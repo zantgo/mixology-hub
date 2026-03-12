@@ -1,0 +1,51 @@
+# ========================
+# Archivos de Entorno y Secretos
+# ========================
+.env
+.env.*
+!.env.example
+*.pem
+backend/.env
+
+# ========================
+# Node.js y Dependencias
+# ========================
+node_modules/
+npm-debug.log
+npm-debug.log.*
+yarn-error.log
+yarn-debug.log*
+package-lock.json
+
+# ========================
+# Compilación (NestJS / Angular)
+# ========================
+dist/
+out-tsc/
+.angular/
+
+# ========================
+# Testing y Coverage
+# ========================
+coverage/
+.nyc_output/
+
+# ========================
+# Base de Datos y Docker
+# ========================
+pgdata/
+*.sqlite
+docker-compose.override.yml
+
+# ========================
+# Archivos del Sistema Operativo e IDEs
+# ========================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
