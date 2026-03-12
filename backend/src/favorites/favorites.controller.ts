@@ -19,16 +19,19 @@ export class FavoritesController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.favoritesService.findOne(+id);
+    // Corregido: se pasa el string id directamente sin el +
+    return this.favoritesService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateFavoriteDto: UpdateFavoriteDto) {
-    return this.favoritesService.update(+id, updateFavoriteDto);
+    // Corregido: se pasa el string id directamente sin el +
+    return this.favoritesService.update(id, updateFavoriteDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.favoritesService.remove(+id);
+    // Corregido: se pasa el string id directamente sin el +
+    return this.favoritesService.remove(id);
   }
 }

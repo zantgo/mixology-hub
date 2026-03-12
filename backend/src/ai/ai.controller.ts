@@ -19,16 +19,19 @@ export class AiController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.aiService.findOne(+id);
+    // Corregido: se pasa el string id directamente sin el operador +
+    return this.aiService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateAiDto: UpdateAiDto) {
-    return this.aiService.update(+id, updateAiDto);
+    // Corregido: se pasa el string id directamente sin el operador +
+    return this.aiService.update(id, updateAiDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.aiService.remove(+id);
+    // Corregido: se pasa el string id directamente sin el operador +
+    return this.aiService.remove(id);
   }
 }
