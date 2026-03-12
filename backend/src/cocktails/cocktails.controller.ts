@@ -1,11 +1,15 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
 import { CocktailsService } from './cocktails.service';
+import { CocktailAggregatorService } from './cocktail-aggregator.service'; // Importa el agregador
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
 
 @Controller('cocktails')
 export class CocktailsController {
-  constructor(private readonly cocktailsService: CocktailsService) {}
+  constructor(
+    private readonly cocktailsService: CocktailsService,
+    private readonly aggregatorService: CocktailAggregatorService,
+  ) {}
 
   @Post()
   create(@Body() createCocktailDto: CreateCocktailDto) {
@@ -13,13 +17,17 @@ export class CocktailsController {
   }
 
   @Get()
-  findAll() {
+  async findAll(@Query('name') name?: string) {
+    // Si viene el query param 'name', usamos el agregador
+    if (name) {
+      return this.aggregatorService.searchUnified(name);
+    }
+    // Si no, devolvemos todo lo local
     return this.cocktailsService.findAll();
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    // Usamos string porque nuestras entidades usan UUID (string), no número
     return this.cocktailsService.findOne(id);
   }
 
