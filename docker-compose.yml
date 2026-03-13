@@ -1,4 +1,5 @@
 services:
+  # Base de datos
   postgres:
     image: postgres:15-alpine
     container_name: mixology_db
@@ -7,15 +8,59 @@ services:
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: mixology_hub
     ports:
-      - "5433:5432"  # <-- El host usará 5433, el contenedor internamente sigue en 5432
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d mixology_hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # Caché
   redis:
     image: redis:7-alpine
     container_name: mixology_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # API Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mixology_backend
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: secretpassword
+      DB_NAME: mixology_hub
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # SPA Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mixology_frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:

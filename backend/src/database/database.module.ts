@@ -14,8 +14,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         username: configService.get<string>('DB_USER'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
-        autoLoadEntities: true, // Carga automáticamente los modelos (entities)
-        synchronize: true, // ¡SOLO DESARROLLO! Crea/actualiza las tablas automáticamente
+        autoLoadEntities: true,
+        synchronize: true,
       }),
     }),
   ],
