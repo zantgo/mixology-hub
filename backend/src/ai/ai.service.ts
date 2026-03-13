@@ -2,21 +2,20 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateAiDto } from './dto/create-ai.dto';
-import { UpdateAiDto } from './dto/update-ai.dto';
+import { UpdateAiDto } from './dto/update-ai.dto'; // <-- ESTE ERA EL IMPORT FALTANTE
 import { Ai } from './entities/ai.entity';
 import { User } from '../users/entities/user.entity';
+import { PollinationsAiService } from '../external/pollinations-ai/pollinations-ai.service';
 
 @Injectable()
 export class AiService {
   constructor(
-    @InjectRepository(Ai)
-    private readonly aiRepository: Repository<Ai>,
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    @InjectRepository(Ai) private readonly aiRepository: Repository<Ai>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    private readonly aiProvider: PollinationsAiService,
   ) {}
 
   async create(createAiDto: CreateAiDto) {
-    // Obtenemos el usuario mockeado de la base de datos
     const mockUser = await this.userRepository.findOne({ 
         where: { email: 'mock@test.com' } 
     });
@@ -25,10 +24,11 @@ export class AiService {
         throw new NotFoundException('Mock user not found in database');
     }
 
-    // Aquí más adelante llamaremos al PollinationsAiService
+    const recipe = await this.aiProvider.generateRecipe(createAiDto.ingredients);
+
     const aiRecipe = this.aiRepository.create({
       prompt: `Ingredients: ${createAiDto.ingredients.join(', ')}`,
-      generated_recipe: { status: 'pending', ingredients: createAiDto.ingredients },
+      generated_recipe: recipe,
       user: mockUser,
     });
     
