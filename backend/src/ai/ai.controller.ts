@@ -2,14 +2,17 @@ import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/commo
 import { AiService } from './ai.service';
 import { CreateAiDto } from './dto/create-ai.dto';
 import { UpdateAiDto } from './dto/update-ai.dto';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 
+@ApiTags('AI')
 @Controller('ai')
 export class AiController {
   constructor(private readonly aiService: AiService) {}
 
   @Post()
+  @ApiOperation({ summary: 'Generate a new cocktail recipe using AI' })
   create(@Body() createAiDto: CreateAiDto) {
-    return this.aiService.create(createAiDto);
+    return this.aiService.generateRecipe(createAiDto);
   }
 
   @Get()
@@ -19,19 +22,16 @@ export class AiController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    // Corregido: se pasa el string id directamente sin el operador +
     return this.aiService.findOne(id);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateAiDto: UpdateAiDto) {
-    // Corregido: se pasa el string id directamente sin el operador +
     return this.aiService.update(id, updateAiDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    // Corregido: se pasa el string id directamente sin el operador +
     return this.aiService.remove(id);
   }
 }

@@ -1,29 +1,35 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateAiDto } from './dto/create-ai.dto';
-import { UpdateAiDto } from './dto/update-ai.dto'; // <-- ESTE ERA EL IMPORT FALTANTE
+import { UpdateAiDto } from './dto/update-ai.dto';
 import { Ai } from './entities/ai.entity';
 import { User } from '../users/entities/user.entity';
 import { PollinationsAiService } from '../external/pollinations-ai/pollinations-ai.service';
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     @InjectRepository(Ai) private readonly aiRepository: Repository<Ai>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
     private readonly aiProvider: PollinationsAiService,
   ) {}
 
-  async create(createAiDto: CreateAiDto) {
+  /**
+   * Generates a new cocktail recipe using AI based on provided ingredients
+   */
+  async generateRecipe(createAiDto: CreateAiDto) {
     const mockUser = await this.userRepository.findOne({ 
         where: { email: 'mock@test.com' } 
     });
 
     if (!mockUser) {
-        throw new NotFoundException('Mock user not found in database');
+        throw new NotFoundException('Mock user not found. Please ensure the seed user exists.');
     }
 
+    // Call the external AI provider
     const recipe = await this.aiProvider.generateRecipe(createAiDto.ingredients);
 
     const aiRecipe = this.aiRepository.create({
@@ -44,7 +50,7 @@ export class AiService {
       where: { id },
       relations: ['user'] 
     });
-    if (!aiRecipe) throw new NotFoundException(`AI record with ID ${id} not found`);
+    if (!aiRecipe) throw new NotFoundException(`AI generated recipe with ID ${id} not found`);
     return aiRecipe;
   }
 
