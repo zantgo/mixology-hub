@@ -1,5 +1,4 @@
 services:
-  # Base de datos
   postgres:
     image: postgres:15-alpine
     container_name: mixology_db
@@ -17,7 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Caché
   redis:
     image: redis:7-alpine
     container_name: mixology_redis
@@ -29,7 +27,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # API Backend
   backend:
     build:
       context: ./backend
@@ -51,7 +48,6 @@ services:
       redis:
         condition: service_healthy
 
-  # SPA Frontend
   frontend:
     build:
       context: ./frontend
