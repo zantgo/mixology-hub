@@ -6,7 +6,7 @@ import { ApiProperty } from '@nestjs/swagger';
  * DTO for the ingredient structure within a cocktail creation.
  * We include both 'amount/unit' for math/logic and 'measure' for display.
  */
-class CreateIngredientDto {
+class CreateCocktailIngredientDto {
   @ApiProperty({ example: 'uuid-of-ingredient', description: 'Ingredient ID from catalog' })
   @IsString()
   @IsNotEmpty()
@@ -47,9 +47,9 @@ export class CreateCocktailDto {
   @IsNotEmpty()
   instructions: string;
 
-  @ApiProperty({ type: [CreateIngredientDto], description: 'List of ingredients with measurements' })
+  @ApiProperty({ type: [CreateCocktailIngredientDto], description: 'List of ingredients with measurements' })
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateIngredientDto)
-  ingredients: CreateIngredientDto[];
+  @Type(() => CreateCocktailIngredientDto)
+  ingredients: CreateCocktailIngredientDto[];
 }
