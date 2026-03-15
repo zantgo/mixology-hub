@@ -19,7 +19,13 @@ export class Cocktail {
   @Column({ default: false })
   is_public: boolean;
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @Column({ default: 'local' })
+  source: string; // 'local', 'api', 'ai'
+
+  @Column({ nullable: true })
+  external_id: string; // ID from TheCocktailDB to prevent duplicates
+
+  @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'created_by' })
   user: User;
 

@@ -8,10 +8,10 @@ import { CocktailsModule } from './cocktails/cocktails.module';
 import { IngredientsModule } from './ingredients/ingredients.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { AiModule } from './ai/ai.module';
+import { UtilsModule } from './utils/utils.module';
 
 @Module({
   imports:[
-    // Configuración global de variables de entorno (.env)
     ConfigModule.forRoot({
       isGlobal: true, 
     }),
@@ -23,6 +23,7 @@ import { AiModule } from './ai/ai.module';
     IngredientsModule,
     FavoritesModule,
     AiModule,
+    UtilsModule,
   ],
 })
 export class AppModule {}

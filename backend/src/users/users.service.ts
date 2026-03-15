@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User } from './entities/user.entity';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class UsersService {
@@ -17,8 +18,13 @@ export class UsersService {
     return await this.userRepository.save(newUser);
   }
 
-  async findAll() {
-    return await this.userRepository.find();
+  async findAll(paginationQuery: PaginationQueryDto) {
+    const { limit = 10, offset = 0 } = paginationQuery;
+    const [data, total] = await this.userRepository.findAndCount({
+      skip: offset,
+      take: limit,
+    });
+    return { data, total, limit, offset };
   }
 
   async findOne(id: string) {
@@ -31,6 +37,13 @@ export class UsersService {
     const user = await this.findOne(id);
     Object.assign(user, updateUserDto);
     return await this.userRepository.save(user);
+  }
+
+  // Returns the seeded mock user (Simulating Auth Context)
+  async getMockUser(): Promise<User> {
+    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
+    if (!user) throw new NotFoundException('Mock user not found. Ensure seeder has run.');
+    return user;
   }
 
   async remove(id: string) {

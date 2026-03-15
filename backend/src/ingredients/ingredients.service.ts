@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { Ingredient } from './entities/ingredient.entity';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class IngredientsService {
@@ -16,6 +17,7 @@ export class IngredientsService {
     try {
       const ingredient = this.ingredientRepository.create({
         name: createIngredientDto.name.toLowerCase().trim(),
+        baseUnit: createIngredientDto.baseUnit || 'ml', // Inserción del baseUnit si se provee
       });
       return await this.ingredientRepository.save(ingredient);
     } catch (error: any) {
@@ -25,8 +27,13 @@ export class IngredientsService {
     }
   }
 
-  async findAll() {
-    return await this.ingredientRepository.find();
+  async findAll(paginationQuery: PaginationQueryDto) {
+    const { limit = 10, offset = 0 } = paginationQuery;
+    const [data, total] = await this.ingredientRepository.findAndCount({
+      skip: offset,
+      take: limit,
+    });
+    return { data, total, limit, offset };
   }
 
   async findOne(id: string) {

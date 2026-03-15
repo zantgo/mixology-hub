@@ -1,3 +1,4 @@
+// src/favorites/entities/favorite.entity.ts
 import { Entity, PrimaryGeneratedColumn, CreateDateColumn, ManyToOne, JoinColumn, Column } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Cocktail } from '../../cocktails/entities/cocktail.entity';
@@ -11,14 +12,12 @@ export class Favorite {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  // Relación con un cóctel local (Opcional)
   @ManyToOne(() => Cocktail, { onDelete: 'CASCADE', nullable: true }) 
   @JoinColumn({ name: 'cocktail_id' })
-  cocktail: Cocktail;
+  cocktail: Cocktail | null;
 
-  // ID de la API pública si el usuario guardó una receta de TheCocktailDB (Opcional)
-  @Column({ nullable: true })
-  external_cocktail_id: string; 
+  @Column({ type: 'varchar', nullable: true })
+  external_cocktail_id: string | null; 
 
   @CreateDateColumn()
   created_at: Date;

@@ -4,40 +4,72 @@ import { Repository } from 'typeorm';
 import { CreateFavoriteDto } from './dto/create-favorite.dto';
 import { UpdateFavoriteDto } from './dto/update-favorite.dto';
 import { Favorite } from './entities/favorite.entity';
+import { User } from '../users/entities/user.entity';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class FavoritesService {
   constructor(
-    @InjectRepository(Favorite)
-    private readonly favoriteRepository: Repository<Favorite>,
+    @InjectRepository(Favorite) private readonly favoriteRepository: Repository<Favorite>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
   ) {}
 
-  async create(createFavoriteDto: CreateFavoriteDto) {
-    const favorite = this.favoriteRepository.create(createFavoriteDto);
+  async create(dto: CreateFavoriteDto) {
+    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const favorite = this.favoriteRepository.create({
+      user: user,
+      cocktail: dto.cocktailId ? { id: dto.cocktailId } : undefined, // <--- FIX (undefined)
+      external_cocktail_id: dto.externalCocktailId || undefined,     // <--- FIX (undefined)
+   });
+
     return await this.favoriteRepository.save(favorite);
   }
 
-  async findAll() {
-    return await this.favoriteRepository.find({ relations: ['user', 'cocktail'] });
+  async findAll(paginationQuery: PaginationQueryDto) {
+    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
+    const { limit = 10, offset = 0 } = paginationQuery;
+
+    const [data, total] = await this.favoriteRepository.findAndCount({
+      where: { user: { id: user?.id } },
+      relations: ['cocktail'],
+      skip: offset,
+      take: limit,
+    });
+
+    return { data, total, limit, offset };
   }
 
   async findOne(id: string) {
     const favorite = await this.favoriteRepository.findOne({ 
       where: { id },
-      relations: ['user', 'cocktail'] 
+      relations:['user', 'cocktail'] 
     });
-    if (!favorite) throw new NotFoundException(`Favorite with ID ${id} not found`);
+    
+    if (!favorite) {
+      throw new NotFoundException(`Favorite with ID ${id} not found`);
+    }
+    
     return favorite;
   }
 
   async update(id: string, updateFavoriteDto: UpdateFavoriteDto) {
     const favorite = await this.findOne(id);
-    Object.assign(favorite, updateFavoriteDto);
+
+    if (updateFavoriteDto.cocktailId !== undefined) {
+      favorite.cocktail = updateFavoriteDto.cocktailId ? { id: updateFavoriteDto.cocktailId } as any : null;
+    }
+    
+    if (updateFavoriteDto.externalCocktailId !== undefined) {
+      favorite.external_cocktail_id = updateFavoriteDto.externalCocktailId || null;
+    }
+
     return await this.favoriteRepository.save(favorite);
   }
 
   async remove(id: string) {
-    const favorite = await this.findOne(id);
+    const favorite = await this.findOne(id); 
     return await this.favoriteRepository.remove(favorite);
   }
 }
