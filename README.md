@@ -47,18 +47,19 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
 The system is fully containerized and divided into distinct micro-services operating within a Docker network:
  
 
-[ Angular SPA ]
-(Signals, RxJS, Reactive)
-        │
-     REST API
-        │
-[ NestJS Backend ]
-(Gateway, Adapters, AI Prompts)
-      /   |   \
-     /    |    \
-[ PostgreSQL ] [ Redis ] [ External APIs ]
-(Relational Data Model) (Cache & Rate Limits) (TheCocktailDB & DeepSeek/OpenAI)
+flowchart TD
+    A[Angular SPA<br/>(Signals, RxJS, Reactive)]
+    B[REST API]
+    C[NestJS Backend<br/>(Gateway, Adapters, AI Prompts)]
+    D[PostgreSQL<br/>(Relational Data Model)]
+    E[Redis<br/>(Cache & Rate Limits)]
+    F[External APIs<br/>(TheCocktailDB & DeepSeek/OpenAI)]
 
+    A --> B
+    B --> C
+    C --> D
+    C --> E
+    C --> F
 
 ## 🚀 Quick Start
  
@@ -160,6 +161,7 @@ To keep this README concise, detailed engineering documentation has been separat
 ## 👨‍💻 Author
   
 **Santiago Rojas**
+
 *Software Engineer*
 
 * [LinkedIn](https://www.linkedin.com/in/santiago-tomas-rojas-jimenez)
