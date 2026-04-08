@@ -54,6 +54,8 @@ string name UK
 
 string baseUnit
 
+uuid created_by FK "nullable: true"
+
 }
 
   
@@ -68,13 +70,15 @@ text instructions
 
 boolean is_public
 
-string source
+ string source
 
-string external_id
+ string external_id
 
-uuid created_by FK
+ string image_url
 
-}
+ uuid created_by FK
+
+ }
 
   
 
@@ -136,6 +140,8 @@ jsonb generated_recipe
 
 uuid created_by FK
 
+timestamp created_at
+
 }
 
 ```
@@ -187,6 +193,8 @@ Stores user-created recipes or AI-saved recipes.
 - **`cocktails.source`:** Enum-like string (`local`, `api`, `ai`) tracking where the recipe originated.
 
 - **`cocktails.external_id`:** Allows the local DB to reference `TheCocktailDB` recipes without duplicating all API data locally.
+
+- **`cocktails.image_url`:** Optional URL string for cocktail images. Supports external URLs (e.g., from TheCocktailDB) or user-provided URLs. Frontend falls back to default image if URL is invalid or fails to load.
 
 - **`cocktail_ingredients.measure`:** A human-readable string (e.g., "A pinch", "1 1/2 oz") for UI display.
 

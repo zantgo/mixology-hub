@@ -11,7 +11,6 @@ import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { IAiProvider } from '../external/ai-provider.interface';
 import { ConfigService } from '@nestjs/config';
-import { PollinationsAiService } from '../external/pollinations-ai/pollinations-ai.service';
 import { LlmAdapterService } from '../external/llm/llm-adapter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
@@ -24,19 +23,13 @@ export class AiService {
     @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(Ingredient) private readonly ingredientRepository: Repository<Ingredient>,
     @InjectRepository(Cocktail) private readonly cocktailRepository: Repository<Cocktail>,
-    private readonly pollinationsAiService: PollinationsAiService,
     private readonly llmAdapterService: LlmAdapterService,
     private readonly configService: ConfigService,
   ) {}
 
   private getAiProvider(): IAiProvider {
-    const aiProvider = this.configService.get<string>('AI_PROVIDER', 'pollinations');
-    
-    if (aiProvider === 'llm-adapter' || this.configService.get<string>('AI_API_URL')) {
-      return this.llmAdapterService;
-    }
-    
-    return this.pollinationsAiService;
+    // Always use the LLM adapter service
+    return this.llmAdapterService;
   }
 
   async generateRecipe(createAiDto: CreateAiDto) {

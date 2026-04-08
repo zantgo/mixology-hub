@@ -25,7 +25,9 @@ export class SeederService implements OnModuleInit {
       const user = this.userRepository.create({
         id: '00000000-0000-0000-0000-000000000000',
         email: mockEmail,
-        password_hash: 'hashed_password_for_mock_user',
+        passwordHash: 'hashed_password_for_mock_user',
+        displayName: 'Mock User',
+        emailVerified: true,
       });
       await this.userRepository.save(user);
       this.logger.log('Mock user seeded successfully.');

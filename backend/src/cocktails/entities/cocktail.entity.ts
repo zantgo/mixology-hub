@@ -25,6 +25,9 @@ export class Cocktail {
   @Column({ nullable: true })
   external_id: string; // ID from TheCocktailDB to prevent duplicates
 
+  @Column({ name: 'image_url', nullable: true })
+  image_url: string; // URL to cocktail image, null for default fallback
+
   @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true })
   @JoinColumn({ name: 'created_by' })
   user: User;

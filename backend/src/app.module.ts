@@ -9,6 +9,7 @@ import { IngredientsModule } from './ingredients/ingredients.module';
 import { FavoritesModule } from './favorites/favorites.module';
 import { AiModule } from './ai/ai.module';
 import { UtilsModule } from './utils/utils.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports:[
@@ -25,6 +26,7 @@ import { UtilsModule } from './utils/utils.module';
     FavoritesModule,
     AiModule,
     UtilsModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

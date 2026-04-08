@@ -35,7 +35,7 @@ You can use this interface to explore all endpoints, view schema models, and exe
 2. **Standardized Pagination:** All list endpoints use cursor-based pagination for performance and consistency.
 
    **Parameters:**
-   - `limit` (default: 10, max: 100): Number of items per page
+   - `limit` (default: 10, max: 100): Number of items per page. Any value outside the 1-100 range returns a `400 Bad Request`.
    - `cursor` (optional): Opaque cursor string for pagination
    
    **Benefits:**
@@ -75,6 +75,38 @@ You can use this interface to explore all endpoints, view schema models, and exe
 - Always order by `created_at DESC, id DESC` for consistent pagination
 - Cursor is opaque to clients - they should treat it as an arbitrary string
 
+5. **Rate Limiting:** Rate-limited endpoints return standard HTTP headers for client-side handling:
+
+   **Headers:**
+   - `X-RateLimit-Limit`: Maximum requests allowed in the time window
+   - `X-RateLimit-Remaining`: Remaining requests in current window
+   - `X-RateLimit-Reset`: Unix timestamp when the rate limit resets (seconds)
+   - `Retry-After`: Seconds to wait before retrying (when rate limited)
+
+   **Example (429 Too Many Requests):**
+   ```http
+   HTTP/1.1 429 Too Many Requests
+   X-RateLimit-Limit: 100
+   X-RateLimit-Remaining: 0
+   X-RateLimit-Reset: 1736341200
+   Retry-After: 60
+   Content-Type: application/json
+   
+   {
+     "statusCode": 429,
+     "message": "Rate limit exceeded. Please wait 60 seconds.",
+     "error": "Too Many Requests"
+   }
+   ```
+
+   **Frontend Integration:** The Angular frontend reads these headers to display user-friendly messages like "Please wait X seconds before trying again."
+
+6. **Query Parameter Validation:** All query parameters are strictly validated:
+   - `limit` must be an integer between 1 and 100
+   - `page` (when used) must be a positive integer
+   - Boolean parameters (`?is_active=true`) accept `true`, `false`, `1`, `0`
+   - Invalid parameters return `400 Bad Request` with specific validation messages
+
   
 
 ---
@@ -95,7 +127,13 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
 
   
 
-- **Query Parameters:** `limit`, `cursor`, `name` (optional)
+- **Query Parameters:** 
+  - `limit`: Number of items per page (default: 10, max: 100)
+  - `cursor`: Opaque cursor for pagination
+  - `name`: Search query (optional)
+  - `sort`: Sorting strategy (optional, default: `relevance`, options: `relevance`, `makeability`)
+    - `relevance`: Default sorting based on search relevance
+    - `makeability`: Sorts by makeability status (makeable → missing 1 ingredient → unmakeable)
 
 - **Response (200 OK):**
 
@@ -105,23 +143,25 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
 
 "data": [
 
-{
-
-"id": "11000",
-
-"name": "Mojito",
-
-"source": "api",
-
-"is_public": true,
-
-"ingredients": [
-
-{ "measure": "2 oz", "ingredient": { "name": "light rum" } }
-
-]
-
-}
+ {
+ 
+ "id": "11000",
+ 
+ "name": "Mojito",
+ 
+ "imageUrl": "https://www.thecocktaildb.com/images/media/drink/metwgh1606770327.jpg",
+ 
+ "source": "api",
+ 
+ "is_public": true,
+ 
+ "ingredients": [
+ 
+ { "measure": "2 oz", "ingredient": { "name": "light rum" } }
+ 
+ ]
+ 
+ }
 
  ],
  
@@ -129,11 +169,110 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
 "hasMore": false,
 "limit": 10
  
- }
+  }
+ 
+ ```
 
+#### `POST /cocktails` (Create Custom Cocktail)
+
+Creates a new custom cocktail recipe. The cocktail is automatically linked to the authenticated user as the creator.
+
+- **Request Body:**
+```json
+{
+  "name": "Secret Margarita",
+  "instructions": "1. Rim glass with salt...",
+  "imageUrl": "https://example.com/margarita.jpg",
+  "isPublic": true,
+  "ingredients": [
+    {
+      "ingredientId": "uuid-of-tequila",
+      "measure": "2 oz",
+      "amount": 2,
+      "unit": "oz"
+    }
+  ]
+}
 ```
 
-  
+- **Validation:**
+  - `name`: Required, string, max 100 chars
+  - `instructions`: Required, string
+  - `imageUrl`: Optional, must be valid URL format if provided
+  - `isPublic`: Optional boolean (default: true)
+  - `ingredients`: Required array with at least 1 ingredient
+
+- **Response (201 Created):**
+```json
+{
+  "id": "uuid-of-new-cocktail",
+  "name": "Secret Margarita",
+  "instructions": "1. Rim glass with salt...",
+  "imageUrl": "https://example.com/margarita.jpg",
+  "isPublic": true,
+  "source": "local",
+  "createdBy": "user-uuid",
+  "createdAt": "2026-04-08T10:30:00.000Z"
+}
+```
+
+- **Error (400 Bad Request):** Invalid input data or invalid image URL format
+- **Error (401 Unauthorized):** User not authenticated
+
+#### `GET /cocktails/:id` (Get Cocktail Details)
+
+Fetches detailed information for a specific cocktail, including full ingredient details.
+
+- **Response (200 OK):**
+```json
+{
+  "id": "uuid-of-cocktail",
+  "name": "Secret Margarita",
+  "instructions": "1. Rim glass with salt...",
+  "imageUrl": "https://example.com/margarita.jpg",
+  "isPublic": true,
+  "source": "local",
+  "createdBy": "user-uuid",
+  "createdAt": "2026-04-08T10:30:00.000Z",
+  "ingredients": [
+    {
+      "id": "uuid-of-cocktail-ingredient",
+      "measure": "2 oz",
+      "amount": 2,
+      "unit": "oz",
+      "ingredient": {
+        "id": "uuid-of-tequila",
+        "name": "Tequila",
+        "category": "spirit"
+      }
+    }
+  ]
+}
+```
+
+- **Error (404 Not Found):** Cocktail not found
+
+#### `PUT /cocktails/:id` (Update Custom Cocktail)
+
+Updates an existing custom cocktail. Only the original creator can update their cocktail.
+
+- **Request Body:** Same structure as `POST /cocktails` (all fields optional except at least one must be provided)
+- **Response (200 OK):** Updated cocktail object
+- **Error (400 Bad Request):** Invalid input data or invalid image URL format
+- **Error (401 Unauthorized):** User not authenticated
+- **Error (403 Forbidden):** User is not the original creator
+- **Error (404 Not Found):** Cocktail not found
+
+#### `DELETE /cocktails/:id` (Delete Custom Cocktail)
+
+Deletes a custom cocktail. Only the original creator can delete their cocktail.
+
+- **Response (204 No Content):** Successful deletion
+- **Error (401 Unauthorized):** User not authenticated
+- **Error (403 Forbidden):** User is not the original creator
+- **Error (404 Not Found):** Cocktail not found
+
+   
 
 #### `POST /cocktails/:id/prepare`
 

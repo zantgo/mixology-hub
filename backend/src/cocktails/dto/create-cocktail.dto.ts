@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive, IsUrl } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -52,4 +52,14 @@ export class CreateCocktailDto {
   @ValidateNested({ each: true })
   @Type(() => CreateCocktailIngredientDto)
   ingredients: CreateCocktailIngredientDto[];
+
+  @ApiProperty({ 
+    example: 'https://www.thecocktaildb.com/images/media/drink/2x8thr1504816928.jpg', 
+    description: 'URL to cocktail image (optional, will use default if not provided or invalid)',
+    required: false 
+  })
+  @IsString()
+  @IsOptional()
+  @IsUrl({ require_protocol: true }, { message: 'imageUrl must be a valid URL with protocol (http:// or https://)' })
+  imageUrl?: string;
 }
