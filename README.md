@@ -43,10 +43,11 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
   
 ## 🏗️ High-Level Architecture
 
- 
+  
 The system is fully containerized and divided into distinct micro-services operating within a Docker network:
  
 
+```mermaid
 flowchart TD
     A[Angular SPA<br/>(Signals, RxJS, Reactive)]
     B[REST API]
@@ -60,6 +61,7 @@ flowchart TD
     C --> D
     C --> E
     C --> F
+```
 
 ## 🚀 Quick Start
  
