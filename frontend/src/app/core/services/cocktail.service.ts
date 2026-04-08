@@ -11,17 +11,17 @@ export class CocktailService {
   private apiUrl = `${environment.apiUrl}/cocktails`;
   private ingredientsUrl = `${environment.apiUrl}/ingredients`;
 
-  // Obtener cócteles
+  // Get cocktails
   getCocktails(): Observable<any[]> {
     return this.http.get<any[]>(this.apiUrl);
   }
 
-  // Obtener ingredientes (necesario para poder crear un cóctel)
+  // Get ingredients (necessary to create a cocktail)
   getIngredients(): Observable<any[]> {
     return this.http.get<any[]>(this.ingredientsUrl);
   }
 
-  // Crear un cóctel nuevo
+  // Create a new cocktail
   createCocktail(cocktail: any): Observable<any> {
     return this.http.post<any>(this.apiUrl, cocktail);
   }

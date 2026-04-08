@@ -9,8 +9,8 @@ export class PollinationsAiService implements IAiProvider {
 
   constructor(private readonly httpService: HttpService) {}
 
-  async generateRecipe(ingredients: string[]) {
-    // PROMPT ESTRICTO
+   async generateRecipe(ingredients: string[]) {
+    // STRICT PROMPT
     const prompt = `
       Act as a professional bartender. 
       Create a cocktail using ONLY these ingredients: ${ingredients.join(', ')}. 
@@ -35,12 +35,12 @@ export class PollinationsAiService implements IAiProvider {
         let rawData = response.data;
         
         if (typeof rawData === 'string') {
-          // Limpieza de posibles marcadores de Markdown que la IA insista en incluir
+          // Clean up possible Markdown markers that the AI insists on including
           rawData = rawData.replace(/```json/g, '').replace(/```/g, '').trim();
           rawData = JSON.parse(rawData);
         }
 
-        // Validación básica de la estructura esperada
+        // Basic validation of expected structure
         if (!rawData || typeof rawData !== 'object' || !rawData.name || !Array.isArray(rawData.ingredients)) {
           throw new Error('Invalid JSON structure returned by AI');
         }
@@ -50,7 +50,7 @@ export class PollinationsAiService implements IAiProvider {
         lastError = error;
         this.logger.warn(`Attempt ${attempt} failed to generate recipe: ${error.message}`);
         
-        // Espera corta antes del siguiente reintento
+        // Short wait before next retry
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }

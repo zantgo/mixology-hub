@@ -85,14 +85,14 @@ export class UserInventoryService {
     const user = await this.usersService.getMockUser();
     const { limit = 10, offset = 0 } = paginationQuery;
     
-    // 1. Obtener inventario del usuario para realizar la validación matemática final
+    // 1. Get user inventory for final mathematical validation
     const inventory = await this.inventoryRepository.find({
       where: { user: { id: user.id } },
       relations: ['ingredient']
     });
 
-    // 2. Usar QueryBuilder para obtener solo cócteles que contengan los ingredientes del inventario
-    // Filtramos en la DB aquellos cócteles donde todos sus ingredientes requeridos están en el inventario del usuario
+    // 2. Use QueryBuilder to get only cocktails that contain inventory ingredients
+    // Filter in the DB those cocktails where all required ingredients are in the user's inventory
     const inventoryIngredientIds = inventory.map(i => i.ingredient.id);
 
     if (inventoryIngredientIds.length === 0) {
@@ -103,13 +103,13 @@ export class UserInventoryService {
       .innerJoin('cocktail.ingredients', 'ci')
       .innerJoin('ci.ingredient', 'i')
       .groupBy('cocktail.id')
-      // Filtramos cócteles cuyos ingredientes requeridos estén todos en el inventario
+      // Filter cocktails whose required ingredients are all in the inventory
       .having('COUNT(DISTINCT i.id) = (SELECT COUNT(*) FROM cocktail_ingredients ci2 WHERE ci2.cocktail_id = cocktail.id)')
       .andWhere('i.id IN (:...ids)', { ids: inventoryIngredientIds });
 
     const allPotentiallyMakeable = await queryBuilder.getMany();
 
-    // 3. Aplicar validación de cantidad usando UnitConverterService
+    // 3. Apply quantity validation using UnitConverterService
     const makeableCocktails = allPotentiallyMakeable.filter(cocktail => {
       return cocktail.ingredients.every(req => {
         const stock = inventory.find(i => i.ingredient.id === req.ingredient.id);
@@ -119,7 +119,7 @@ export class UserInventoryService {
       });
     });
 
-    // 4. Paginación final
+    // 4. Final pagination
     const paginatedData = makeableCocktails.slice(offset, offset + limit);
 
     return {

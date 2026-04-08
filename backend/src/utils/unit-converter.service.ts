@@ -13,7 +13,7 @@ export class UnitConverterService {
     'l': 1000,
     'cl': 10,
     'units': 1,
-    'g': 1,      // Equivalencia de barra: 1 gramo = 1 ml para cálculos de recetas
+    'g': 1,      // Bar equivalence: 1 gram = 1 ml for recipe calculations
     'kg': 1000,
   };
 

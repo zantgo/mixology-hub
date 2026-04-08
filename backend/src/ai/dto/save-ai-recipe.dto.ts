@@ -2,7 +2,7 @@ import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class SaveAiRecipeDto {
-  @ApiProperty({ example: 'Mojito Tropical', description: 'Nombre que el usuario quiere darle a la receta' })
+  @ApiProperty({ example: 'Mojito Tropical', description: 'Name the user wants to give to the recipe' })
   @IsString()
   @IsNotEmpty()
   name: string;

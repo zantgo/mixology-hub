@@ -13,17 +13,17 @@ export class TheCocktailDbService {
   ) {}
 
   async searchByName(name: string) {
-    // 1. Intentar obtener de caché
+    // 1. Try to get from cache
     const cacheKey = `cocktail_search_${name.toLowerCase()}`;
     const cachedData = await this.cacheManager.get(cacheKey);
     if (cachedData) return cachedData;
 
-    // 2. Si no hay caché, llamar a API
+    // 2. If no cache, call API
     const { data } = await firstValueFrom(
       this.httpService.get(`${this.baseUrl}/search.php?s=${name}`),
     );
 
-    // 3. Guardar en caché por 6 horas
+    // 3. Save to cache for 6 hours
     if (data.drinks) {
       await this.cacheManager.set(cacheKey, data.drinks, 21600000);
     }

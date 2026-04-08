@@ -48,7 +48,7 @@ import { UserService } from './core/services/user.service';
 export class AppComponent implements OnInit {
   private userService = inject(UserService);
 
-  // Angular Signals para manejar el estado reactivo
+  // Angular Signals to manage reactive state
   users = signal<any[]>([]);
 
   ngOnInit() {

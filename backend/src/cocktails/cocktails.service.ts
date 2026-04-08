@@ -73,7 +73,7 @@ export class CocktailsService {
   async prepare(cocktailId: string) {
     return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
       const cocktail = await this.findOne(cocktailId);
-      const inventoryPaginated = await this.inventoryService.getUserInventory({ limit: 10000, offset: 0 }); // Usamos un limite alto para calcular internamente
+      const inventoryPaginated = await this.inventoryService.getUserInventory({ limit: 10000, offset: 0 }); // Use a high limit for internal calculation
       const inventory = inventoryPaginated.data;
 
       for (const req of cocktail.ingredients) {

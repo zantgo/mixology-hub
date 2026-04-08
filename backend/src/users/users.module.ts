@@ -9,12 +9,12 @@ import { UserInventoryController } from './user-inventory.controller';
 import { SeederService } from '../database/seeder.service';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
-import { UtilsModule } from '../utils/utils.module'; // <- Path relativo corregido
+import { UtilsModule } from '../utils/utils.module'; // <- Corrected relative path
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserInventory, Ingredient, Cocktail]), // <- UtilsModule ya no está aquí
-    UtilsModule // <- Se inyecta correctamente como módulo de Nest
+    TypeOrmModule.forFeature([User, UserInventory, Ingredient, Cocktail]), // <- UtilsModule is no longer here
+    UtilsModule // <- Correctly injected as a Nest module
   ],
   controllers:[UsersController, UserInventoryController],
   providers:[UsersService, UserInventoryService, SeederService],

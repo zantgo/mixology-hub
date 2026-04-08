@@ -3,7 +3,7 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateAiDto {
   @ApiProperty({ 
-    example:['vodka', 'naranja', 'limón'], 
+    example:['vodka', 'orange', 'lemon'], 
     description: 'List of ingredients the user wants to use for the AI cocktail' 
   })
   @IsArray()

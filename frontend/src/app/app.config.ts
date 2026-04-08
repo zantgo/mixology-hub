@@ -5,7 +5,7 @@ import { routes } from './app.routes';
 
 export const appConfig: ApplicationConfig = {
   providers:[
-    // Usamos el detector de cambios moderno (Zoneless) en su versión estable
+    // Use the modern change detector (Zoneless) in its stable version
     provideZonelessChangeDetection(),
     provideRouter(routes),
     provideHttpClient()

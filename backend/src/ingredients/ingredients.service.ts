@@ -17,11 +17,11 @@ export class IngredientsService {
     try {
       const ingredient = this.ingredientRepository.create({
         name: createIngredientDto.name.toLowerCase().trim(),
-        baseUnit: createIngredientDto.baseUnit || 'ml', // Inserción del baseUnit si se provee
+        baseUnit: createIngredientDto.baseUnit || 'ml', // Insertion of baseUnit if provided
       });
       return await this.ingredientRepository.save(ingredient);
     } catch (error: any) {
-      // 23505 es el código de error de Postgres para Unique Violation
+      // 23505 is the Postgres error code for Unique Violation
       if (error?.code === '23505') throw new ConflictException('Ingredient already exists');
       throw error;
     }

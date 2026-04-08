@@ -2,17 +2,17 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-# Copiar archivos de configuración y dependencias
+# Copy configuration files and dependencies
 COPY package*.json ./
 COPY .npmrc ./
 
-# Instalar dependencias usando la configuración de legacy-peer-deps
+# Install dependencies using legacy-peer-deps configuration
 RUN npm install
 
-# Copiar el resto del código
+# Copy the rest of the code
 COPY . .
 
-# Compilar NestJS
+# Compile NestJS
 RUN npm run build
 
 # Stage 2: Production
