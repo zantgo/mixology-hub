@@ -129,7 +129,155 @@ describe('MakeableCocktailsService - Serving Size Scaling', () => {
   });
 });
 
-**Example TDD for Ratio/Part-based Measurements (UC 3.8):**
+**Example TDD for Scaling-Induced "Almost Makeable" Transition (UC 3.8):**
+```typescript
+describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
+  it('should transition from Makeable to Almost Makeable when scaling exceeds inventory', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // User has 4oz of Vodka
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'vodka', quantity: 4, unit: 'oz' }
+    ]);
+    
+    // Martini requires 2oz Vodka per serving
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'vodka', amount: 2, unit: 'oz' }
+    ]);
+    
+    // Check makeability for 1 serving (requires 2oz, has 4oz) - Makeable
+    const result1 = await makeableService.checkMakeable('martini_id', 1);
+    expect(result1.isMakeable).toBe(true);
+    expect(result1.category).toBe('makeable');
+    
+    // Check makeability for 3 servings (requires 6oz, has 4oz) - Almost Makeable
+    const result3 = await makeableService.checkMakeable('martini_id', 3);
+    expect(result3.isMakeable).toBe(false);
+    expect(result3.category).toBe('almost_makeable');
+    expect(result3.missingAmounts[0].amount).toBe(2); // Missing 2oz
+    expect(result3.missingAmounts[0].ingredientId).toBe('vodka');
+  });
+
+  it('should provide clear feedback on missing amounts for scaled servings', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // User has limited ingredients
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'gin', quantity: 3, unit: 'oz' },
+      { ingredientId: 'vermouth', quantity: 1, unit: 'oz' }
+    ]);
+    
+    // Martini requires 2oz Gin, 0.5oz Vermouth per serving
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'gin', amount: 2, unit: 'oz' },
+      { ingredientId: 'vermouth', amount: 0.5, unit: 'oz' }
+    ]);
+    
+    // Check 2 servings (requires 4oz Gin, 1oz Vermouth)
+    const result = await makeableService.checkMakeable('martini_id', 2);
+    
+    expect(result.category).toBe('almost_makeable');
+    expect(result.missingAmounts).toHaveLength(2);
+    expect(result.missingAmounts.find(m => m.ingredientId === 'gin')?.amount).toBe(1); // Missing 1oz Gin
+    expect(result.missingAmounts.find(m => m.ingredientId === 'vermouth')?.amount).toBe(0); // Has enough Vermouth
+    expect(result.userMessage).toContain('Missing 1oz Gin for 2 servings');
+  });
+
+  it('should handle complex cocktails with multiple ingredients when scaling', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // User inventory
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'rum', quantity: 8, unit: 'oz' },
+      { ingredientId: 'lime_juice', quantity: 4, unit: 'oz' },
+      { ingredientId: 'simple_syrup', quantity: 2, unit: 'oz' },
+      { ingredientId: 'mint', quantity: 10, unit: 'leaves' }
+    ]);
+    
+    // Mojito requires per serving: 2oz Rum, 1oz Lime, 0.5oz Simple, 5 Mint leaves
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'rum', amount: 2, unit: 'oz' },
+      { ingredientId: 'lime_juice', amount: 1, unit: 'oz' },
+      { ingredientId: 'simple_syrup', amount: 0.5, unit: 'oz' },
+      { ingredientId: 'mint', amount: 5, unit: 'leaves' }
+    ]);
+    
+    // Test different serving sizes
+    const testCases = [
+      { servings: 1, expectedCategory: 'makeable' }, // Has enough for 1
+      { servings: 2, expectedCategory: 'makeable' }, // Has enough for 2
+      { servings: 3, expectedCategory: 'almost_makeable' }, // Missing Simple Syrup (needs 1.5oz, has 2oz) - actually has enough
+      { servings: 4, expectedCategory: 'almost_makeable' }, // Missing Simple Syrup (needs 2oz, has 2oz) - borderline
+      { servings: 5, expectedCategory: 'almost_makeable' }  // Missing multiple ingredients
+    ];
+    
+    for (const testCase of testCases) {
+      const result = await makeableService.checkMakeable('mojito_id', testCase.servings);
+      expect(result.category).toBe(testCase.expectedCategory);
+    }
+  });
+
+  it('should dynamically recalculate as inventory changes', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // Mock inventory that can change
+    let mockInventory = [
+      { ingredientId: 'vodka', quantity: 4, unit: 'oz' }
+    ];
+    
+    jest.spyOn(makeableService, 'getUserInventory').mockImplementation(async () => mockInventory);
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'vodka', amount: 2, unit: 'oz' }
+    ]);
+    
+    // Initially: 4oz vodka, 3 servings requires 6oz - Almost Makeable
+    const initialResult = await makeableService.checkMakeable('martini_id', 3);
+    expect(initialResult.category).toBe('almost_makeable');
+    
+    // User adds 2oz vodka (now 6oz total)
+    mockInventory = [{ ingredientId: 'vodka', quantity: 6, unit: 'oz' }];
+    
+    // Now: 6oz vodka, 3 servings requires 6oz - Makeable
+    const updatedResult = await makeableService.checkMakeable('martini_id', 3);
+    expect(updatedResult.category).toBe('makeable');
+  });
+
+  it('should maintain accurate categorization across serving size changes', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'tequila', quantity: 6, unit: 'oz' },
+      { ingredientId: 'triple_sec', quantity: 3, unit: 'oz' },
+      { ingredientId: 'lime_juice', quantity: 2, unit: 'oz' }
+    ]);
+    
+    // Margarita requires per serving: 2oz Tequila, 1oz Triple Sec, 1oz Lime
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'tequila', amount: 2, unit: 'oz' },
+      { ingredientId: 'triple_sec', amount: 1, unit: 'oz' },
+      { ingredientId: 'lime_juice', amount: 1, unit: 'oz' }
+    ]);
+    
+    const results = await Promise.all([
+      makeableService.checkMakeable('margarita_id', 1),
+      makeableService.checkMakeable('margarita_id', 2),
+      makeableService.checkMakeable('margarita_id', 3)
+    ]);
+    
+    // 1 serving: Makeable (has all ingredients)
+    expect(results[0].category).toBe('makeable');
+    
+    // 2 servings: Almost Makeable (missing Lime: needs 2oz, has 2oz - borderline)
+    expect(results[1].category).toBe('makeable'); // Actually has exactly enough
+    
+    // 3 servings: Almost Makeable (missing Lime: needs 3oz, has 2oz)
+    expect(results[2].category).toBe('almost_makeable');
+    expect(results[2].missingAmounts.find(m => m.ingredientId === 'lime_juice')?.amount).toBe(1);
+  });
+});
+```
+
+**Example TDD for Ratio/Part-based Measurements (UC 3.9):**
 ```typescript
 describe('MeasureParserService - Ratio/Part-based Measurements', () => {
   it('should handle "part" as a unit requiring base volume input', () => {
@@ -171,7 +319,7 @@ describe('MeasureParserService - Ratio/Part-based Measurements', () => {
 });
 ```
 
-**Example TDD for Synonym Aggregation for Makeability (UC 3.9):**
+**Example TDD for Synonym Aggregation for Makeability (UC 3.10):**
 ```typescript
 describe('MakeableCocktailsService - Synonym Aggregation', () => {
   it('should aggregate quantities of all synonym ingredients to determine makeability', async () => {
@@ -222,7 +370,7 @@ describe('MakeableCocktailsService - Synonym Aggregation', () => {
   });
 });
 
-**Example TDD for Hierarchical Ingredient Satisfaction (UC 3.11):**
+**Example TDD for Hierarchical Ingredient Satisfaction (UC 3.12):**
 ```typescript
 describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () => {
   it('should satisfy generic ingredient requirements with specific sub-types', async () => {
@@ -360,6 +508,227 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     expect(result.isMakeable).toBe(true);
     expect(result.usedAmounts.find(a => a.ingredientId === 'whiskey')?.amount).toBe(30);
     expect(result.usedAmounts.find(a => a.ingredientId === 'bourbon')?.amount).toBe(10);
+  });
+});
+```
+
+**Example TDD for Makeability with Un-tracked Garnishes (UC 3.11):**
+```typescript
+describe('MakeableCocktailsService - Garnish Handling', () => {
+  it('should treat garnish ingredients as optional by default', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // Cocktail requires Vodka, Lime Juice, and Mint Sprig (garnish)
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'vodka', amount: 50, unit: 'ml', is_optional: false },
+      { ingredientId: 'lime_juice', amount: 25, unit: 'ml', is_optional: false },
+      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', is_optional: true, type: 'garnish' }
+    ]);
+    
+    // User has vodka and lime juice, no mint
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'vodka', quantity: 100 },
+      { ingredientId: 'lime_juice', quantity: 50 }
+    ]);
+    
+    const result = await makeableService.checkMakeable('mojito_id', 1);
+    
+    // Should be makeable despite missing garnish
+    expect(result.isMakeable).toBe(true);
+    expect(result.missingGarnishes).toEqual(['mint_sprig']);
+  });
+
+  it('should flag cocktails as "Makeable (Missing Garnish)"', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'vodka', amount: 50, unit: 'ml' },
+      { ingredientId: 'olive', amount: 1, unit: 'piece', type: 'garnish' }
+    ]);
+    
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'vodka', quantity: 100 }
+    ]);
+    
+    const result = await makeableService.getMakeableCocktails('user123');
+    const vodkaMartini = result.find(c => c.name === 'Vodka Martini');
+    
+    expect(vodkaMartini).toBeDefined();
+    expect(vodkaMartini.missingGarnishes).toContain('olive');
+    expect(vodkaMartini.status).toBe('makeable_missing_garnish');
+  });
+
+  it('should exclude garnish-only cocktails from makeable list', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // Cocktail that's ONLY garnish (e.g., "Mint Sprig on Ice")
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', type: 'garnish' }
+    ]);
+    
+    const result = await makeableService.getMakeableCocktails('user123');
+    
+    // Garnish-only cocktails shouldn't appear in makeable list
+    expect(result).toHaveLength(0);
+  });
+});
+```
+
+**Example TDD for Recursive Hierarchy Infinite Loop Prevention (UC 3.13):**
+```typescript
+describe('IngredientService - Circular Reference Detection', () => {
+  it('should detect and prevent circular references in ingredient hierarchy', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock circular reference: Bourbon → Whiskey → Bourbon
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      if (id === 'bourbon') return ['whiskey'];
+      if (id === 'whiskey') return ['bourbon']; // Circular reference!
+      return [];
+    });
+    
+    // Should detect circular reference and throw error
+    await expect(ingredientService.resolveHierarchy('bourbon'))
+      .rejects
+      .toThrow('Circular reference detected in ingredient hierarchy: bourbon → whiskey → bourbon');
+  });
+
+  it('should track visited nodes to detect circular references', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock complex circular reference: A → B → C → A
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      if (id === 'ingredient_a') return ['ingredient_b'];
+      if (id === 'ingredient_b') return ['ingredient_c'];
+      if (id === 'ingredient_c') return ['ingredient_a']; // Circular reference
+      return [];
+    });
+    
+    await expect(ingredientService.resolveHierarchy('ingredient_a'))
+      .rejects
+      .toThrow('Circular reference detected');
+  });
+
+  it('should handle self-referential circular references', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock self-reference: Vodka → Vodka
+    jest.spyOn(ingredientService, 'getParentIngredients').mockResolvedValue(['vodka']); // Vodka is its own parent
+    
+    await expect(ingredientService.resolveHierarchy('vodka'))
+      .rejects
+      .toThrow('Circular reference detected: vodka → vodka');
+  });
+
+  it('should safely break loops and return valid hierarchy when circular reference detected', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock circular reference with some valid hierarchy
+    let callCount = 0;
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      callCount++;
+      if (callCount > 10) {
+        throw new Error('Infinite loop detected - too many recursive calls');
+      }
+      
+      if (id === 'bourbon') return ['whiskey', 'spirit']; // Bourbon IS-A Whiskey AND Spirit
+      if (id === 'whiskey') return ['bourbon', 'spirit']; // Circular: Whiskey IS-A Bourbon (wrong!)
+      if (id === 'spirit') return [];
+      return [];
+    });
+    
+    // Should detect circular reference and break
+    const result = await ingredientService.resolveHierarchy('bourbon', { maxDepth: 5 });
+    
+    // Should return partial hierarchy or empty array
+    expect(result).toBeDefined();
+    expect(result.length).toBeLessThan(10); // Should not have infinite results
+  });
+
+  it('should log circular references for database cleanup', async () => {
+    const ingredientService = new IngredientService();
+    const logger = { error: jest.fn() };
+    ingredientService.logger = logger;
+    
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      if (id === 'tequila') return ['mezcal'];
+      if (id === 'mezcal') return ['tequila']; // Circular
+      return [];
+    });
+    
+    try {
+      await ingredientService.resolveHierarchy('tequila');
+    } catch (error) {
+      // Should log the circular reference
+      expect(logger.error).toHaveBeenCalledWith(
+        'Circular reference in ingredient hierarchy',
+        expect.objectContaining({
+          path: expect.stringContaining('tequila → mezcal → tequila')
+        })
+      );
+    }
+  });
+
+  it('should prevent stack overflow with deep circular references', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock very deep circular reference that would cause stack overflow
+    const deepChain = Array(1000).fill(null).map((_, i) => `ingredient_${i}`);
+    let currentIndex = 0;
+    
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      const match = id.match(/ingredient_(\d+)/);
+      if (match) {
+        const num = parseInt(match[1]);
+        // Create circular reference at depth 500
+        if (num === 500) return ['ingredient_0']; // Circular back to start
+        return [`ingredient_${num + 1}`];
+      }
+      return [];
+    });
+    
+    // Should detect circular reference before stack overflow
+    await expect(ingredientService.resolveHierarchy('ingredient_0', { maxDepth: 100 }))
+      .rejects
+      .toThrow('Circular reference detected');
+  });
+
+  it('should work correctly with valid non-circular hierarchies', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock valid hierarchy: Vodka → Clear Spirit → Spirit → Alcoholic Beverage
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      if (id === 'vodka') return ['clear_spirit'];
+      if (id === 'clear_spirit') return ['spirit'];
+      if (id === 'spirit') return ['alcoholic_beverage'];
+      if (id === 'alcoholic_beverage') return [];
+      return [];
+    });
+    
+    const result = await ingredientService.resolveHierarchy('vodka');
+    
+    expect(result).toEqual(['clear_spirit', 'spirit', 'alcoholic_beverage']);
+    expect(result).not.toContain('vodka'); // Should not include self
+  });
+
+  it('should handle mixed valid and circular references gracefully', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock: A → B → C (valid), C → D → B (circular: B already visited)
+    const hierarchyMap = {
+      'ingredient_a': ['ingredient_b'],
+      'ingredient_b': ['ingredient_c'],
+      'ingredient_c': ['ingredient_d'],
+      'ingredient_d': ['ingredient_b'] // Circular back to B
+    };
+    
+    jest.spyOn(ingredientService, 'getParentIngredients').mockImplementation(async (id) => {
+      return hierarchyMap[id] || [];
+    });
+    
+    await expect(ingredientService.resolveHierarchy('ingredient_a'))
+      .rejects
+      .toThrow('Circular reference detected');
   });
 });
 ```

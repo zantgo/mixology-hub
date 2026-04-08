@@ -71,3 +71,54 @@
 * **Then** the system checks the `is_email_verified` flag.
 * **And** restricts AI generation (costly feature) until they click the secure verification token sent via Nodemailer to their inbox.
 * **And** allows basic features (browsing, inventory viewing) while unverified.
+
+**UC 9.12: Case-Insensitive Email Login**
+* **Given** a user registered with email "John.Doe@Example.com".
+* **When** they attempt to login with "john.doe@example.com" or "JOHN.DOE@EXAMPLE.COM".
+* **Then** the authentication system normalizes emails to lowercase before comparison.
+* **And** successfully authenticates the user regardless of email case.
+* **And** prevents duplicate registration with different email cases.
+
+**UC 9.13: Session Invalidation on Password Change**
+* **Given** an authenticated user changes their password.
+* **When** they attempt to use their old JWT token.
+* **Then** the token validation checks the `token_version` field in the user record.
+* **And** rejects tokens with outdated `token_version`.
+* **And** forces re-authentication with the new password.
+
+**UC 9.14: Refresh Token Reuse Detection**
+* **Given** a user's refresh token is stolen and used.
+* **When** the legitimate user attempts to refresh their access token.
+* **Then** the system detects the refresh token reuse.
+* **And** immediately invalidates all refresh tokens for that user.
+* **And** sends a security alert email about suspicious activity.
+
+**UC 9.15: Expired Verification Link & Resend Flow**
+* **Given** a user's email verification link expires after 24 hours.
+* **When** they click the expired link.
+* **Then** the system detects the expired token.
+* **And** presents a clear "Link expired" message with option to resend.
+* **And** rate limits resend requests to prevent email spam.
+
+**UC 9.16: Secure Email Change**
+* **Given** a user wants to change their registered email address.
+* **When** they initiate an email change request.
+* **Then** the system sends a verification link to the NEW email address.
+* **And** sends a security notice to the OLD email address.
+* **And** only updates the email after the new address is verified.
+* **And** invalidates all existing sessions after email change.
+
+**UC 9.17: Stateless Access Token Revocation Mitigation**
+* **Given** a user logs out or changes their password.
+* **When** they attempt to use an access token issued before the logout/password change.
+* **Then** the JWT validation checks the `last_logout_timestamp` and `token_version`.
+* **And** rejects tokens issued before the `last_logout_timestamp`.
+* **And** provides stateless revocation without maintaining a server-side blacklist.
+
+**UC 9.18: Role-Based Access Control (Admin Guards)**
+* **Given** a standard authenticated user attempts to call `PATCH /ingredients/:id/promote` (Global Promotion).
+* **When** the request hits the API.
+* **Then** the `RolesGuard` verifies the JWT payload for an `admin` role.
+* **And** blocks the request with a `403 Forbidden` if the role is missing or equals `user`.
+* **And** allows the request to proceed only if the role equals `admin`.
+* **And** logs admin actions for audit trail purposes.

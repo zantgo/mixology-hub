@@ -282,66 +282,7 @@ describe('Inventory Validation - Boundaries', () => {
 });
 ```
 
-**Example TDD for Makeability with Un-tracked Garnishes (UC 3.10):**
-```typescript
-describe('MakeableCocktailsService - Garnish Handling', () => {
-  it('should treat garnish ingredients as optional by default', async () => {
-    const makeableService = new MakeableCocktailsService();
-    
-    // Cocktail requires Vodka, Lime Juice, and Mint Sprig (garnish)
-    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml', is_optional: false },
-      { ingredientId: 'lime_juice', amount: 25, unit: 'ml', is_optional: false },
-      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', is_optional: true, type: 'garnish' }
-    ]);
-    
-    // User has vodka and lime juice, no mint
-    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100 },
-      { ingredientId: 'lime_juice', quantity: 50 }
-    ]);
-    
-    const result = await makeableService.checkMakeable('mojito_id', 1);
-    
-    // Should be makeable despite missing garnish
-    expect(result.isMakeable).toBe(true);
-    expect(result.missingGarnishes).toEqual(['mint_sprig']);
-  });
 
-  it('should flag cocktails as "Makeable (Missing Garnish)"', async () => {
-    const makeableService = new MakeableCocktailsService();
-    
-    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml' },
-      { ingredientId: 'olive', amount: 1, unit: 'piece', type: 'garnish' }
-    ]);
-    
-    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100 }
-    ]);
-    
-    const result = await makeableService.getMakeableCocktails('user123');
-    const vodkaMartini = result.find(c => c.name === 'Vodka Martini');
-    
-    expect(vodkaMartini).toBeDefined();
-    expect(vodkaMartini.missingGarnishes).toContain('olive');
-    expect(vodkaMartini.status).toBe('makeable_missing_garnish');
-  });
-
-  it('should exclude garnish-only cocktails from makeable list', async () => {
-    const makeableService = new MakeableCocktailsService();
-    
-    // Cocktail that's ONLY garnish (e.g., "Mint Sprig on Ice")
-    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', type: 'garnish' }
-    ]);
-    
-    const result = await makeableService.getMakeableCocktails('user123');
-    
-    // Garnish-only cocktails shouldn't appear in makeable list
-    expect(result).toHaveLength(0);
-  });
-});
 
 **Example TDD for Adding "Count-Based" or Qualitative Inventory Items (UC 1.14):**
 ```typescript
@@ -597,6 +538,355 @@ describe('Inventory Service - Row Limits', () => {
   });
 });
 ```
+
+**Example TDD for Inventory Addition Unit Validation (UC 1.17):**
+```typescript
+describe('Inventory Service - Unit Type Validation', () => {
+  it('should reject incompatible unit types during inventory addition', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient with volume base unit
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'vodka-123',
+      name: 'Vodka',
+      baseUnit: 'ml',
+      unitType: 'volume'
+    });
+    
+    inventoryService.ingredientService = ingredientService;
+    
+    // Attempt to add vodka with count unit (incompatible)
+    const invalidPayload = { ingredientId: 'vodka-123', quantity: 1, unit: 'slice' };
+    
+    await expect(inventoryService.addToInventory('user123', invalidPayload))
+      .rejects
+      .toThrow('Incompatible unit type: Vodka requires volume units (ml, oz, L), not count units (slice)');
+  });
+
+  it('should accept compatible unit types during inventory addition', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient with volume base unit
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'vodka-123',
+      name: 'Vodka',
+      baseUnit: 'ml',
+      unitType: 'volume'
+    });
+    
+    inventoryService.ingredientService = ingredientService;
+    
+    // Valid volume units for vodka
+    const validPayloads = [
+      { ingredientId: 'vodka-123', quantity: 500, unit: 'ml' },
+      { ingredientId: 'vodka-123', quantity: 16.9, unit: 'oz' },
+      { ingredientId: 'vodka-123', quantity: 1, unit: 'L' }
+    ];
+    
+    for (const payload of validPayloads) {
+      await expect(inventoryService.addToInventory('user123', payload)).resolves.not.toThrow();
+    }
+  });
+
+  it('should validate unit compatibility across all unit types', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    // Test different ingredient types
+    const testCases = [
+      {
+        ingredient: { id: 'lemon-123', name: 'Lemon', baseUnit: 'piece', unitType: 'count' },
+        validUnits: ['piece', 'whole', 'count'],
+        invalidUnits: ['ml', 'oz', 'g']
+      },
+      {
+        ingredient: { id: 'salt-123', name: 'Salt', baseUnit: 'g', unitType: 'mass' },
+        validUnits: ['g', 'kg', 'oz'],
+        invalidUnits: ['ml', 'piece', 'slice']
+      },
+      {
+        ingredient: { id: 'simple_syrup-123', name: 'Simple Syrup', baseUnit: 'ml', unitType: 'volume' },
+        validUnits: ['ml', 'oz', 'L', 'dash', 'tsp'],
+        invalidUnits: ['piece', 'g', 'slice']
+      }
+    ];
+    
+    for (const testCase of testCases) {
+      jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue(testCase.ingredient);
+      inventoryService.ingredientService = ingredientService;
+      
+      // Test valid units
+      for (const unit of testCase.validUnits) {
+        const payload = { ingredientId: testCase.ingredient.id, quantity: 1, unit };
+        await expect(inventoryService.addToInventory('user123', payload)).resolves.not.toThrow();
+      }
+      
+      // Test invalid units
+      for (const unit of testCase.invalidUnits) {
+        const payload = { ingredientId: testCase.ingredient.id, quantity: 1, unit };
+        await expect(inventoryService.addToInventory('user123', payload))
+          .rejects
+          .toThrow(`Incompatible unit type: ${testCase.ingredient.name} requires ${testCase.ingredient.unitType} units`);
+      }
+    }
+  });
+
+  it('should handle unit conversion within compatible types', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    const unitConverter = new UnitConverterService();
+    
+    // Mock ingredient with volume base unit
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'vodka-123',
+      name: 'Vodka',
+      baseUnit: 'ml',
+      unitType: 'volume'
+    });
+    
+    // Mock unit converter
+    jest.spyOn(unitConverter, 'convert').mockReturnValue(29.5735); // 1 oz = 29.5735 ml
+    jest.spyOn(unitConverter, 'areUnitsCompatible').mockReturnValue(true);
+    
+    inventoryService.ingredientService = ingredientService;
+    inventoryService.unitConverter = unitConverter;
+    
+    // Add vodka in ounces (should convert to ml for storage)
+    const payload = { ingredientId: 'vodka-123', quantity: 1, unit: 'oz' };
+    
+    await inventoryService.addToInventory('user123', payload);
+    
+    // Should call converter to convert oz to ml
+    expect(unitConverter.convert).toHaveBeenCalledWith(1, 'oz', 'ml');
+    expect(unitConverter.areUnitsCompatible).toHaveBeenCalledWith('oz', 'ml');
+  });
+
+  it('should reject unit conversion attempts between incompatible types', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    const unitConverter = new UnitConverterService();
+    
+    // Mock ingredient with volume base unit
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'vodka-123',
+      name: 'Vodka',
+      baseUnit: 'ml',
+      unitType: 'volume'
+    });
+    
+    // Mock unit converter to detect incompatibility
+    jest.spyOn(unitConverter, 'areUnitsCompatible').mockReturnValue(false);
+    
+    inventoryService.ingredientService = ingredientService;
+    inventoryService.unitConverter = unitConverter;
+    
+    // Attempt to add vodka with mass unit (incompatible)
+    const payload = { ingredientId: 'vodka-123', quantity: 500, unit: 'g' };
+    
+    await expect(inventoryService.addToInventory('user123', payload))
+      .rejects
+      .toThrow('Incompatible unit type');
+    
+    expect(unitConverter.areUnitsCompatible).toHaveBeenCalledWith('g', 'ml');
+  });
+
+  it('should provide user-friendly error messages for unit validation failures', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'gin-123',
+      name: 'Gin',
+      baseUnit: 'ml',
+      unitType: 'volume',
+      suggestedUnits: ['ml', 'oz', 'dash', 'tsp']
+    });
+    
+    inventoryService.ingredientService = ingredientService;
+    
+    const payload = { ingredientId: 'gin-123', quantity: 2, unit: 'slice' };
+    
+    try {
+      await inventoryService.addToInventory('user123', payload);
+    } catch (error) {
+      expect(error.message).toContain('Gin requires volume units');
+      expect(error.message).toContain('Suggested units: ml, oz, dash, tsp');
+      expect(error.statusCode).toBe(400);
+    }
+  });
+});
+```
+
+**Example TDD for IngredientService - Immutability (UC 1.19):**
+```typescript
+describe('IngredientService - Immutability', () => {
+  it('should prevent changing baseUnit if ingredient is in use', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock that the ingredient is actively mapped in cocktail_ingredients
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(5);
+    
+    await expect(ingredientService.updateIngredient('ing-123', { baseUnit: 'g' }))
+      .rejects
+      .toThrow('Conflict: Cannot change baseUnit because ingredient is currently used in 5 recipes.');
+  });
+
+  it('should allow changing baseUnit for unused ingredients', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient not used in any recipes
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(0);
+    jest.spyOn(ingredientService.inventoryRepo, 'count').mockResolvedValue(0);
+    
+    const mockSave = jest.spyOn(ingredientService.ingredientRepo, 'save').mockResolvedValue({} as any);
+    
+    await ingredientService.updateIngredient('ing-123', { baseUnit: 'ml' });
+    
+    expect(mockSave).toHaveBeenCalled();
+  });
+
+  it('should check both cocktail usage and inventory usage', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient used in 2 cocktails and 3 inventory entries
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(2);
+    jest.spyOn(ingredientService.inventoryRepo, 'count').mockResolvedValue(3);
+    
+    await expect(ingredientService.updateIngredient('ing-123', { baseUnit: 'count' }))
+      .rejects
+      .toThrow('Conflict: Cannot change baseUnit because ingredient is currently used in 2 recipes and 3 inventory entries.');
+  });
+
+  it('should allow updating other fields even when baseUnit is locked', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient is in use
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(3);
+    
+    const mockSave = jest.spyOn(ingredientService.ingredientRepo, 'save').mockResolvedValue({} as any);
+    
+    // Should allow updating description even if baseUnit is locked
+    await ingredientService.updateIngredient('ing-123', { 
+      description: 'Updated description',
+      category: 'Updated category'
+      // No baseUnit change
+    });
+    
+    expect(mockSave).toHaveBeenCalled();
+  });
+
+  it('should validate baseUnit compatibility before allowing change', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient not in use
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(0);
+    jest.spyOn(ingredientService.inventoryRepo, 'count').mockResolvedValue(0);
+    
+    // Mock unit converter to validate compatibility
+    const unitConverter = new UnitConverterService();
+    jest.spyOn(unitConverter, 'canConvertBetween').mockReturnValue(false);
+    
+    ingredientService.unitConverter = unitConverter;
+    
+    // Attempt to change from volume to count (incompatible)
+    await expect(ingredientService.updateIngredient('ing-123', { baseUnit: 'count' }))
+      .rejects
+      .toThrow('Cannot change baseUnit from volume to count - incompatible unit types');
+  });
+
+  it('should handle batch update of multiple ingredients with baseUnit validation', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock some ingredients are in use, some are not
+    const countSpy = jest.spyOn(ingredientService.cocktailIngredientRepo, 'count')
+      .mockImplementation(async (options) => {
+        const ingredientId = options.where.ingredientId;
+        if (ingredientId === 'used-ingredient') return 5;
+        if (ingredientId === 'unused-ingredient') return 0;
+        return 0;
+      });
+    
+    const updates = [
+      { id: 'used-ingredient', baseUnit: 'ml' }, // Should fail
+      { id: 'unused-ingredient', baseUnit: 'g' }  // Should succeed
+    ];
+    
+    await expect(ingredientService.batchUpdateIngredients(updates))
+      .rejects
+      .toThrow('Conflict: Cannot change baseUnit for used-ingredient');
+    
+    expect(countSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('should provide detailed error information for debugging', async () => {
+    const ingredientService = new IngredientService();
+    
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(8);
+    
+    try {
+      await ingredientService.updateIngredient('ing-123', { baseUnit: 'piece' });
+    } catch (error) {
+      expect(error.statusCode).toBe(409);
+      expect(error.message).toContain('Cannot change baseUnit');
+      expect(error.message).toContain('8 recipes');
+      expect(error.details).toHaveProperty('ingredientId', 'ing-123');
+      expect(error.details).toHaveProperty('currentUsageCount', 8);
+    }
+  });
+
+  it('should work with transaction rollback on validation failure', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock transaction
+    const mockTransaction = jest.fn().mockImplementation(async (callback) => {
+      try {
+        return await callback();
+      } catch (error) {
+        throw error;
+      }
+    });
+    
+    jest.spyOn(ingredientService.ingredientRepo.manager, 'transaction').mockImplementation(mockTransaction);
+    
+    // Mock ingredient is in use
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(1);
+    
+    await expect(ingredientService.updateIngredient('ing-123', { baseUnit: 'ml' }))
+      .rejects
+      .toThrow();
+    
+    // Transaction should have been attempted and rolled back
+    expect(mockTransaction).toHaveBeenCalled();
+  });
+
+  it('should allow admin override for critical fixes', async () => {
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient is in use
+    jest.spyOn(ingredientService.cocktailIngredientRepo, 'count').mockResolvedValue(10);
+    
+    // Admin override with force flag
+    const mockSave = jest.spyOn(ingredientService.ingredientRepo, 'save').mockResolvedValue({} as any);
+    
+    await ingredientService.updateIngredient('ing-123', { baseUnit: 'ml' }, true); // force = true
+    
+    expect(mockSave).toHaveBeenCalled();
+    
+    // Should log admin override
+    const loggerSpy = jest.spyOn(ingredientService.logger, 'warn');
+    expect(loggerSpy).toHaveBeenCalledWith(
+      'Admin forced baseUnit change',
+      expect.objectContaining({
+        ingredientId: 'ing-123',
+        oldBaseUnit: expect.any(String),
+        newBaseUnit: 'ml',
+        usageCount: 10
+      })
+    );
+  });
+});
 ```
 ```
 ```

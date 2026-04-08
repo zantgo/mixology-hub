@@ -101,3 +101,26 @@
 * **And** if it fails, it saves the `amount` as `null` and `unit` as `'unknown'`.
 * **And** the UI displays a warning: "This ingredient's quantity cannot be tracked in inventory automatically."
 * **And** when the user clicks "Prepare", this specific ingredient bypasses strict mathematical deduction (like qualitative measures in UC 3.3).
+
+**UC 1.17: Inventory Addition Unit Validation**
+* **Given** the global ingredient catalog defines Vodka's `baseUnit` as `ml` (volume).
+* **When** a user attempts to add "1 slice of Vodka" or "500g of Vodka" to their inventory.
+* **Then** the `POST /user-inventory` endpoint validates the unit against the ingredient's `baseUnit` type.
+* **And** rejects count-based or mass-based inputs for volume-based ingredients at insertion time.
+* **And** returns a `400 Bad Request` with a clear error message about incompatible units.
+* **And** prevents corrupting the inventory ledger with incompatible unit types.
+
+**UC 1.18: Editing Custom Ingredient Names**
+* **Given** a user created a custom ingredient ("My Sirup").
+* **When** they submit a `PUT` request to correct the spelling to "My Syrup".
+* **Then** the system updates the `normalized_name` and updates the UI for that user.
+* **And** preserves the ingredient's `UUID` and all existing inventory and recipe relationships.
+* **And** updates the display name across all cocktails and inventory entries using this ingredient.
+
+**UC 1.19: Locking `baseUnit` for In-Use Ingredients**
+* **Given** a user created "Custom Bitters" with a `baseUnit` of `ml`.
+* **And** it is currently used in a Custom Cocktail or active Inventory row.
+* **When** the user attempts to change the `baseUnit` to `count` or `g`.
+* **Then** the system rejects the update with a `409 Conflict`.
+* **And** prevents historical unit-conversion math from breaking.
+* **And** provides a clear error message: "Cannot change base unit because ingredient is used in X recipes and Y inventory entries."

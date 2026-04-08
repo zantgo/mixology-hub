@@ -30,3 +30,18 @@
 * **Then** the validation layer strictly enforces `http://` or `https://` protocols.
 * **And** the frontend sanitizes the URL via Angular's `DomSanitizer` before binding to the `src` attribute.
 * **And** the backend never fetches the URL directly (preventing SSRF).
+
+**UC 12.6: Pagination Deep-Offset DoS Prevention**
+* **Given** a malicious script attempts to scrape the database by requesting `limit=100&page=999999`.
+* **When** the request hits the Aggregator or Inventory service.
+* **Then** the backend enforces a hard cap on maximum pagination depth (e.g., max 100 pages).
+* **And** returns a `400 Bad Request` to prevent high CPU/Memory load from massive offset scans.
+* **And** implements cursor-based pagination where possible to avoid offset-based performance degradation.
+
+**UC 12.7: CORS Policy Enforcement**
+* **Given** a malicious site (`http://evil.com`) attempts to make an AJAX request to the MixologyHub API.
+* **When** the browser sends an `OPTIONS` preflight request.
+* **Then** the NestJS CORS middleware rejects the request.
+* **And** ensures only whitelisted origins (e.g., `localhost:4200`, `mixologyhub.com`) return the `Access-Control-Allow-Origin` headers.
+* **And** validates Origin headers against environment-configured whitelist.
+* **And** includes appropriate CORS headers (`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`) for legitimate preflight requests.

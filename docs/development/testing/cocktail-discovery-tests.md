@@ -470,7 +470,308 @@ describe('CocktailAggregatorService - Advanced Filtering', () => {
 });
 ```
 
-**Example TDD for Forking External Recipes on Edit (UC 2.19):**
+**Example TDD for Strict Inclusion Search (UC 2.19):**
+```typescript
+describe('CocktailAggregatorService - Strict Inclusion Search', () => {
+  it('should return only cocktails containing ALL specified ingredients', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Negroni', 
+        ingredients: [{ name: 'Gin' }, { name: 'Campari' }, { name: 'Vermouth' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Gin & Tonic', 
+        ingredients: [{ name: 'Gin' }, { name: 'Tonic Water' }] 
+      },
+      { 
+        id: '3', 
+        name: 'Americano', 
+        ingredients: [{ name: 'Campari' }, { name: 'Vermouth' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Search for cocktails containing BOTH Gin AND Campari
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Gin', 'Campari']
+    });
+    
+    // Should return only Negroni (contains both Gin and Campari)
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Negroni');
+  });
+
+  it('should handle case-insensitive ingredient matching', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Margarita', 
+        ingredients: [{ name: 'TEQUILA' }, { name: 'LIME JUICE' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Tequila Sunrise', 
+        ingredients: [{ name: 'tequila' }, { name: 'Orange Juice' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Search with lowercase filter
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['tequila'] // Lowercase
+    });
+    
+    // Should return both cocktails (case-insensitive match)
+    expect(result.data).toHaveLength(2);
+  });
+
+  it('should require ALL ingredients in include filter (not just some)', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Cocktail A', 
+        ingredients: [{ name: 'Vodka' }, { name: 'Lime' }, { name: 'Soda' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Cocktail B', 
+        ingredients: [{ name: 'Vodka' }, { name: 'Cranberry' }] 
+      },
+      { 
+        id: '3', 
+        name: 'Cocktail C', 
+        ingredients: [{ name: 'Lime' }, { name: 'Soda' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Filter for Vodka AND Lime AND Soda
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Vodka', 'Lime', 'Soda']
+    });
+    
+    // Should return only Cocktail A (has all three)
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Cocktail A');
+  });
+
+  it('should work with partial ingredient name matches', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Whiskey Sour', 
+        ingredients: [{ name: 'Bourbon Whiskey' }, { name: 'Lemon Juice' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Scotch & Soda', 
+        ingredients: [{ name: 'Scotch Whisky' }, { name: 'Soda Water' }] 
+      },
+      { 
+        id: '3', 
+        name: 'Vodka Martini', 
+        ingredients: [{ name: 'Vodka' }, { name: 'Vermouth' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Filter for any cocktail containing "Whiskey" in ingredient name
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Whiskey']
+    });
+    
+    // Should return Bourbon Whiskey and Scotch Whisky cocktails
+    expect(result.data).toHaveLength(2);
+    expect(result.data[0].name).toBe('Whiskey Sour');
+    expect(result.data[1].name).toBe('Scotch & Soda');
+  });
+
+  it('should combine include and exclude filters', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Vodka Cranberry', 
+        ingredients: [{ name: 'Vodka' }, { name: 'Cranberry Juice' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Vodka Soda', 
+        ingredients: [{ name: 'Vodka' }, { name: 'Soda Water' }] 
+      },
+      { 
+        id: '3', 
+        name: 'Rum & Coke', 
+        ingredients: [{ name: 'Rum' }, { name: 'Cola' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Filter: Must include Vodka, must NOT include Cranberry
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Vodka'],
+      ingredients_exclude: ['Cranberry']
+    });
+    
+    // Should return only Vodka Soda
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Vodka Soda');
+  });
+
+  it('should apply strict inclusion to external API results', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const externalResults = [
+      { 
+        id: '11000', 
+        name: 'Margarita', 
+        ingredients: [{ name: 'Tequila' }, { name: 'Lime Juice' }, { name: 'Triple Sec' }] 
+      },
+      { 
+        id: '11001', 
+        name: 'Tequila Sunrise', 
+        ingredients: [{ name: 'Tequila' }, { name: 'Orange Juice' }] 
+      },
+      { 
+        id: '11002', 
+        name: 'Paloma', 
+        ingredients: [{ name: 'Tequila' }, { name: 'Grapefruit Soda' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchExternal').mockResolvedValue(externalResults);
+    
+    // Filter for Tequila AND Lime Juice
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Tequila', 'Lime Juice']
+    });
+    
+    // Should return only Margarita from external results
+    expect(result.data.find(c => c.name === 'Margarita')).toBeDefined();
+    expect(result.data.find(c => c.name === 'Tequila Sunrise')).toBeUndefined();
+    expect(result.data.find(c => c.name === 'Paloma')).toBeUndefined();
+  });
+
+  it('should handle empty include filter (return all cocktails)', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { id: '1', name: 'Cocktail A', ingredients: [{ name: 'Vodka' }] },
+      { id: '2', name: 'Cocktail B', ingredients: [{ name: 'Gin' }] }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Empty include filter should return all
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: [] // Empty array
+    });
+    
+    expect(result.data).toHaveLength(2);
+  });
+
+  it('should provide user-friendly error for impossible filter combinations', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    // Include and exclude the same ingredient
+    await expect(aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Vodka'],
+      ingredients_exclude: ['Vodka'] // Impossible combination
+    })).rejects.toThrow('Cannot include and exclude the same ingredient: Vodka');
+  });
+
+  it('should handle synonyms in strict inclusion search', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    aggregator.ingredientService = ingredientService;
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Whiskey Drink', 
+        ingredients: [{ name: 'Bourbon' }] // Bourbon is a type of Whiskey
+      },
+      { 
+        id: '2', 
+        name: 'Other Drink', 
+        ingredients: [{ name: 'Vodka' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Mock synonym resolution: Bourbon → Whiskey
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockImplementation((name) => name === 'Bourbon' ? 'Whiskey' : name);
+    
+    // Search for Whiskey (should match Bourbon via synonym)
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_include: ['Whiskey']
+    });
+    
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Whiskey Drink');
+  });
+});
+```
+
+**Example TDD for Forking External Recipes on Edit (UC 2.21):**
 ```typescript
 describe('CocktailService - Forking External Recipes', () => {
   it('should create local fork when editing external cocktail', async () => {
@@ -631,6 +932,323 @@ describe('CocktailService - Forking External Recipes', () => {
   });
 });
 ```
+
+**Example TDD for Empty Custom Cocktail Validation (UC 2.23):**
+```typescript
+describe('CocktailService - Empty Custom Cocktail Validation', () => {
+  it('should reject custom cocktail creation with empty ingredients array', async () => {
+    const cocktailService = new CocktailService();
+    
+    const emptyCocktailPayload = {
+      name: 'Empty Cocktail',
+      ingredients: [], // Empty array - should be rejected
+      instructions: 'Mix nothing',
+      category: 'Custom'
+    };
+    
+    await expect(cocktailService.createCocktail('user123', emptyCocktailPayload))
+      .rejects
+      .toThrow('Cocktail must contain at least 1 ingredient');
+  });
+
+  it('should reject custom cocktail creation with null ingredients', async () => {
+    const cocktailService = new CocktailService();
+    
+    const nullIngredientsPayload = {
+      name: 'Null Ingredients Cocktail',
+      ingredients: null, // Null - should be rejected
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    await expect(cocktailService.createCocktail('user123', nullIngredientsPayload))
+      .rejects
+      .toThrow('Ingredients array is required');
+  });
+
+  it('should reject custom cocktail creation with undefined ingredients', async () => {
+    const cocktailService = new CocktailService();
+    
+    const undefinedIngredientsPayload = {
+      name: 'Undefined Ingredients Cocktail',
+      // ingredients field omitted (undefined)
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    await expect(cocktailService.createCocktail('user123', undefinedIngredientsPayload))
+      .rejects
+      .toThrow('Ingredients array is required');
+  });
+
+  it('should accept custom cocktail with at least 1 ingredient', async () => {
+    const cocktailService = new CocktailService();
+    
+    const validCocktailPayload = {
+      name: 'Valid Cocktail',
+      ingredients: [
+        { ingredientId: 'vodka-123', measure: '2 oz' }
+      ], // 1 ingredient - minimum
+      instructions: 'Mix with ice',
+      category: 'Custom'
+    };
+    
+    jest.spyOn(cocktailService.cocktailRepo, 'save').mockResolvedValue({
+      id: 'cocktail-123',
+      ...validCocktailPayload
+    });
+    
+    const result = await cocktailService.createCocktail('user123', validCocktailPayload);
+    
+    expect(result).toBeDefined();
+    expect(result.id).toBe('cocktail-123');
+    expect(result.ingredients).toHaveLength(1);
+  });
+
+  it('should validate ingredient structure within ingredients array', async () => {
+    const cocktailService = new CocktailService();
+    
+    const invalidIngredientPayload = {
+      name: 'Invalid Ingredient Cocktail',
+      ingredients: [
+        { /* missing ingredientId */ measure: '2 oz' }, // Invalid
+        { ingredientId: 'vodka-123', /* missing measure */ } // Invalid
+      ],
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    await expect(cocktailService.createCocktail('user123', invalidIngredientPayload))
+      .rejects
+      .toThrow('Each ingredient must have ingredientId and measure');
+  });
+
+  it('should reject cocktail update that would result in empty ingredients', async () => {
+    const cocktailService = new CocktailService();
+    
+    // Mock existing cocktail
+    jest.spyOn(cocktailService.cocktailRepo, 'findOne').mockResolvedValue({
+      id: 'cocktail-123',
+      name: 'Existing Cocktail',
+      ingredients: [{ ingredientId: 'vodka-123', measure: '2 oz' }],
+      created_by: 'user123'
+    });
+    
+    const updatePayload = {
+      ingredients: [] // Trying to update to empty array
+    };
+    
+    await expect(cocktailService.updateCocktail('cocktail-123', 'user123', updatePayload))
+      .rejects
+      .toThrow('Cocktail must contain at least 1 ingredient');
+  });
+
+  it('should provide user-friendly error messages for empty ingredients', async () => {
+    const cocktailService = new CocktailService();
+    
+    const emptyCocktailPayload = {
+      name: 'Test Cocktail',
+      ingredients: [],
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    try {
+      await cocktailService.createCocktail('user123', emptyCocktailPayload);
+    } catch (error) {
+      expect(error.message).toBe('Cocktail must contain at least 1 ingredient');
+      expect(error.statusCode).toBe(400);
+      expect(error.userMessage).toContain('Please add at least one ingredient');
+    }
+  });
+
+  it('should validate ingredients before database transaction', async () => {
+    const cocktailService = new CocktailService();
+    
+    const emptyCocktailPayload = {
+      name: 'Test',
+      ingredients: [],
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    // Mock transaction to verify it's not called
+    const mockTransaction = jest.fn();
+    jest.spyOn(cocktailService.cocktailRepo.manager, 'transaction').mockImplementation(mockTransaction);
+    
+    await expect(cocktailService.createCocktail('user123', emptyCocktailPayload))
+      .rejects
+      .toThrow('Cocktail must contain at least 1 ingredient');
+    
+    // Transaction should NOT be called due to validation failure
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it('should handle edge case: ingredients array with null/undefined elements', async () => {
+    const cocktailService = new CocktailService();
+    
+    const edgeCasePayload = {
+      name: 'Edge Case Cocktail',
+      ingredients: [null, undefined, { ingredientId: 'vodka-123', measure: '2 oz' }],
+      instructions: 'Test',
+      category: 'Custom'
+    };
+    
+    await expect(cocktailService.createCocktail('user123', edgeCasePayload))
+      .rejects
+      .toThrow('Invalid ingredient at position 0: must be an object with ingredientId and measure');
+  });
+
+  it('should work with class-validator decorators for DTO validation', async () => {
+    // This test would validate the CreateCocktailDto class
+    const createCocktailDto = new CreateCocktailDto();
+    createCocktailDto.name = 'Test Cocktail';
+    createCocktailDto.ingredients = []; // Empty array
+    
+    // Simulate class-validator validation
+    const errors = await validate(createCocktailDto);
+    
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].property).toBe('ingredients');
+    expect(errors[0].constraints).toHaveProperty('arrayMinSize');
+  });
+});
+```
+
+**Example TDD for External Ingredient Resolution (UC 2.25):**
+```typescript
+describe('CocktailAggregatorService - External Ingredient Resolution', () => {
+  it('should resolve external string ingredients to local UUIDs for makeability checks', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // External API returns string "Dark Rum"
+    const externalCocktail = { idDrink: '1', strIngredient1: 'Dark Rum', strMeasure1: '2 oz' };
+    
+    // Mock the resolver to return a local UUID
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue({ id: 'uuid-dark-rum', name: 'dark rum' });
+      
+    aggregator.ingredientService = ingredientService;
+    
+    const mapped = await aggregator.mapExternalToInternal(externalCocktail);
+    
+    // The mapped DTO should now contain the resolvable UUID for the Makeable Engine
+    expect(mapped.ingredients[0].ingredientId).toBe('uuid-dark-rum');
+  });
+
+  it('should handle case-insensitive ingredient name matching', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // External API returns "LIGHT RUM" (uppercase)
+    const externalCocktail = { idDrink: '2', strIngredient1: 'LIGHT RUM', strMeasure1: '1.5 oz' };
+    
+    // Mock resolver to handle case-insensitive matching
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockImplementation((name) => {
+        const normalized = name.toLowerCase();
+        if (normalized === 'light rum') {
+          return Promise.resolve({ id: 'uuid-light-rum', name: 'Light Rum' });
+        }
+        return Promise.resolve(null);
+      });
+      
+    aggregator.ingredientService = ingredientService;
+    
+    const mapped = await aggregator.mapExternalToInternal(externalCocktail);
+    
+    expect(mapped.ingredients[0].ingredientId).toBe('uuid-light-rum');
+  });
+
+  it('should cache resolved ingredient mappings in Redis', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    const cacheService = new RedisCacheService();
+    
+    const externalCocktail = { idDrink: '3', strIngredient1: 'Gin', strMeasure1: '2 oz' };
+    
+    // Mock first call to resolve from database
+    const resolveSpy = jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValueOnce({ id: 'uuid-gin', name: 'Gin' })
+      .mockResolvedValueOnce({ id: 'uuid-gin', name: 'Gin' });
+    
+    // Mock cache set and get
+    const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValue(true);
+    const cacheGetSpy = jest.spyOn(cacheService, 'get').mockResolvedValue(null);
+    
+    aggregator.ingredientService = ingredientService;
+    aggregator.cacheService = cacheService;
+    
+    // First call should hit database and cache
+    await aggregator.mapExternalToInternal(externalCocktail);
+    expect(resolveSpy).toHaveBeenCalledTimes(1);
+    expect(cacheSetSpy).toHaveBeenCalledWith('ingredient:resolve:Gin', 'uuid-gin', { ttl: 3600 });
+    
+    // Reset spy calls
+    resolveSpy.mockClear();
+    
+    // Mock cache now returns the UUID
+    cacheGetSpy.mockResolvedValue('uuid-gin');
+    
+    // Second call should use cache, not database
+    await aggregator.mapExternalToInternal(externalCocktail);
+    expect(resolveSpy).not.toHaveBeenCalled(); // Should not call database
+  });
+
+  it('should handle unresolved external ingredients gracefully', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // External API returns unknown ingredient
+    const externalCocktail = { 
+      idDrink: '4', 
+      strIngredient1: 'Unicorn Tears', 
+      strMeasure1: '1 dash' 
+    };
+    
+    // Mock resolver returns null (not found)
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue(null);
+      
+    aggregator.ingredientService = ingredientService;
+    
+    const mapped = await aggregator.mapExternalToInternal(externalCocktail);
+    
+    // Should still map but with null ingredientId for makeability
+    expect(mapped.ingredients[0].ingredientId).toBeNull();
+    expect(mapped.ingredients[0].name).toBe('Unicorn Tears');
+  });
+
+  it('should resolve synonyms for external ingredients', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // External API returns "Cointreau"
+    const externalCocktail = { idDrink: '5', strIngredient1: 'Cointreau', strMeasure1: '0.5 oz' };
+    
+    // Mock resolver to map synonym to base ingredient
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockImplementation((name) => {
+        if (name === 'Cointreau') {
+          return Promise.resolve({ 
+            id: 'uuid-triple-sec', 
+            name: 'Triple Sec',
+            isSynonym: true,
+            baseIngredientId: 'uuid-orange-liqueur'
+          });
+        }
+        return Promise.resolve(null);
+      });
+      
+    aggregator.ingredientService = ingredientService;
+    
+    const mapped = await aggregator.mapExternalToInternal(externalCocktail);
+    
+    // Should map to the base ingredient UUID for makeability calculations
+    expect(mapped.ingredients[0].ingredientId).toBe('uuid-orange-liqueur');
+  });
+});
 ```
 ```
 ```

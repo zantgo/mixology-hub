@@ -280,5 +280,21 @@ describe('InventoryStore - Optimistic Rollback', () => {
   }));
 });
 ```
+
+**Example TDD for Pagination State Restoration:**
+```typescript
+describe('Frontend - Pagination State Restoration', () => {
+  it('should remember search scroll position and page state when returning from detail view', () => {
+    // If I scroll to page 3, click a cocktail, and click "Back", 
+    // the UI Signal should have cached the search results and cursor 
+    // so I don't get kicked back to page 1.
+  });
+});
+
+describe('Frontend - Network Loss (Offline State)', () => {
+  it('should disable prepare buttons and show "Offline" indicator if window.navigator is offline', () => {
+    // Prevents optimistic updates from triggering when there is guaranteed no connection
+  });
+});
 ```
 ```

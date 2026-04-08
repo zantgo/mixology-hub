@@ -707,5 +707,275 @@ describe('AI Service - Unit Hallucination Handling', () => {
   });
 });
 ```
+
+**Example TDD for AI Generation Strictly from Inventory (UC 5.8):**
+```typescript
+describe('AI Service - Strict Inventory Generation', () => {
+  it('should automatically fetch user inventory when strict_inventory=true', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    // Mock inventory fetch
+    const mockInventory = [
+      { ingredientId: 'vodka-123', name: 'Vodka', quantity: 500, unit: 'ml' },
+      { ingredientId: 'orange-juice-456', name: 'Orange Juice', quantity: 1000, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    // Mock AI provider
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Screwdriver',
+        ingredients: [{ name: 'Vodka', measure: '2 oz' }, { name: 'Orange Juice', measure: '4 oz' }]
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    // Should fetch user inventory
+    expect(inventoryService.getUserInventory).toHaveBeenCalledWith('user123');
+    
+    // Should inject inventory into prompt
+    const prompt = mockProvider.generateRecipe.mock.calls[0][0];
+    expect(prompt).toContain('Vodka');
+    expect(prompt).toContain('Orange Juice');
+    expect(prompt).toContain('Only use these ingredients');
+  });
+
+  it('should reject generation if user has empty inventory with strict_inventory=true', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    // Mock empty inventory
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue([]);
+    
+    await expect(aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' }))
+      .rejects
+      .toThrow('Cannot generate recipe from empty inventory. Please add ingredients first.');
+  });
+
+  it('should format inventory list for AI prompt correctly', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'gin-123', name: 'Gin', quantity: 750, unit: 'ml' },
+      { ingredientId: 'tonic-456', name: 'Tonic Water', quantity: 1000, unit: 'ml' },
+      { ingredientId: 'lime-789', name: 'Lime', quantity: 2, unit: 'piece' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    const prompt = mockProvider.generateRecipe.mock.calls[0][0];
+    
+    // Should format inventory in prompt
+    expect(prompt).toContain('Gin (750 ml)');
+    expect(prompt).toContain('Tonic Water (1000 ml)');
+    expect(prompt).toContain('Lime (2 piece)');
+    expect(prompt).toContain('ONLY use the following ingredients');
+  });
+
+  it('should combine user input with inventory when both provided', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'rum-123', name: 'Rum', quantity: 500, unit: 'ml' },
+      { ingredientId: 'cola-456', name: 'Cola', quantity: 1000, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    // User specifies "lime" but inventory has rum and cola
+    await aiService.generateRecipe('lime', { strict_inventory: true, userId: 'user123' });
+    
+    const prompt = mockProvider.generateRecipe.mock.calls[0][0];
+    
+    // Should include both inventory and user input
+    expect(prompt).toContain('Rum');
+    expect(prompt).toContain('Cola');
+    expect(prompt).toContain('lime');
+    expect(prompt).toContain('Available ingredients: Rum, Cola. User request: lime');
+  });
+
+  it('should validate that generated recipe uses only inventory ingredients', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'vodka-123', name: 'Vodka', quantity: 500, unit: 'ml' },
+      { ingredientId: 'orange-juice-456', name: 'Orange Juice', quantity: 1000, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    // AI generates recipe with ingredient NOT in inventory
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Invalid Recipe',
+        ingredients: [
+          { name: 'Vodka', measure: '2 oz' },
+          { name: 'Orange Juice', measure: '4 oz' },
+          { name: 'Grenadine', measure: '0.5 oz' } // Not in inventory!
+        ]
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    await expect(aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' }))
+      .rejects
+      .toThrow('Generated recipe contains ingredient not in inventory: Grenadine');
+  });
+
+  it('should handle ingredient name variations in validation', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    // Inventory has "Orange Juice"
+    const mockInventory = [
+      { ingredientId: 'oj-123', name: 'Orange Juice', quantity: 1000, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    // AI might generate "orange juice" (lowercase) or "Fresh Orange Juice"
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Drink',
+        ingredients: [
+          { name: 'orange juice', measure: '4 oz' }, // Lowercase
+          { name: 'Fresh Orange Juice', measure: '2 oz' } // Different phrasing
+        ]
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    // Should normalize and match despite variations
+    const result = await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    expect(result).toBeDefined();
+    expect(result.name).toBe('Drink');
+  });
+
+  it('should cache inventory fetch for multiple AI calls in same session', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'gin-123', name: 'Gin', quantity: 750, unit: 'ml' }
+    ];
+    
+    const inventorySpy = jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    const mockProvider = {
+      generateRecipe: jest.fn()
+        .mockResolvedValueOnce({ name: 'Drink 1', ingredients: [] })
+        .mockResolvedValueOnce({ name: 'Drink 2', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    // First call
+    await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    // Second call in same session
+    await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    // Should cache inventory to avoid duplicate DB calls
+    expect(inventorySpy).toHaveBeenCalledTimes(1); // Cached for second call
+  });
+
+  it('should provide fallback when AI ignores inventory constraints', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'vodka-123', name: 'Vodka', quantity: 500, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    // AI completely ignores inventory and generates unrelated recipe
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Margarita',
+        ingredients: [
+          { name: 'Tequila', measure: '2 oz' }, // Not in inventory!
+          { name: 'Lime Juice', measure: '1 oz' },
+          { name: 'Triple Sec', measure: '1 oz' }
+        ]
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    await expect(aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' }))
+      .rejects
+      .toThrow('AI generated recipe uses ingredients not in inventory: Tequila, Lime Juice, Triple Sec');
+  });
+
+  it('should allow optional ingredients even if not in inventory', async () => {
+    const aiService = new AIService();
+    const inventoryService = new UserInventoryService();
+    
+    aiService.inventoryService = inventoryService;
+    
+    const mockInventory = [
+      { ingredientId: 'gin-123', name: 'Gin', quantity: 750, unit: 'ml' },
+      { ingredientId: 'tonic-456', name: 'Tonic Water', quantity: 1000, unit: 'ml' }
+    ];
+    
+    jest.spyOn(inventoryService, 'getUserInventory').mockResolvedValue(mockInventory);
+    
+    // AI generates recipe with optional garnish
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Gin & Tonic',
+        ingredients: [
+          { name: 'Gin', measure: '2 oz', is_optional: false },
+          { name: 'Tonic Water', measure: '4 oz', is_optional: false },
+          { name: 'Lime Wedge', measure: '1 piece', is_optional: true } // Optional, not in inventory
+        ]
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    // Should allow optional ingredients even if not in inventory
+    const result = await aiService.generateRecipe('', { strict_inventory: true, userId: 'user123' });
+    
+    expect(result).toBeDefined();
+    expect(result.ingredients).toHaveLength(3);
+    expect(result.ingredients[2].is_optional).toBe(true);
+  });
+});
+```
 ```
 ```

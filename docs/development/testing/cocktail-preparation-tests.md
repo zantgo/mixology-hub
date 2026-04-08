@@ -163,7 +163,7 @@ describe('Cocktail Preparation - Optional Ingredients Logic', () => {
   });
 });
 
-**Example TDD for Time-Bounded "Undo" Functionality (UC 4.6):**
+**Example TDD for Time-Bounded "Undo" Functionality (UC 4.8):**
 ```typescript
 describe('Cocktail Preparation - Undo Boundaries', () => {
   it('should reject undo requests older than 15 minutes', async () => {

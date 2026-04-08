@@ -201,4 +201,18 @@ describe('CocktailAggregatorService - Cache Safety', () => {
   });
 });
 ```
+
+**Example TDD for N+1 Query Prevention:**
+```typescript
+describe('TypeORM Performance - N+1 Query Prevention', () => {
+  it('should fetch cocktails and their ingredients in exactly 2 queries using QueryBuilder', async () => {
+    // Tests that TypeORM doesn't execute a separate SELECT for the ingredients 
+    // of EVERY cocktail in a 100-item array (The N+1 problem).
+    const queryLogger = new QueryLogger();
+    // ... setup logger
+    await cocktailService.searchUnified('a', { limit: 50 });
+    expect(queryLogger.getQueryCount()).toBeLessThanOrEqual(3); 
+  });
+});
+```
 ```

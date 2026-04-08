@@ -38,3 +38,10 @@
 * **When** the user clicks "Prepare 4 Servings".
 * **Then** the `POST /cocktails/:id/prepare` transaction deducts `Quantity * 4` from the inventory.
 * **And** successfully commits the single transaction.
+
+**UC 4.9: Undoing a Batch Preparation**
+* **Given** a user prepared a batch of 4 Mojitos (deducting `8 oz` of Rum).
+* **When** the user clicks "Undo" within the 15-minute window.
+* **Then** the transaction references the specific preparation log.
+* **And** successfully restores the full `8 oz` (amount × servings) back to the inventory, not just a single serving.
+* **And** maintains ACID consistency across all ingredients in the batch.

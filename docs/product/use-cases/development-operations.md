@@ -30,3 +30,11 @@
 * **When** the nightly cron job (or background task) executes.
 * **Then** the system identifies records where `created_at` is older than 24 hours.
 * **And** safely permanently deletes these rows to reclaim database storage.
+
+**UC 14.6: Graceful Shutdown of Active Transactions**
+* **Given** the backend receives a `SIGTERM` signal from the Docker/Kubernetes orchestrator.
+* **When** there are active PostgreSQL transactions (e.g., cocktail preparation).
+* **Then** the NestJS application stops accepting new HTTP requests.
+* **And** waits for existing database connections and transactions to commit or rollback gracefully (up to 10 seconds) before terminating the process.
+* **And** logs the shutdown process with transaction completion status for debugging.
+* **And** ensures no data corruption occurs during deployment restarts.

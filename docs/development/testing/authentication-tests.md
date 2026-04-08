@@ -651,6 +651,537 @@ describe('Auth Service - Secure Email Change', () => {
   });
 });
 ```
+
+**Example TDD for Mock Auth Bypass (ENABLE_MOCK_AUTH=true):**
+```typescript
+describe('Auth Guard - Mock Authentication Bypass', () => {
+  it('should auto-inject mock user when ENABLE_MOCK_AUTH=true', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    // Set mock auth environment variable
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    process.env.MOCK_USER_EMAIL = 'mock@test.com';
+    process.env.MOCK_USER_ID = 'mock-user-uuid';
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {} // No auth header
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    // Should allow request and inject mock user
+    const canActivate = await authGuard.canActivate(mockExecutionContext as any);
+    
+    expect(canActivate).toBe(true);
+    
+    // Verify mock user is injected
+    const request = mockExecutionContext.switchToHttp().getRequest();
+    expect(request.user).toBeDefined();
+    expect(request.user.email).toBe('mock@test.com');
+    expect(request.user.id).toBe('mock-user-uuid');
+  });
+
+  it('should respect @Public() decorator even with mock auth enabled', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {} })
+      }),
+      getHandler: () => ({
+        // Handler has @Public() decorator
+        [PUBLIC_METADATA_KEY]: true
+      }),
+      getClass: () => ({})
+    };
+    
+    const canActivate = await authGuard.canActivate(mockExecutionContext as any);
+    
+    // Should allow public endpoints without injecting mock user
+    expect(canActivate).toBe(true);
+    
+    const request = mockExecutionContext.switchToHttp().getRequest();
+    expect(request.user).toBeUndefined(); // No mock user for public endpoints
+  });
+
+  it('should use real JWT authentication when ENABLE_MOCK_AUTH=false', async () => {
+    const authGuard = new JwtAuthGuard();
+    const jwtService = new JwtService({ secret: 'test-secret' });
+    
+    authGuard.jwtService = jwtService;
+    
+    process.env.ENABLE_MOCK_AUTH = 'false';
+    
+    const validToken = jwtService.sign({ userId: 'real-user-123' });
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { authorization: `Bearer ${validToken}` }
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    const canActivate = await authGuard.canActivate(mockExecutionContext as any);
+    
+    expect(canActivate).toBe(true);
+    
+    // Should use real JWT user, not mock user
+    const request = mockExecutionContext.switchToHttp().getRequest();
+    expect(request.user.userId).toBe('real-user-123');
+    expect(request.user.email).not.toBe('mock@test.com');
+  });
+
+  it('should reject requests without auth when mock auth is disabled', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    process.env.ENABLE_MOCK_AUTH = 'false';
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {} // No auth header
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    await expect(authGuard.canActivate(mockExecutionContext as any))
+      .rejects
+      .toThrow('Unauthorized');
+  });
+
+  it('should allow configuration of mock user via environment variables', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    // Custom mock user configuration
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    process.env.MOCK_USER_EMAIL = 'custom@test.com';
+    process.env.MOCK_USER_ID = 'custom-uuid-123';
+    process.env.MOCK_USER_NAME = 'Custom Test User';
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {} })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    await authGuard.canActivate(mockExecutionContext as any);
+    
+    const request = mockExecutionContext.switchToHttp().getRequest();
+    expect(request.user.email).toBe('custom@test.com');
+    expect(request.user.id).toBe('custom-uuid-123');
+    expect(request.user.name).toBe('Custom Test User');
+  });
+
+  it('should log mock auth usage for security auditing', async () => {
+    const authGuard = new JwtAuthGuard();
+    const logger = { warn: jest.fn() };
+    authGuard.logger = logger;
+    
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {},
+          ip: '127.0.0.1',
+          method: 'GET',
+          url: '/api/inventory'
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    await authGuard.canActivate(mockExecutionContext as any);
+    
+    // Should log security warning about mock auth usage
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Mock authentication enabled',
+      expect.objectContaining({
+        ip: '127.0.0.1',
+        endpoint: '/api/inventory',
+        mockUser: 'mock@test.com'
+      })
+    );
+  });
+
+  it('should disable certain security features when mock auth is enabled', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    
+    // Mock rate limiter - should be disabled for mock auth
+    const mockRateLimiter = {
+      consume: jest.fn()
+    };
+    authGuard.rateLimiter = mockRateLimiter;
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {} })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    await authGuard.canActivate(mockExecutionContext as any);
+    
+    // Rate limiter should NOT be called for mock auth
+    expect(mockRateLimiter.consume).not.toHaveBeenCalled();
+  });
+
+  it('should work with SeederService integration for MVP testing', async () => {
+    const authGuard = new JwtAuthGuard();
+    const seederService = new SeederService();
+    
+    authGuard.seederService = seederService;
+    
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    
+    // Mock seeder service to ensure mock user exists
+    const ensureMockUserSpy = jest.spyOn(seederService, 'ensureMockUserExists')
+      .mockResolvedValue({
+        id: 'seeder-mock-uuid',
+        email: 'seeder@test.com'
+      });
+    
+    const mockExecutionContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: {} })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    await authGuard.canActivate(mockExecutionContext as any);
+    
+    // Should ensure mock user exists in database
+    expect(ensureMockUserSpy).toHaveBeenCalled();
+    
+    const request = mockExecutionContext.switchToHttp().getRequest();
+    expect(request.user.id).toBe('seeder-mock-uuid');
+  });
+
+  it('should validate mock auth configuration at application startup', () => {
+    // This test would be in app configuration
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    process.env.NODE_ENV = 'production'; // Mock auth in production is dangerous!
+    
+    expect(() => {
+      if (process.env.ENABLE_MOCK_AUTH === 'true' && process.env.NODE_ENV === 'production') {
+        throw new Error('Mock authentication cannot be enabled in production environment');
+      }
+    }).toThrow('Mock authentication cannot be enabled in production environment');
+  });
+
+  it('should allow gradual transition from mock auth to real auth', async () => {
+    const authGuard = new JwtAuthGuard();
+    
+    // Test mixed mode: some endpoints use mock, some use real auth
+    process.env.ENABLE_MOCK_AUTH = 'true';
+    
+    const mockEndpoints = ['/api/inventory', '/api/cocktails'];
+    const realAuthEndpoints = ['/api/admin', '/api/billing'];
+    
+    // Simulate request to mock endpoint
+    const mockRequestContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: {},
+          url: '/api/inventory'
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    const mockResult = await authGuard.canActivate(mockRequestContext as any);
+    expect(mockResult).toBe(true);
+    
+    // Simulate request to real auth endpoint (with token)
+    const jwtService = new JwtService({ secret: 'test-secret' });
+    authGuard.jwtService = jwtService;
+    
+    const realAuthContext = {
+      switchToHttp: () => ({
+        getRequest: () => ({
+          headers: { authorization: 'Bearer valid-token' },
+          url: '/api/admin'
+        })
+      }),
+      getHandler: () => ({}),
+      getClass: () => ({})
+    };
+    
+    // Should attempt real JWT validation even with mock auth enabled
+    // (implementation would check endpoint or use metadata)
+    await expect(authGuard.canActivate(realAuthContext as any))
+      .rejects
+      .toThrow(); // Invalid token
+  });
+});
+```
+
+**Example TDD for RolesGuard - RBAC (UC 9.18):**
+```typescript
+describe('RolesGuard - RBAC', () => {
+  it('should block non-admin users from promoting ingredients', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    
+    const mockContext = {
+      getHandler: () => ({}), // Assume @Roles('admin') is set
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'user123', role: 'user' } // Normal user
+        })
+      })
+    };
+    
+    // Guard should throw or return false
+    expect(() => rolesGuard.canActivate(mockContext as any)).toThrow('Forbidden');
+  });
+
+  it('should allow admin users to access admin-only endpoints', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    
+    // Mock @Roles('admin') decorator
+    const reflector = new Reflector();
+    jest.spyOn(reflector, 'get').mockReturnValue(['admin']);
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'admin123', role: 'admin' } // Admin user
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+
+  it('should handle endpoints with multiple allowed roles', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    // Endpoint allows both 'admin' and 'moderator'
+    jest.spyOn(reflector, 'get').mockReturnValue(['admin', 'moderator']);
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'mod123', role: 'moderator' } // Moderator user
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+
+  it('should handle endpoints without role decorator (allow all authenticated users)', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    // No @Roles decorator on endpoint
+    jest.spyOn(reflector, 'get').mockReturnValue(undefined);
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'user123', role: 'user' } // Any authenticated user
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+
+  it('should reject unauthenticated requests to role-protected endpoints', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    jest.spyOn(reflector, 'get').mockReturnValue(['admin']);
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: null // No user (unauthenticated)
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    expect(() => rolesGuard.canActivate(mockContext as any)).toThrow('Unauthorized');
+  });
+
+  it('should log admin actions for audit trail', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const logger = { info: jest.fn() };
+    rolesGuard.logger = logger;
+    
+    const reflector = new Reflector();
+    jest.spyOn(reflector, 'get').mockReturnValue(['admin']);
+    
+    const mockContext = {
+      getHandler: () => ({ name: 'promoteIngredient' }),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'admin123', role: 'admin', email: 'admin@example.com' },
+          method: 'PATCH',
+          url: '/api/ingredients/123/promote',
+          ip: '192.168.1.1'
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    await rolesGuard.canActivate(mockContext as any);
+    
+    expect(logger.info).toHaveBeenCalledWith(
+      'Admin action performed',
+      expect.objectContaining({
+        userId: 'admin123',
+        userEmail: 'admin@example.com',
+        action: 'promoteIngredient',
+        endpoint: '/api/ingredients/123/promote',
+        method: 'PATCH',
+        ip: '192.168.1.1'
+      })
+    );
+  });
+
+  it('should work with class-level role decorators', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    // Class has @Roles('admin') decorator
+    jest.spyOn(reflector, 'get')
+      .mockImplementation((key, target) => {
+        if (key === 'roles') {
+          // Check handler first, then class
+          if (target === mockContext.getHandler()) {
+            return undefined; // No handler decorator
+          }
+          if (target === mockContext.getClass()) {
+            return ['admin']; // Class has decorator
+          }
+        }
+        return undefined;
+      });
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      getClass: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'admin123', role: 'admin' }
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+
+  it('should prioritize handler decorator over class decorator', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    // Class: @Roles('admin'), Handler: @Roles('moderator')
+    jest.spyOn(reflector, 'get')
+      .mockImplementation((key, target) => {
+        if (key === 'roles') {
+          if (target === mockContext.getHandler()) {
+            return ['moderator']; // Handler decorator takes priority
+          }
+          if (target === mockContext.getClass()) {
+            return ['admin']; // Class decorator
+          }
+        }
+        return undefined;
+      });
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      getClass: () => ({}),
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'mod123', role: 'moderator' } // Moderator can access
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+
+  it('should handle inheritance of role decorators', async () => {
+    const rolesGuard = new RolesGuard(new Reflector());
+    const reflector = new Reflector();
+    
+    // Parent class has @Roles('admin'), child class inherits
+    const parentClass = class ParentController {
+      static roles = ['admin'];
+    };
+    
+    const childClass = class ChildController extends ParentController {};
+    
+    jest.spyOn(reflector, 'get')
+      .mockImplementation((key, target) => {
+        if (key === 'roles' && target === childClass) {
+          // Should inherit from parent
+          return ['admin'];
+        }
+        return undefined;
+      });
+    
+    const mockContext = {
+      getHandler: () => ({}),
+      getClass: () => childClass,
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: 'admin123', role: 'admin' }
+        })
+      })
+    };
+    
+    rolesGuard.reflector = reflector;
+    
+    const result = rolesGuard.canActivate(mockContext as any);
+    expect(result).toBe(true);
+  });
+});
 ```
 ```
 ```

@@ -118,15 +118,44 @@
 * **When** they apply a filter for `ingredients_exclude=["Tequila"]` (e.g., looking for mocktails/variations).
 * **Then** the Aggregator filters out results containing that ingredient.
 
-**UC 2.19: Forking External Recipes on Edit**
+**UC 2.19: Strict Inclusion Search**
+* **Given** a user wants to find cocktails containing BOTH Gin AND Campari.
+* **When** they apply a filter for `ingredients_include=["Gin", "Campari"]`.
+* **Then** the Aggregator strictly returns only cocktails containing ALL specified ingredients.
+* **And** performs case-insensitive matching against ingredient names.
+* **And** works across both local and external cocktail sources.
+
+**UC 2.21: Forking External Recipes on Edit**
 * **Given** a user views a public cocktail from TheCocktailDB (`source: 'api'`).
 * **When** the user clicks "Edit Recipe" to change an ingredient.
 * **Then** the backend intercepts the request and creates a *new* local `Cocktails` record.
 * **And** sets `source: 'local'`, `parent_external_id: '11000'`, and `created_by: user_id`.
 
-**UC 2.20: Sorting Unified Search by Makeability**
+**UC 2.22: Sorting Unified Search by Makeability**
 * **Given** the user searches for "Martini" and gets 10 results.
 * **When** the frontend requests the results with `sort=makeable`.
 * **Then** the Aggregator Service passes the results through the `MakeableCocktailsService`.
 * **And** pushes the cocktails the user has 100% of the ingredients for to the top of the array.
 * **And** pushes the "Missing 1 ingredient" to the middle, and completely unmakeable to the bottom.
+
+**UC 2.23: Aggregator Pagination State via Redis**
+* **Given** an external API returns an unpaginated array of 50 cocktails.
+* **When** the Aggregator maps this to internal DTOs.
+* **Then** the Aggregator caches the *entire unified array* in Redis under the `search_cursor_key`.
+* **And** subsequent cursor requests pull directly from the cached Redis array using `slice(offset, offset + limit)` rather than hitting the database or external API again.
+* **And** implements TTL expiration (e.g., 5 minutes) to prevent stale search results.
+
+**UC 2.24: Fuzzy Search / Typo Tolerance**
+* **Given** a user searches for "Margaritta" (typo).
+* **When** the external API returns 0 results.
+* **Then** the PostgreSQL local search utilizes `pg_trgm` (Trigram similarity) or `ILIKE` fallback matching.
+* **And** successfully returns "Margarita" from the local database.
+* **And** provides "Did you mean: Margarita?" suggestion in the UI when exact matches fail.
+
+**UC 2.25: On-the-fly External Ingredient Resolution**
+* **Given** the Aggregator fetches an external recipe containing the string `"Light rum"`.
+* **When** evaluating if the cocktail is makeable (UC 2.22).
+* **Then** the Aggregator passes the string through the `IngredientService.resolveBaseIngredient()` method.
+* **And** maps the string to the closest known local ingredient `UUID` (e.g., using case-insensitive or synonym matching).
+* **And** correctly assesses makeability against the user's inventory without requiring the external ingredient to be permanently saved in the local DB first.
+* **And** caches the string-to-UUID mapping in Redis to avoid repeated database lookups for subsequent searches.

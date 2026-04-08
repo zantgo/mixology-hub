@@ -32,3 +32,31 @@
 * **When** the user fetches their Favorites list.
 * **Then** the Aggregator catches the `404 Not Found` from the external API.
 * **And** safely flags that favorite as "Recipe Unavailable" in the UI rather than failing the entire Favorites list hydration.
+
+**UC 6.6: Handling Deleted Custom Cocktails in Favorites**
+* **Given** a user has favorited a custom cocktail created by another user.
+* **When** the original author deletes their custom cocktail (soft delete).
+* **Then** the Favorites hydration detects the `is_deleted` flag.
+* **And** displays a tombstone entry with "Recipe deleted by author" message.
+* **And** allows the user to remove the deleted cocktail from their favorites.
+
+**UC 6.7: Paginated & Batched Favorites Hydration**
+* **Given** a user has 50+ favorites (mix of local and external).
+* **When** they request their favorites list.
+* **Then** the API returns paginated results (e.g., 20 per page).
+* **And** batches external API calls to avoid overwhelming TheCocktailDB.
+* **And** implements rate limiting between batch calls to respect external API limits.
+
+**UC 6.8: Searching/Filtering Favorites**
+* **Given** a user has a large collection of favorited cocktails.
+* **When** they search for "rum" within their favorites.
+* **Then** the system filters favorites by name and ingredient matches.
+* **And** performs case-insensitive partial matching.
+* **And** combines search with pagination for performance.
+
+**UC 6.9: Handling Privacy Toggles on Favorited Cocktails**
+* **Given** User A creates a Public cocktail and User B favorites it.
+* **When** User A edits the cocktail and toggles `is_public: false`.
+* **Then** the cocktail remains in User B's database relation.
+* **And** User B's UI displays a tombstone: "This recipe was made private by the author" (similar to soft-delete behavior).
+* **And** prevents unauthorized access to private recipe details while maintaining the favorite relationship.

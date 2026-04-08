@@ -50,3 +50,27 @@
 * **When** they query the makeability engine with `servings=4`.
 * **Then** the system mathematically multiplies all required recipe ingredient volumes by 4.
 * **And** evaluates makeability against the inventory using the new scaled requirements.
+
+**UC 3.8: Scaling-Induced "Almost Makeable" Transition**
+* **Given** a user has 4oz of Vodka and a Martini requires 2oz per serving.
+* **When** they request `servings=1`, the cocktail is **Makeable**.
+* **When** they request `servings=3` (requires 6oz total), the cocktail transitions to **"Almost Makeable"**.
+* **Then** the system dynamically recalculates makeability based on scaled requirements.
+* **And** provides clear feedback: "Missing 2oz Vodka for 3 servings".
+* **And** maintains accurate categorization as inventory changes relative to serving size.
+
+**UC 3.13: Recursive Hierarchy/Synonym Infinite Loop Prevention**
+* **Given** the ingredient database has a circular reference: `Bourbon → Whiskey → Bourbon`.
+* **When** the `IngredientService.resolveHierarchy()` method is called for Bourbon.
+* **Then** the method tracks visited nodes to detect circular references.
+* **And** throws a `CircularReferenceError` or safely breaks the loop.
+* **And** prevents stack overflow or infinite loops during makeability calculations.
+* **And** logs the circular reference for database cleanup.
+
+**UC 3.14: Deducting from overlapping synonym inventories**
+* **Given** a recipe requires `1 oz Light Rum` AND `1 oz Dark Rum`.
+* **And** the user has exactly `1.5 oz` of generic "Rum" (which maps as a hierarchical synonym to both).
+* **When** the makeability engine evaluates the cocktail.
+* **Then** it accurately sums the *total* required rum (`2 oz`).
+* **And** correctly flags the cocktail as "Almost Makeable" (missing 0.5 oz), rather than double-counting the 1.5 oz for both requirements.
+* **And** prevents inventory over-allocation across overlapping synonym hierarchies.
