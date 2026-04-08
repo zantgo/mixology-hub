@@ -44,7 +44,7 @@ export class AiService {
     const recipe = aiRecord.generated_recipe;
 
     return await this.cocktailRepository.manager.transaction(async (em) => {
-      // 1. Crear el cóctel dentro de la transacción
+      // 1. Create the cocktail within the transaction
       const newCocktail = em.create(Cocktail, {
         name: saveDto.name,
         instructions: recipe.instructions,
@@ -53,7 +53,7 @@ export class AiService {
       });
       const savedCocktail = await em.save(newCocktail);
 
-      // 2. Procesar ingredientes dentro de la transacción
+      // 2. Process ingredients within the transaction
       for (const item of recipe.ingredients) {
         let ingredient = await em.findOne(Ingredient, { where: { name: item.name.toLowerCase() } });
         
@@ -62,12 +62,12 @@ export class AiService {
           ingredient = await em.save(ingredient);
         }
 
-        // 3. Crear relación usando las instancias dentro del contexto 'em'
+        // 3. Create the relationship using instances within the 'em' context
         const cocktailIngredient = em.create(CocktailIngredient, {
           cocktail: savedCocktail,
           ingredient: ingredient,
           measure: item.measure,
-          amount: 1, // Valor por defecto
+          amount: 1, // Default value
           unit: 'ml'
         });
         

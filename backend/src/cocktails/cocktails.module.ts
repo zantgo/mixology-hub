@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common'; // <-- Añadido forwardRef
+import { Module, forwardRef } from '@nestjs/common'; // <-- Added forwardRef
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { CocktailsService } from './cocktails.service';
@@ -10,7 +10,7 @@ import { User } from '../users/entities/user.entity';
 import { ExternalModule } from '../external/external.module';
 import { CocktailAggregatorService } from './cocktail-aggregator.service';
 import { UtilsModule } from '../utils/utils.module';
-import { UsersModule } from '../users/users.module'; // <-- AQUI ESTÁ EL FIX (Importar el módulo)
+import { UsersModule } from '../users/users.module'; // <-- FIX: Imported the module
 
 @Module({
   imports: [
@@ -18,7 +18,7 @@ import { UsersModule } from '../users/users.module'; // <-- AQUI ESTÁ EL FIX (I
     UtilsModule,
     HttpModule,
     ExternalModule,
-    forwardRef(() => UsersModule), // <-- AQUI ESTÁ EL FIX (Inyectar el módulo)
+    forwardRef(() => UsersModule), // <-- FIX: Injected the module
   ],
   controllers:[CocktailsController],
   providers: [CocktailsService, CocktailAggregatorService],

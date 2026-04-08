@@ -3,12 +3,12 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateFavoriteDto {
   @ApiProperty({ required: false, description: 'Local Cocktail UUID' })
-  @ValidateIf(o => !o.externalCocktailId) // Solo validar si no viene el externo
+  @ValidateIf(o => !o.externalCocktailId) // Only validate if externalCocktailId is not provided
   @IsString()
   cocktailId?: string;
 
   @ApiProperty({ required: false, description: 'External API Cocktail ID' })
-  @ValidateIf(o => !o.cocktailId) // Solo validar si no viene el local
+  @ValidateIf(o => !o.cocktailId) // Only validate if cocktailId is not provided
   @IsString()
   externalCocktailId?: string;
 }

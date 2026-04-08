@@ -53,7 +53,7 @@ export class CocktailAggregatorService {
 
     } catch (err) {
       this.logger.error('Search unified failed:', err);
-      // Retornar estructura vacía respetando el formato de paginación
+      // Return an empty structure while respecting the pagination format
       return { data:[], total: 0, limit: paginationQuery.limit || 10, offset: paginationQuery.offset || 0 };
     }
   }
