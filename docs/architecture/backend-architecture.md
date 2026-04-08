@@ -40,7 +40,7 @@ src/
 
 ├── common/ # Shared DTOs (e.g., PaginationQueryDto)
 
-├── utils/ # Pure business logic (e.g., UnitConverterService)
+├── utils/ # Pure business logic (e.g., UnitConverterService, MeasureParserService)
 
 └── app.module.ts # Root module orchestrating imports
 
@@ -97,6 +97,123 @@ To determine if a user can make a cocktail, the system cannot rely on simple str
 - We use a dedicated `UnitConverterService` containing mathematical conversion factors relative to a base unit (ml, grams).
 
 - **Makeable Algorithm:** When querying `GET /user-inventory/makeable`, the database uses a complex SQL `HAVING` clause to filter cocktails where *all* required ingredients exist in the user's inventory. Then, in memory, the `UnitConverterService` mathematically verifies that the *quantities* are sufficient.
+
+#### 📐 Human-Readable Measure Parsing
+
+The `cocktail_ingredients` table stores both a human-readable `measure` string (e.g., "1 1/2 oz", "a splash") and separate `amount` (decimal) and `unit` (string) fields for mathematical operations.
+
+**Parsing Strategy:**
+1. **Fraction & Decimal Detection:** Regex patterns convert "1 1/2" → 1.5, "0.5" → 0.5
+2. **Unit Extraction:** Separate numeric amount from unit string ("2 oz" → amount: 2, unit: "oz")
+3. **Special Cases:** Handle "a pinch", "dash", "splash" as qualitative measures with null/0 amount
+4. **Validation:** Ensure parsed values are valid for `UnitConverterService`
+
+**Implementation Example:**
+```typescript
+export class MeasureParserService {
+  parseMeasure(measure: string): { amount: number | null; unit: string } {
+    // Handle special qualitative measures
+    const qualitativeMeasures = ['pinch', 'dash', 'splash', 'to taste'];
+    for (const qual of qualitativeMeasures) {
+      if (measure.toLowerCase().includes(qual)) {
+        return { amount: null, unit: qual };
+      }
+    }
+    
+    // Extract numeric part (supports fractions: "1 1/2", "3/4", "2.5")
+    const match = measure.match(/(\d+(?:\s+\d+\/\d+|\/\d+)?(?:\.\d+)?)/);
+    if (!match) {
+      throw new Error(`Invalid measure format: ${measure}`);
+    }
+    
+    const numericStr = match[1];
+    const amount = this.parseFraction(numericStr);
+    
+    // Extract unit (everything after the number)
+    const unit = measure.replace(numericStr, '').trim() || 'unit';
+    
+    return { amount, unit };
+  }
+  
+  private parseFraction(str: string): number {
+    // Handle mixed numbers: "1 1/2"
+    const mixedMatch = str.match(/(\d+)\s+(\d+)\/(\d+)/);
+    if (mixedMatch) {
+      const whole = parseInt(mixedMatch[1]);
+      const numerator = parseInt(mixedMatch[2]);
+      const denominator = parseInt(mixedMatch[3]);
+      return whole + (numerator / denominator);
+    }
+    
+    // Handle simple fractions: "3/4"
+    const fractionMatch = str.match(/(\d+)\/(\d+)/);
+    if (fractionMatch) {
+      const numerator = parseInt(fractionMatch[1]);
+      const denominator = parseInt(fractionMatch[2]);
+      return numerator / denominator;
+    }
+    
+    // Handle decimals: "2.5"
+    return parseFloat(str);
+  }
+}
+
+**Critical Edge Case: Recurring Decimals & Database Precision**
+- Fractions like "1/3 oz" produce recurring decimals (0.333333...)
+- Database uses `decimal(10,2)` - only 2 decimal places stored
+- **Solution**: Round to 2 decimal places before database insertion
+- **TDD Test Required**: Ensure "1/3 oz" → 0.33 (rounded), not 0.333333...
+- **Business Impact**: Precision loss acceptable for cocktail measurements (±0.01 oz ≈ 0.3 ml)
+```
+
+**Why This Matters:**
+- UI captures human-friendly input ("1 1/2 oz")
+- Backend needs precise decimals (1.5) for mathematical operations
+- `UnitConverterService` requires `amount` and `unit` separately
+- Database stores both formats for display (`measure`) and calculation (`amount`, `unit`)
+
+#### 🚀 Performance Optimization (Future Consideration)
+
+For production-scale deployments with large ingredient catalogs, the current two-step approach (SQL filter + in-memory math) could become a bottleneck. Two database-centric optimizations are available:
+
+1. **PostgreSQL Materialized Views:** Pre-compute unit-converted inventory quantities in a materialized view that refreshes on inventory changes. This moves the math to the database layer.
+
+2. **Custom PostgreSQL Functions:** Implement unit conversion logic as PostgreSQL stored functions, allowing the database to handle both filtering AND quantity validation in a single query.
+
+**Example PostgreSQL function concept:**
+```sql
+CREATE OR REPLACE FUNCTION can_make_cocktail(
+  user_id UUID, 
+  cocktail_id UUID
+) RETURNS BOOLEAN AS $$
+DECLARE
+  ingredient RECORD;
+  user_quantity DECIMAL;
+  required_quantity DECIMAL;
+BEGIN
+  FOR ingredient IN 
+    SELECT ci.amount, ci.unit, i.base_unit
+    FROM cocktail_ingredients ci
+    JOIN ingredients i ON ci.ingredient_id = i.id
+    WHERE ci.cocktail_id = $2
+  LOOP
+    -- Convert required amount to base unit
+    required_quantity := convert_to_base_unit(ingredient.amount, ingredient.unit, ingredient.base_unit);
+    
+    -- Get user's inventory in base units
+    SELECT ui.quantity INTO user_quantity
+    FROM user_inventory ui
+    WHERE ui.user_id = $1 
+      AND ui.ingredient_id = ingredient.ingredient_id;
+    
+    IF user_quantity IS NULL OR user_quantity < required_quantity THEN
+      RETURN FALSE;
+    END IF;
+  END LOOP;
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql;
+```
 
   
 
@@ -175,3 +292,7 @@ External API calls are expensive and subject to rate-limiting. We utilize **Redi
 - **Global Pipes:** All incoming requests pass through a global `ValidationPipe`.
 
 - **DTOs:** Data Transfer Objects leverage `class-validator` to strictly type-check incoming JSON bodies. Requests with extra, unmapped fields are automatically stripped (`whitelist: true`) or rejected (`forbidNonWhitelisted: true`) to prevent mass-assignment vulnerabilities.
+
+### 🚦 Rate Limiting (Production Consideration)
+
+In a production environment, public endpoints—especially the AI generation endpoint (`POST /ai`)—will be protected by a `ThrottlerModule` (NestJS rate limiter). This prevents abuse, controls costs associated with third-party LLM APIs, and ensures fair usage across users. The roadmap (Phase 1) includes configuring per-user and global request limits.

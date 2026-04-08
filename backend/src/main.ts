@@ -7,7 +7,9 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   
   app.enableCors({
-    origin: '*',
+    origin: process.env.NODE_ENV === 'production' 
+      ? ['https://mixologyhub.com'] 
+      : ['http://localhost:4200', 'http://localhost:8080'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   });
 

@@ -82,7 +82,7 @@ This document outlines the strategic direction and planned features for Mixology
 - **Weather Integration**: Weather-appropriate drink suggestions
 - **API Platform**: Public API for third-party integrations
 
-## Phase 4: Enterprise & Scale (Q1 2025)
+## Phase 4: Enterprise & Scale (Q1 2027)
 
 ### 4.1 Multi-Tenancy & White Label
 - **Bar/Brand Customization**: White-label versions for bars/restaurants

@@ -32,6 +32,7 @@ cd frontend && npm start         # Port 4200
 make test            # Run all tests
 make test-backend    # Backend Jest tests
 make test-frontend   # Frontend Vitest tests
+make test-e2e        # Backend E2E tests (Supertest)
 ```
 
 ## Key Architecture Notes
@@ -41,9 +42,10 @@ make test-frontend   # Frontend Vitest tests
 - **Unit Conversion**: Mathematical base-unit conversions in `UnitConverterService`
 
 ## Environment Configuration
-- **Required**: `.env` file in `backend/` directory
+- **Required**: `.env` file in root directory (copy from `.env.example`)
 - **Critical variables**: `AI_API_URL`, `AI_API_KEY`, `AI_MODEL` for LLM integration
 - **Database/Redis**: Match docker-compose.yml defaults
+- **Setup**: Run `cp .env.example .env` and edit with actual API keys
 
 ## Code Standards
 - **Backend**: Strict TypeScript, class-validator DTOs, Dependency Injection

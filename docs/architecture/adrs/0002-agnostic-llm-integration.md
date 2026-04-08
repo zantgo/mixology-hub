@@ -39,7 +39,7 @@ Implement the Dependency Inversion Principle (DIP) for AI integration:
 
 ### Alternatives Considered
 1. **Direct Integration (Current Anti-Pattern)**:
-   - ❌ Hardcoded to Pollinations AI
+   - ❌ Hardcoded to specific AI provider
    - ❌ Requires code changes to switch providers
    - ❌ Creates technical debt
 
@@ -69,17 +69,15 @@ export interface IAiProvider {
 ### Configuration Strategy
 ```env
 # .env configuration
-AI_PROVIDER=llm-adapter  # or 'pollinations'
-AI_API_URL=https://api.openai.com/v1/chat/completions
-AI_API_KEY=sk-...
-AI_MODEL=gpt-4o-mini  # or 'deepseek-chat', 'claude-3-haiku', etc.
+AI_API_URL=https://api.deepseek.com/v1/chat/completions  # or OpenAI/Anthropic URLs
+AI_API_KEY=your_api_key_here
+AI_MODEL=deepseek-chat  # or 'gpt-4o-mini', 'claude-3-5-sonnet', etc.
 ```
 
 ### Provider Selection Logic
 The `AiService` uses a factory method to select the appropriate provider:
-1. If `AI_API_URL` is configured → Use `LlmAdapterService` (supports OpenAI-compatible APIs)
-2. Else if `AI_PROVIDER=pollinations` → Use `PollinationsAiService` (free tier fallback)
-3. Else → Default to Pollinations AI for backward compatibility
+1. If `AI_API_URL` is configured → Use `LlmAdapterService` (supports OpenAI-compatible APIs like DeepSeek, OpenAI, Anthropic)
+2. Else → Throw configuration error (AI integration requires API configuration)
 
 ## Migration Path
 1. **Phase 1**: Implement interface and adapter pattern (current)

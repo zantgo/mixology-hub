@@ -3,7 +3,7 @@ YELLOW=\033[1;33m
 RED=\033[0;31m
 NC=\033[0m 
 
-.PHONY: help start stop clean rebuild logs test-backend test-frontend setup
+.PHONY: help start stop clean rebuild logs test-backend test-frontend test-e2e setup
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -39,7 +39,11 @@ test-backend:
 
 test-frontend:
 	@echo "$(GREEN)Running Frontend Tests...$(NC)"
-	cd frontend && npm run test -- --watch=false
+	cd frontend && npm run test:ci
+
+test-e2e:
+	@echo "$(GREEN)Running Backend E2E Tests...$(NC)"
+	cd backend && npm run test:e2e
 
 test: test-backend test-frontend
 	@echo "$(GREEN)All tests completed successfully.$(NC)"

@@ -50,3 +50,11 @@ jobs:
       - name: Run Vitest
         working-directory: ./frontend
         run: npm run test -- --watch=false
+        
+      # Uncomment when Playwright E2E tests are added:
+      # - name: Install Playwright browsers
+      #   working-directory: ./frontend
+      #   run: npx playwright install --with-deps
+      # - name: Run Playwright E2E tests
+      #   working-directory: ./frontend
+      #   run: npm run test:e2e

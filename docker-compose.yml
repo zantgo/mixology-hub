@@ -34,14 +34,16 @@ services:
     container_name: mixology_backend
     ports:
       - "3000:3000"
+    env_file:
+      - ./.env
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USER: admin
-      DB_PASSWORD: secretpassword
-      DB_NAME: mixology_hub
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-admin}
+      DB_PASSWORD: ${DB_PASSWORD:-secretpassword}
+      DB_NAME: ${DB_NAME:-mixology_hub}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
     depends_on:
       postgres:
         condition: service_healthy

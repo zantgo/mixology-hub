@@ -212,6 +212,25 @@ Logs the history of AI requests.
 
 ---
 
+## 📐 Unit Conversion & Base Unit Catalog
+
+The `ingredients.baseUnit` field is a constrained enumeration that defines the fundamental measurement type for that ingredient. The backend `UnitConverterService` uses a static dictionary to convert any supported unit to a standard base unit (`ml` for volumes, `g` for weights).
+
+### Supported Units & Conversion Factors
+
+| Category | Base Unit | Supported Input Units | Conversion Factor (to Base) |
+|----------|-----------|----------------------|----------------------------|
+| Volume   | `ml`      | `ml`, `cl`, `dl`, `l`, `oz`, `tbsp`, `tsp`, `dash` | Defined in `UnitConverterService` |
+| Weight   | `g`       | `g`, `kg`, `oz`, `lb` | Defined in `UnitConverterService` |
+
+**Important:** The `baseUnit` column for an ingredient must be set to one of the base units (`ml` or `g`). The system uses this value to determine which conversion table to apply when comparing inventory quantities against recipe requirements.
+
+### Seeding the Ingredient Catalog
+
+The global `ingredients` table is initially populated via a migration or seeder script. Each ingredient's `baseUnit` is explicitly set based on its physical nature (e.g., liquids → `ml`, solids → `g`). This ensures the math engine always operates on consistent, comparable units.
+
+---
+
   
 
 ## 🛡️ Data Integrity Strategies
@@ -227,3 +246,45 @@ Logs the history of AI requests.
 2. **Eager Loading Optimization:**
 
 - On heavily queried pivot tables (like `CocktailIngredient`), the `Ingredient` relation is marked as `eager: true` in TypeORM. This ensures that the ingredient name is automatically joined and fetched without requiring manual `LEFT JOIN` boilerplate in every service method.
+
+3. **Decimal Column Transformers:**
+
+- PostgreSQL `decimal` columns are configured with TypeORM transformers to ensure proper JavaScript `number` type conversion. Without transformers, TypeORM may return decimal values as strings, breaking mathematical operations in the `UnitConverterService`.
+
+**Example Entity Configuration:**
+```typescript
+import { ColumnNumericTransformer } from '../utils/column-numeric.transformer';
+
+@Entity()
+export class UserInventory {
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    transformer: new ColumnNumericTransformer(), // Critical for math operations
+  })
+  quantity: number;
+
+  @Column({
+    type: 'decimal',
+    precision: 8,
+    scale: 2,
+    transformer: new ColumnNumericTransformer(),
+  })
+  amount: number;
+}
+
+// ColumnNumericTransformer implementation:
+export class ColumnNumericTransformer {
+  to(data: number): number {
+    return data;
+  }
+  
+  from(data: string): number {
+    if (data === null || data === undefined) return null;
+    return parseFloat(data);
+  }
+}
+```
+
+**Why this matters:** The `UnitConverterService` performs precise mathematical calculations for inventory management. String values would cause `NaN` errors or incorrect conversions, potentially allowing users to prepare cocktails they don't have ingredients for.

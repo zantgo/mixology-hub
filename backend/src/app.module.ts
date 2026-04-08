@@ -13,7 +13,8 @@ import { UtilsModule } from './utils/utils.module';
 @Module({
   imports:[
     ConfigModule.forRoot({
-      isGlobal: true, 
+      isGlobal: true,
+      envFilePath: ['.env', '../.env'],
     }),
     DatabaseModule,
     RedisCacheModule,

@@ -97,6 +97,11 @@ jobs:
       - Run Linter
       - Run Unit Tests
       - Run E2E Tests
+        # For Playwright E2E tests:
+        # - name: Install Playwright browsers
+        #   run: npx playwright install --with-deps
+        # - name: Run Playwright tests
+        #   run: npm run test:e2e
       - Build Backend
       - Build Frontend
       - Upload Artifacts

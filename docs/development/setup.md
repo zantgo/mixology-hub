@@ -38,47 +38,36 @@ A core architectural feature is the **Provider-Agnostic LLM Integration**. You c
 
   
 
-Create a `.env` file in the `backend/` directory:
+Copy the example environment file to create your local configuration:
 
-  
-
-```ini
-
-# --- Database Configuration (Matches docker-compose.yml) ---
-
-DB_HOST=postgres
-
-DB_PORT=5432
-
-DB_USER=admin
-
-DB_PASSWORD=secretpassword
-
-DB_NAME=mixology_hub
-
-  
-
-# --- Redis Configuration ---
-
-REDIS_HOST=redis
-
-REDIS_PORT=6379
-
-  
-
-# --- AI Provider Configuration (Plug-and-Play) ---
-
-# Example using DeepSeek (Compatible with OpenAI SDKs/Formats)
-
-AI_API_URL=https://api.deepseek.com/v1/chat/completions
-
-AI_API_KEY=your_deepseek_api_key_here
-
-AI_MODEL=deepseek-chat
-
+```bash
+cp .env.example .env
 ```
 
-*(Note: Never commit your actual API keys. A `.env.example` file is provided in the repository for reference).*
+Then edit `.env` to add your actual API keys (this file is ignored by git). The `.env.example` file contains all required variables including:
+
+```ini
+# --- Database Configuration (Matches docker-compose.yml) ---
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=admin
+DB_PASSWORD=secretpassword
+DB_NAME=mixology_hub
+
+# --- Redis Configuration ---
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# --- AI Provider Configuration (Plug-and-Play) ---
+# Example using DeepSeek (Compatible with OpenAI SDKs/Formats)
+AI_API_URL=https://api.deepseek.com/v1/chat/completions
+AI_API_KEY=your_deepseek_api_key_here
+AI_MODEL=deepseek-chat
+
+# Alternative configurations for OpenAI and Anthropic are also provided
+```
+
+*(Note: Never commit your actual API keys. The `.env` file should remain local and untracked by git).*
 
   
 
@@ -170,7 +159,7 @@ docker compose up -d postgres redis
 
 ### 2. Start the Backend (NestJS)
 
-*Important: Change `DB_HOST` and `REDIS_HOST` in your `.env` to `localhost`.*
+*Important: Change `DB_HOST` to `localhost` and `DB_PORT` to `5433` in your `.env` so NestJS can reach the Dockerized PostgreSQL from your host machine. Also change `REDIS_HOST` to `localhost`.*
 
 ```bash
 
@@ -257,3 +246,76 @@ Upon the first initialization of the NestJS module, the seeder automatically che
 **Why this matters:**
 
 This ensures that core database relations—such as Foreign Key constraints for `Cocktails`, `Favorites`, and `UserInventory`—function immediately out of the box without requiring the developer to manually register a user or set up a JWT flow for every local test run.
+
+---
+
+## 🗄️ Database Migrations with TypeORM
+
+MixologyHub uses TypeORM migrations to manage database schema changes. All migrations are stored in `backend/src/database/migrations/`.
+
+### Generating a New Migration
+
+When you modify entity classes (add/remove columns, change types, etc.), generate a migration:
+
+```bash
+cd backend
+
+# 1. Ensure the database is running
+docker compose up -d postgres
+
+# 2. Generate migration (auto-detects schema changes)
+npm run typeorm migration:generate -- src/database/migrations/YourMigrationName
+
+# Example:
+npm run typeorm migration:generate -- src/database/migrations/AddCocktailRatingColumn
+```
+
+### Running Migrations
+
+Migrations run automatically when the backend starts. For manual execution:
+
+```bash
+# Run pending migrations
+npm run typeorm migration:run
+
+# Revert last migration
+npm run typeorm migration:revert
+
+# Show migration status
+npm run typeorm migration:show
+```
+
+### Migration Best Practices
+
+1. **Always generate migrations from entity changes** - Never write raw SQL migrations manually
+2. **Test migrations locally** before committing
+3. **Include both `up` and `down` methods** for rollback capability
+4. **Use the Docker environment** - Ensure `DB_HOST=postgres` and `DB_PORT=5432` in your `.env`
+
+### Example Migration File
+
+```typescript
+import { MigrationInterface, QueryRunner } from 'typeorm';
+
+export class AddCocktailRatingColumn1712345678901 implements MigrationInterface {
+  name = 'AddCocktailRatingColumn1712345678901';
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "cocktails" ADD COLUMN "rating" decimal(3,2) DEFAULT NULL`,
+    );
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "cocktails" DROP COLUMN "rating"`,
+    );
+  }
+}
+```
+
+### Troubleshooting
+
+- **"No changes in database schema were found"**: Ensure your entity changes are saved and TypeORM can connect to the database
+- **Connection errors**: Verify Docker PostgreSQL is running and `.env` has correct credentials
+- **Migration conflicts**: If multiple developers create migrations, coordinate to avoid timestamp collisions

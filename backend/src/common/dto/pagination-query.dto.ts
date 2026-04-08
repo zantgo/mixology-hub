@@ -1,17 +1,18 @@
-import { IsOptional, IsPositive, Min } from 'class-validator';
+import { IsOptional, IsPositive, Min, Max, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Number of items to return (default: 10)', minimum: 1, default: 10 })
+  @ApiPropertyOptional({ description: 'Number of items to return (default: 10, max: 100)', minimum: 1, maximum: 100, default: 10 })
   @IsOptional()
   @IsPositive()
+  @Min(1)
+  @Max(100)
   @Type(() => Number)
-  limit?: number;
+  limit?: number = 10;
 
-  @ApiPropertyOptional({ description: 'Number of items to skip (default: 0)', minimum: 0, default: 0 })
+  @ApiPropertyOptional({ description: 'Opaque cursor string for cursor-based pagination' })
   @IsOptional()
-  @Min(0)
-  @Type(() => Number)
-  offset?: number;
+  @IsString()
+  cursor?: string;
 }

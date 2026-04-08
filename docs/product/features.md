@@ -64,7 +64,7 @@ Users can craft their own recipes using an interactive form:
 
 - **Dynamic Fields:** Using Angular's `FormArray`, users can add or remove an unlimited number of ingredients per cocktail.
 
-- **Validation:** Every ingredient row requires a `measure` (string for display) and `amount/unit` (for math logic). The form prevents submission unless all rows are fully defined.
+- **Validation & Parsing:** Every ingredient row captures a human-readable `measure` (e.g., "1 1/2 oz") which is automatically parsed into `amount` (1.5) and `unit` ("oz") for mathematical operations. The backend uses a `MeasureParserService` to handle fractions ("3/4"), mixed numbers ("1 1/2"), decimals ("0.5"), and qualitative measures ("a pinch").
 
   
 

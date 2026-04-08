@@ -43,23 +43,30 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
   
 ## 🏗️ High-Level Architecture
 
-  
 The system is fully containerized and divided into distinct micro-services operating within a Docker network:
- 
 
-```
-                           [ Angular SPA ]
-                       (Signals, RxJS, Reactive)
-                                  │
-                               REST API
-                                  │
-                          [ NestJS Backend ]
-                    (Gateway, Adapters, AI Prompts)
-                        /         |         \
-                       /          |          \
-           [ PostgreSQL ]     [ Redis ]     [ External APIs ]
-            (Relational       (Cache &       (TheCocktailDB &
-             Data Model)    Rate Limits)      DeepSeek/OpenAI)
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        Browser[Browser Client] -->|HTTP| Frontend
+    end
+    
+    subgraph "Application Layer"
+        Frontend[Angular 18 SPA<br/>Signals • RxJS • Reactive] -->|REST API| Backend
+        Backend[NestJS Backend<br/>Gateway • Adapters • AI Prompts]
+    end
+    
+    subgraph "Data & External Services"
+        Backend --> PostgreSQL[(PostgreSQL<br/>Relational Data Model)]
+        Backend --> Redis[(Redis<br/>Cache & Rate Limiting)]
+        Backend --> External[External APIs<br/>TheCocktailDB • LLM Providers]
+    end
+    
+    style Frontend fill:#dd0031,color:#fff
+    style Backend fill:#e0234e,color:#fff
+    style PostgreSQL fill:#336791,color:#fff
+    style Redis fill:#dc382d,color:#fff
+    style External fill:#10a37f,color:#fff
 ```
 
 ## 🚀 Quick Start
@@ -79,17 +86,13 @@ cd mixology-hub
 ```
 
   
-Configure your environment variables (specifically for the AI Provider) in a `.env` file in the `backend/` directory:
+Copy the example environment file and configure your variables:
 
-```ini
-
-AI_API_URL=https://api.deepseek.com/v1/chat/completions
-
-AI_API_KEY=your_api_key_here
-
-AI_MODEL=deepseek-chat
-
+```bash
+cp .env.example .env
 ```
+
+Then edit `.env` to add your actual API keys (this file is ignored by git). The `.env.example` file contains all required variables including AI provider configuration for DeepSeek, OpenAI, or Anthropic.
 
   
 ### 2. Start the Stack
@@ -122,30 +125,30 @@ To keep this README concise, detailed engineering documentation has been separat
  
 
 * **Architecture & System Design:**
-
-* [System Overview](./docs/architecture/system-overview.md)
-
-* [Backend Architecture](./docs/architecture/backend-architecture.md)
-
-* [Frontend Architecture](./docs/architecture/frontend-architecture.md)
+  * [System Overview](./docs/architecture/system-overview.md) – Containerized microservices, provider-agnostic AI integration
+  * [Backend Architecture](./docs/architecture/backend-architecture.md) – NestJS patterns, database optimization strategies
+  * [Frontend Architecture](./docs/architecture/frontend-architecture.md) – Angular 18+ Signals, zoneless change detection
+  * [Observability Strategy](./docs/architecture/observability.md) – Logging, monitoring, and tracing for production
+  * [Deployment Strategy & CI/CD](./docs/architecture/deployment-and-cicd.md) – Production deployment patterns and automation
+  * [Architecture Decision Records (ADRs)](./docs/architecture/adrs/) – Context on tech stack choices and trade-offs
 
 * **Data & APIs:**
-
-* [Database Schema & ERD](./docs/database/database-schema.md)
-
-* [REST API Specification](./docs/api/api-spec.md)
+  * [Database Schema & ERD](./docs/database/database-schema.md) – PostgreSQL design with unit conversion considerations
+  * [API Documentation & Testing Hub](./docs/api/README.md) – Postman collection, testing guide, and REST API specification
 
 * **Product & Features:**
-
-* [Features Deep-Dive](./docs/product/features.md)
-
-* [Future Roadmap](./docs/product/roadmap.md)
+  * [Product Use Cases (BDD/TDD)](./docs/product/use-cases.md) – Gherkin scenarios driving test-driven development
+  * [Features Deep-Dive](./docs/product/features.md) – Use cases and business logic implementation
+  * [Future Roadmap](./docs/product/roadmap.md) – Phased development plan and scalability roadmap
 
 * **Development & DevOps:**
+  * [Local Setup Guide](./docs/development/setup.md) – Docker-first development environment
+  * [Coding Standards](./docs/development/coding-standards.md) – TypeScript best practices, LLM security patterns
+  * [Testing Strategy](./docs/development/testing.md) – TDD approach, testing pyramid, Red-Green-Refactor
+  * [TypeORM Decimal Transformers](./docs/development/typeorm-decimal-transformers.md) – Handling floating-point precision issues in Node.js
 
-* [Local Setup Guide](./docs/development/setup.md)
-
-* [Coding Standards](./docs/development/coding-standards.md)
+* **Security:**
+  * [LLM Prompt Security](./docs/security/llm-prompt-security.md) – Defending against Prompt Injection attacks
 
   
 
