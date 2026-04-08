@@ -1,7 +1,7 @@
 import { Injectable, Logger, InternalServerErrorException, BadGatewayException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
-import { IAiProvider } from './ai-provider.interface';
+import { IAiProvider } from '../ai-provider.interface';
 
 @Injectable()
 export class PollinationsAiService implements IAiProvider {

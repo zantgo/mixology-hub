@@ -23,6 +23,8 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
 - **⚡ High Performance Caching:** Integrates **Redis** to cache external API searches (TTL-based), drastically reducing third-party API calls and improving response times.
 - **🔐 Modern Reactive UI:** The frontend is built with **Angular 18+**, utilizing Standalone Components, the new Zoneless Change Detection (`provideZonelessChangeDetection`), Angular Signals for state management, and strict RxJS streams.
 
+> **🔐 Note on Authentication (MVP State):** To simplify the local developer experience and code review process, Auth is currently bypassed. A `SeederService` automatically provisions a mock user (`mock@test.com`) on boot to satisfy all Foreign Key database constraints. Full JWT/OAuth2 implementation is slated for the next roadmap phase.
+
 ## 🏗️ High-Level Architecture
 
 The system is fully containerized and divided into distinct micro-services operating within a Docker network:
