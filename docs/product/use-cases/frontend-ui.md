@@ -84,12 +84,14 @@
 * **Then** the frontend globally applies a `dark-theme` CSS class to the document root.
 * **And** overrides OS-level `prefers-color-scheme` settings.
 
-**UC 7.14: Image Upload UX vs. URL Paste**
-* **Given** a user is creating a custom cocktail or ingredient.
-* **When** they interact with the image field.
-* **Then** the UI clearly indicates this is a "Paste Image URL" field (not a binary file upload).
+**UC 7.14: MVP Image URL Constraint (No File Upload)**
+* **Given** a user is creating a custom cocktail or ingredient on their mobile device.
+* **When** they interact with the image field expecting to upload a photo.
+* **Then** the UI clearly indicates this is a "Paste Image URL" field only (no binary file upload in MVP).
+* **And** shows a tooltip explaining: "For MVP, please use a public image URL. Future versions will support photo uploads."
 * **And** the UI attempts to preview the image URL on `blur` or `debounce`.
 * **And** shows a clear error if the pasted link is a broken image or blocked by CORS.
+* **Technical Constraint:** MVP scope excludes S3/R2 file upload infrastructure. Users must use existing public image URLs.
 
 **UC 7.15: Search State Preservation Across Navigation**
 * **Given** a user searches for "Martini" with filters (ABV: 20-30%, Glass: Martini Glass).
@@ -97,3 +99,85 @@
 * **Then** the frontend stores the search state (query, filters, pagination) in a service or URL query params.
 * **And** when they navigate back to the search results, the exact same state is restored.
 * **And** the search results are reloaded from cache or re-queried if cache expired.
+
+**UC 7.16: Optimistic UI Updates for Favorites**
+* **Given** the user clicks the "Heart/Favorite" button on a cocktail card.
+* **When** the action is triggered.
+* **Then** the Angular Signal immediately toggles `is_favorited = true` so the UI reacts instantly.
+* **And** if the background HTTP `POST /favorites` request fails, the signal reverts to `false` and displays an error toast.
+
+**UC 7.17: Admin Dashboard - Pending Ingredients Queue**
+* **Given** an Admin user with `role: 'admin'` logs into the system.
+* **When** they navigate to the Admin Dashboard.
+* **Then** the UI displays a queue of user-submitted custom ingredients awaiting approval.
+* **And** provides action buttons to "Approve as Global" or "Reject with Reason".
+* **And** shows real-time updates as ingredients are processed.
+
+**UC 7.18: Admin Dashboard - Ingredient Merge Interface**
+* **Given** an Admin identifies duplicate ingredients in the global catalog.
+* **When** they select "Merge Ingredients" from the Admin Dashboard.
+* **Then** the UI presents a side-by-side comparison of ingredient properties.
+* **And** allows selecting which ingredient becomes the canonical version.
+* **And** shows a preview of affected cocktails and user inventories before committing the merge.
+
+**UC 7.19: Refresh Token Race Condition (SPA)**
+* **Given** multiple concurrent HTTP requests fail with 401 Unauthorized.
+* **When** the Angular HTTP Interceptor catches them.
+* **Then** it intercepts and queues all subsequent requests using an RxJS `BehaviorSubject<boolean>` (isRefreshing lock).
+* **And** makes exactly ONE call to `/auth/refresh`.
+* **And** upon success, releases the queue and replays all pending requests with the new Access Token.
+* **And** prevents triggering token reuse detection (UC 9.15) by avoiding multiple simultaneous refresh requests.
+
+**UC 7.20: Density Conversion Boundary UI**
+* **Given** a user selects an ingredient defined by Mass (g).
+* **When** they attempt to type a Volume unit (ml) in the UI dropdown.
+* **Then** the Angular UI actively filters the select options to only show compatible units.
+* **And** prevents the user from submitting a request that is guaranteed to fail validation.
+* **And** displays a tooltip explaining the conversion constraint when incompatible units are attempted.
+
+**UC 7.21: Offline Queue Conflict Resolution**
+* **Given** a user prepares a cocktail while offline (optimistic UI deducts inventory).
+* **And** the physical database no longer has sufficient stock (depleted by a roommate/another session).
+* **When** the app comes back online and the background sync processes the queue.
+* **Then** the backend returns a `400 Bad Request` for that specific queued action.
+* **And** the Angular Sync Service catches the 400 error, drops the item from the queue, and forces a hard refresh of the user's inventory signal from the server.
+* **And** displays a toast: "Sync failed: Inventory was changed on another device."
+* **And** prevents the queue from getting stuck on conflicting operations.
+
+**UC 7.22: External Image Hotlinking Privacy (Referrer-Policy)**
+* **Given** the frontend renders cocktail images sourced directly from external APIs (e.g., TheCocktailDB).
+* **When** the browser makes the GET request for the image asset.
+* **Then** the Angular `<img [src]="imageUrl">` tag includes `referrerpolicy="no-referrer"`.
+* **And** prevents the external API from tracking the MixologyHub application domain or user metrics via referer headers.
+* **And** reduces the risk of hotlinking blocks by external image providers.
+
+**UC 7.23: Bulk Offline Queue Sync**
+* **Given** a user prepared 3 drinks while entirely offline.
+* **When** the device regains network connectivity.
+* **Then** the Angular Sync Service batches all 3 preparations into a single `POST /sync/preparations` request.
+* **And** the backend processes them in a single database transaction, returning an array of success/failure statuses for each item.
+* **And** prevents network instability from sending 10 queued items sequentially when the app comes back online.
+
+**UC 7.24: Asynchronous AI Loading State Recovery**
+* **Given** a user requests an AI recipe and navigates to the "Inventory" page while waiting.
+* **When** the AI generation completes successfully in the background.
+* **Then** a global Angular Signal (`pendingAiRecipe`) catches the result.
+* **And** triggers a non-intrusive Toast notification: "Your AI Recipe is ready!".
+* **And** when the user navigates back to the AI Bartender view, the generated recipe is preserved and rendered instead of being lost.
+* **And** the recipe remains available for 1 hour or until the user generates a new one.
+
+**UC 7.25: Cross-Tab State Synchronization**
+* **Given** a user has MixologyHub open in Tab A and Tab B.
+* **When** the user clicks "Prepare Drink" in Tab A, deducting 50ml of Vodka.
+* **Then** the Angular application uses `BroadcastChannel API` or listens to `window.addEventListener('storage')` for `localStorage` changes.
+* **And** instantly updates the Angular Signal in Tab B to reflect the new inventory state without requiring a manual refresh.
+* **And** displays a subtle notification in Tab B: "Inventory updated from another tab".
+* **Implementation:** Uses a shared service that publishes state changes to `BroadcastChannel` and subscribes to receive updates from other tabs.
+
+**UC 7.26: LocalStorage Limit for Offline Queue**
+* **Given** a user is offline for an extended period and queues 150 preparations.
+* **When** the browser's `localStorage` or IndexedDB approaches its storage quota (typically 5-10MB).
+* **Then** the Angular Sync Service enforces a maximum queue size (e.g., 50 actions).
+* **And** disables further offline actions with a warning: "Offline queue full. Please sync before adding more actions."
+* **And** provides a "Clear Oldest" button to manually prune the queue.
+* **And** prevents browser memory crashes and data loss by proactively managing storage limits.

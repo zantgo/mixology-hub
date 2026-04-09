@@ -139,3 +139,50 @@
 * **When** they trigger `POST /ai/generate`.
 * **Then** the backend injects the user's unit preference into the system prompt (e.g., "Use metric measurements like ml and grams").
 * **And** the AI directly outputs clean, localized measurements, preventing messy decimal conversions in the UI.
+
+**UC 5.22: Bounding AI Response Payload Size (DoS Prevention)**
+* **Given** the external LLM provider responds with an abnormally massive payload (e.g., > 100KB).
+* **When** the AI Adapter receives the HTTP stream.
+* **Then** the HTTP client automatically aborts the connection once the byte limit is exceeded.
+* **And** prevents `JSON.parse()` from executing on massive strings, protecting the Node.js event loop from crashing.
+
+**UC 5.23: Concurrent AI Generation Lock (Debounce)**
+* **Given** an authenticated user clicks "Generate" three times rapidly.
+* **When** the `POST /ai/generate` endpoint receives the concurrent requests.
+* **Then** the backend utilizes a Redis distributed lock (or in-memory lock) keyed to the `user_id`.
+* **And** processes the first request.
+* **And** rejects the subsequent two requests immediately with a `429 Too Many Requests` or `409 Conflict` before hitting the LLM provider.
+* **And** prevents duplicate expensive LLM calls from double-clicks or network retries.
+
+**UC 5.24: AI Quota Deletion Loophole**
+* **Given** a user generates an AI recipe, consuming 1 quota slot.
+* **When** the transient recipe is deleted (manually or via Cron).
+* **Then** the daily quota remains consumed.
+* **And** the quota validation queries historical generation events (or a dedicated `ai_usage_logs` counter) rather than just counting active rows in `ai_generated_recipes`.
+* **And** prevents users from bypassing the 20/day limit by deleting their own recipes.
+
+**UC 5.25: Atomic AI Quota Enforcement (Race Condition)**
+* **Given** a user has exactly 1 generation left in their daily quota.
+* **When** they maliciously send 5 concurrent `POST /ai/generate` requests simultaneously.
+* **Then** the backend utilizes an atomic Redis `INCR` counter (or a database row-level lock) to evaluate the quota.
+* **And** exactly 1 request succeeds.
+* **And** the remaining 4 requests are rejected instantly with `429 Too Many Requests` before hitting the LLM API.
+* **And** prevents quota bypass through race conditions that could cost excessive LLM API fees.
+
+**UC 5.26: AI Entity Resolution (Ingredient Mapping)**
+* **Context:** The AI generates strings (e.g., "Fresh squeezed lime"). Your math engine needs UUIDs.
+* **Given** the user saves an AI recipe containing "Fresh squeezed lime".
+* **When** save-as-cocktail is triggered.
+* **Then** the system runs the string through `IngredientService.resolveBaseIngredient()` (using the exact same logic as External APIs in UC 3.21) to map it to the global "Lime Juice" UUID.
+* **And** only creates a new custom ingredient if the similarity score to existing global ingredients is below a strict threshold (e.g., < 0.8 similarity).
+* **And** prevents ingredient duplication by fuzzy-matching AI-generated strings to existing global catalog entries.
+* **Database Implementation:** Uses PostgreSQL's `pg_trgm` extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm;` for efficient trigram similarity matching (`similarity() > 0.8`) instead of slow Levenshtein distance or inaccurate `LIKE` queries.
+
+**UC 5.27: AI Quota Evasion via Account Deletion**
+* **Context:** Malicious users could delete and re-register accounts to bypass daily AI generation limits.
+* **Given** a malicious user exhausts their 20/day AI quota.
+* **When** they delete their account (GDPR deletion) and immediately re-register with the same email.
+* **Then** the system checks Redis for an IP-based quota using hashed IP address as key.
+* **And** retains a hashed identifier (SHA-256 of email + IP) in Redis for 24 hours to track re-registration attempts.
+* **And** successfully blocks the user from bypassing the LLM cost controls by enforcing a combined limit of 20 generations per 24 hours across all accounts created from the same IP/email combination.
+* **And** logs suspicious re-registration patterns for admin review and potential IP blocking.

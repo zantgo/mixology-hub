@@ -155,42 +155,71 @@
 
 **UC 2.25: Fuzzy Search / Typo Tolerance**
 * **Given** a user searches for "Margaritta" (typo).
+* **When** the query is processed by the Aggregator.
+* **Then** the local PostgreSQL `pg_trgm` (trigram) extension or Levenshtein distance matching identifies "Margarita".
+* **And** successfully returns the corrected results without requiring an exact string match.
 
-**UC 2.26: Filtering by ABV Range**
-* **Given** a user wants to find cocktails with alcohol content between 15% and 30%.
+*Note: UC 2.26-2.32 (ABV Range, Glass Type, Category, Preparation Time, Difficulty, Dietary Restrictions, Seasonal Availability) are Phase 2 features that require additional data sources beyond TheCocktailDB. These will be implemented when we expand our data partnerships.*
 
-**UC 2.27: Filtering by Glass Type**
-* **Given** a user wants to find cocktails served in a "Martini Glass".
-
-**UC 2.28: Filtering by Category**
-* **Given** a user wants to find cocktails in the "Classic" category.
-
-**UC 2.29: Filtering by Preparation Time**
-* **Given** a user wants to find cocktails that take less than 5 minutes to prepare.
-
-**UC 2.30: Filtering by Difficulty**
-* **Given** a user wants to find cocktails with "Easy" difficulty.
-
-**UC 2.31: Filtering by Dietary Restrictions**
-* **Given** a user wants to find cocktails that are "Vegan" or "Gluten-Free".
-
-**UC 2.32: Filtering by Seasonal Availability**
-* **Given** a user wants to find "Summer" cocktails.
-
-**UC 2.33: Filtering by Ingredient Synonyms**
+**UC 2.26: Filtering by Ingredient Synonyms**
 * **Given** a user searches for cocktails with "Triple Sec".
 * **When** the user has "Curaçao" in their inventory (a synonym).
 * **Then** the makeability engine recognizes the synonym relationship.
 * **And** returns cocktails requiring "Triple Sec" as makeable.
 
-**UC 2.34: Personalization Injection in Search Results**
+**UC 2.27: Personalization Injection in Search Results**
 * **Given** a user has favorited a cocktail and rated it 4.5 stars.
 * **When** the user searches and that cocktail appears in results.
 * **Then** the backend cross-references the user's session.
 * **And** dynamically injects `is_favorited: true` and `user_rating: 4.5` into the response DTO so the frontend can render filled hearts/stars.
 
-**UC 2.35: Direct Access Guard for Private Cocktails**
+**UC 2.28: Direct Access Guard for Private Cocktails**
 * **Given** User A creates a cocktail with `is_public: false`.
 * **When** User B obtains the UUID and attempts to directly call `GET /cocktails/<uuid>`.
 * **Then** the backend verifies ownership.
 * **And** returns a `403 Forbidden` or `404 Not Found` to prevent URL sharing of private recipes.
+
+**UC 2.29: Flattening numbered API keys into arrays**
+* **Given** TheCocktailDB returns a flat object with `strIngredient1: "Rum"`, `strMeasure1: "2 oz"`, `strIngredient2: null`, `strIngredient3: ""`
+* **When** the Aggregator Service maps the data to the internal DTO.
+* **Then** it dynamically loops through keys 1-15.
+* **And** stops processing when it encounters a `null` or empty string.
+* **And** successfully outputs a clean `ingredients: []` array containing only valid entries.
+
+**UC 2.30: Rating a Cocktail**
+* **Given** a user views a cocktail they've prepared or favorited.
+* **When** they submit a 1-5 star rating via `POST /cocktails/:id/rate`.
+* **Then** the system inserts or updates their row in the `COCKTAIL_RATINGS` pivot table.
+* **And** triggers an asynchronous background job to recalculate and update the cached `rating` average on the `COCKTAILS` table.
+* **And** returns the updated average rating in the response.
+
+**UC 2.31: Updating a Rating**
+* **Given** a user has previously rated a cocktail 4 stars.
+* **When** they change their rating to 5 stars via `POST /cocktails/:id/rate`.
+* **Then** the system performs an UPSERT on the `COCKTAIL_RATINGS` table.
+* **And** recalculates the average rating (removing the old 4, adding the new 5).
+* **And** updates the cached `rating` column on the `COCKTAIL_RATINGS` table atomically.
+
+**UC 2.32: Handling External API Image Link Rot**
+* **Given** the user views an external cocktail from TheCocktailDB where the `strDrinkThumb` URL has expired or returns a 403/404.
+* **When** the browser attempts to render the image.
+* **Then** the Angular `onError` directive catches the broken image.
+* **And** immediately swaps it for the local `cocktail-placeholder.jpg`.
+* **And** prevents the UI layout from collapsing.
+* **And** logs the broken image URL to analytics for monitoring external API image reliability.
+
+**UC 2.33: Bounding Custom Cocktail Recipe Amounts**
+* **Given** a malicious user creates a custom cocktail.
+* **When** they pass an ingredient with `amount: 999999999.99`, `unit: 'ml'`.
+* **Then** the global validation pipe rejects the payload with `400 Bad Request`.
+* **And** enforces maximum bounds for ingredient amounts (e.g., `max: 100000` for volume in ml, `max: 1000` for count-based ingredients).
+* **And** prevents PostgreSQL `decimal(10,2)` overflow errors upon saving the recipe.
+* **And** provides clear error message: "Ingredient amount cannot exceed 100,000 ml (100 liters)".
+
+**UC 2.34: External API Payload Size Limit (JSON Bomb)**
+* **Given** the CocktailAggregatorService queries TheCocktailDB (or any future 3rd party API).
+* **When** the external API gets compromised and returns a 50MB JSON payload (Billion Laughs / JSON Bomb attack).
+* **Then** the Axios/HTTP client strictly bounds the `maxContentLength` to 5MB.
+* **And** aborts the connection before `JSON.parse()` crashes the Node.js V8 event loop.
+* **And** returns a graceful fallback error: "External API response too large" while continuing to serve local database results.
+* **And** logs the oversized response attempt for security monitoring.

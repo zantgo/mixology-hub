@@ -17,3 +17,10 @@
 * **When** API endpoints are called.
 * **Then** response times, database query durations, and external API latencies are tracked.
 * **And** dashboards display performance trends and identify bottlenecks.
+
+**UC 13.4: Zero-Result Search Tracking (Product Growth)**
+* **Given** a user searches for "Malort" and gets 0 unified results.
+* **When** the response is returned.
+* **Then** a fire-and-forget background event logs the "Zero Result Query" to the database.
+* **And** this allows Admins to see highly requested missing ingredients/cocktails to manually add to the global catalog.
+* **And** tracks search patterns to identify gaps in the ingredient/cocktail database for product improvement.

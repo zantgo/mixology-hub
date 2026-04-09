@@ -335,27 +335,27 @@ describe('Cocktail Image Error Handling', () => {
   it('should handle network errors gracefully', fakeAsync(() => {
     const component = TestBed.createComponent(CocktailImageComponent).componentInstance;
     const errorSpy = spyOn(console, 'error');
-    
+
     component.imageUrl = 'https://example.com/cocktail.jpg';
     component.ngOnInit();
     tick();
-    
+
     // Simulate network error
     const img = component.imageElement.nativeElement;
     img.dispatchEvent(new Event('error'));
     tick();
-    
+
     expect(component.showFallback).toBe(true);
     expect(errorSpy).toHaveBeenCalledWith('Failed to load cocktail image:', expect.anything());
   }));
 
   it('should handle CORS errors gracefully', fakeAsync(() => {
     const component = TestBed.createComponent(CocktailImageComponent).componentInstance;
-    
+
     component.imageUrl = 'https://external-site.com/cocktail.jpg'; // Might have CORS restrictions
     component.ngOnInit();
     tick();
-    
+
     // Simulate CORS error
     const img = component.imageElement.nativeElement;
     const errorEvent = new ErrorEvent('error', { 
@@ -363,7 +363,7 @@ describe('Cocktail Image Error Handling', () => {
     });
     img.dispatchEvent(errorEvent);
     tick();
-    
+
     expect(component.showFallback).toBe(true);
   }));
 
@@ -371,14 +371,190 @@ describe('Cocktail Image Error Handling', () => {
     const component = TestBed.createComponent(CocktailImageComponent).componentInstance;
     component.imageUrl = 'https://slow-server.com/cocktail.jpg';
     component.loadTimeoutMs = 100; // Short timeout for test
-    
+
     component.ngOnInit();
-    
+
     // Don't trigger load or error events
     tick(150); // Past timeout
-    
+
     expect(component.showFallback).toBe(true);
   }));
+
+  it('should implement an async validation job that periodically verifies public cocktail image URLs and nullifies dead links to prevent client-side waterfall errors', async () => {
+    const imageValidationService = new ImageValidationService();
+    const mockCocktailRepository = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'cocktail1', imageUrl: 'https://example.com/alive.jpg', isPublic: true },
+        { id: 'cocktail2', imageUrl: 'https://example.com/dead.jpg', isPublic: true },
+        { id: 'cocktail3', imageUrl: null, isPublic: true }
+      ]),
+      save: jest.fn()
+    };
+
+    const mockHttpClient = {
+      head: jest.fn()
+        .mockResolvedValueOnce({ status: 200 }) // Alive
+        .mockRejectedValueOnce(new Error('404 Not Found')) // Dead
+    };
+
+    imageValidationService.cocktailRepository = mockCocktailRepository;
+    imageValidationService.httpClient = mockHttpClient;
+
+    await imageValidationService.validatePublicCocktailImages();
+
+    // Should check both URLs
+    expect(mockHttpClient.head).toHaveBeenCalledTimes(2);
+    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/alive.jpg', { timeout: 5000 });
+    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/dead.jpg', { timeout: 5000 });
+
+    // Should save null for dead link
+    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'cocktail2',
+        imageUrl: null
+      })
+    );
+
+    // Should NOT save for alive link or already null link
+    expect(mockCocktailRepository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('should respect rate limits when checking external image URLs', async () => {
+    const imageValidationService = new ImageValidationService();
+    const mockCocktailRepository = {
+      find: jest.fn().mockResolvedValue(
+        Array(100).fill(null).map((_, i) => ({
+          id: `cocktail${i}`,
+          imageUrl: `https://example.com/image${i}.jpg`,
+          isPublic: true
+        }))
+      ),
+      save: jest.fn()
+    };
+
+    const mockHttpClient = {
+      head: jest.fn().mockResolvedValue({ status: 200 })
+    };
+
+    const mockRateLimiter = {
+      acquire: jest.fn().mockResolvedValue(true)
+    };
+
+    imageValidationService.cocktailRepository = mockCocktailRepository;
+    imageValidationService.httpClient = mockHttpClient;
+    imageValidationService.rateLimiter = mockRateLimiter;
+
+    await imageValidationService.validatePublicCocktailImages();
+
+    // Should use rate limiter for each request
+    expect(mockRateLimiter.acquire).toHaveBeenCalledTimes(100);
+    expect(mockHttpClient.head).toHaveBeenCalledTimes(100);
+  });
+
+  it('should skip private cocktail images during validation', async () => {
+    const imageValidationService = new ImageValidationService();
+    const mockCocktailRepository = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'public1', imageUrl: 'https://example.com/public.jpg', isPublic: true },
+        { id: 'private1', imageUrl: 'https://example.com/private.jpg', isPublic: false }
+      ]),
+      save: jest.fn()
+    };
+
+    const mockHttpClient = {
+      head: jest.fn().mockResolvedValue({ status: 200 })
+    };
+
+    imageValidationService.cocktailRepository = mockCocktailRepository;
+    imageValidationService.httpClient = mockHttpClient;
+
+    await imageValidationService.validatePublicCocktailImages();
+
+    // Should only check public cocktail
+    expect(mockHttpClient.head).toHaveBeenCalledTimes(1);
+    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/public.jpg', { timeout: 5000 });
+  });
+
+  it('should handle different types of image URL failures', async () => {
+    const imageValidationService = new ImageValidationService();
+    const mockCocktailRepository = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'cocktail1', imageUrl: 'https://example.com/404.jpg', isPublic: true },
+        { id: 'cocktail2', imageUrl: 'https://example.com/timeout.jpg', isPublic: true },
+        { id: 'cocktail3', imageUrl: 'https://example.com/ssl.jpg', isPublic: true }
+      ]),
+      save: jest.fn()
+    };
+
+    const mockHttpClient = {
+      head: jest.fn()
+        .mockRejectedValueOnce({ status: 404, message: 'Not Found' })
+        .mockRejectedValueOnce(new Error('Timeout'))
+        .mockRejectedValueOnce(new Error('SSL certificate error'))
+    };
+
+    imageValidationService.cocktailRepository = mockCocktailRepository;
+    imageValidationService.httpClient = mockHttpClient;
+
+    await imageValidationService.validatePublicCocktailImages();
+
+    // Should nullify all failed URLs
+    expect(mockCocktailRepository.save).toHaveBeenCalledTimes(3);
+    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'cocktail1', imageUrl: null })
+    );
+    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'cocktail2', imageUrl: null })
+    );
+    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'cocktail3', imageUrl: null })
+    );
+  });
+
+  it('should log validation results for monitoring', async () => {
+    const imageValidationService = new ImageValidationService();
+    const mockCocktailRepository = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'cocktail1', imageUrl: 'https://example.com/alive.jpg', isPublic: true },
+        { id: 'cocktail2', imageUrl: 'https://example.com/dead.jpg', isPublic: true }
+      ]),
+      save: jest.fn()
+    };
+
+    const mockHttpClient = {
+      head: jest.fn()
+        .mockResolvedValueOnce({ status: 200 })
+        .mockRejectedValueOnce(new Error('404'))
+    };
+
+    const mockLogger = {
+      info: jest.fn(),
+      warn: jest.fn()
+    };
+
+    imageValidationService.cocktailRepository = mockCocktailRepository;
+    imageValidationService.httpClient = mockHttpClient;
+    imageValidationService.logger = mockLogger;
+
+    await imageValidationService.validatePublicCocktailImages();
+
+    // Should log results
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      'Image validation completed',
+      expect.objectContaining({
+        totalChecked: 2,
+        alive: 1,
+        dead: 1
+      })
+    );
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Dead image URL detected and nullified',
+      expect.objectContaining({
+        cocktailId: 'cocktail2',
+        imageUrl: 'https://example.com/dead.jpg'
+      })
+    );
+  });
 });
 ```
 

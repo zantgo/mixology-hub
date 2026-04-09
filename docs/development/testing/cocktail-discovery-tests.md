@@ -1541,5 +1541,30 @@ describe('CocktailService - Private Cocktail Guards', () => {
       .toThrow('Forbidden: You do not have permission to view this recipe');
   });
 });
+
+**Example TDD for Flat Key Mapping (UC 2.36):**
+```typescript
+describe('CocktailAggregatorService - Flat Key Mapping', () => {
+  it('should flatten strIngredient1-15 and strMeasure1-15 into an ingredients array', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const rawApiResponse = {
+      idDrink: '11000',
+      strDrink: 'Mojito',
+      strIngredient1: 'Rum',
+      strMeasure1: '2 oz',
+      strIngredient2: 'Mint',
+      strMeasure2: '5 leaves',
+      strIngredient3: null, // Should stop here
+      strIngredient4: 'Sugar' // Should be ignored because 3 was null
+    };
+    
+    const result = await aggregator.mapExternalToInternal(rawApiResponse);
+    
+    expect(result.ingredients).toHaveLength(2);
+    expect(result.ingredients[0].name).toBe('Rum');
+    expect(result.ingredients[1].name).toBe('Mint');
+  });
+});
 ```
 ```

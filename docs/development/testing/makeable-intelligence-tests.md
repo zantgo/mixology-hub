@@ -731,6 +731,93 @@ describe('IngredientService - Circular Reference Detection', () => {
       .toThrow('Circular reference detected');
   });
 });
-```
+
+**Example TDD for Density Math (UC 3.24):**
+```typescript
+describe('UnitConverterService - Density Math', () => {
+  it('should convert mass to volume using specific gravity/density', () => {
+    const converter = new UnitConverterService();
+    // Honey density ≈ 1.42 g/ml
+    const result = converter.convertMassToVolume(50, 'g', 'ml', 1.42);
+    
+    // 50g / 1.42 = 35.21ml
+    expect(result).toBeCloseTo(35.21, 2);
+  });
+
+  it('should convert volume to mass using specific gravity/density', () => {
+    const converter = new UnitConverterService();
+    // Honey density ≈ 1.42 g/ml
+    const result = converter.convertVolumeToMass(35.21, 'ml', 'g', 1.42);
+    
+    // 35.21ml * 1.42 = 50g
+    expect(result).toBeCloseTo(50, 2);
+  });
+
+  it('should validate makeability with density conversions', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // Cocktail requires 50g of Honey
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'honey', amount: 50, unit: 'g' }
+    ]);
+    
+    // User has 100ml of Honey
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'honey', quantity: 100, unit: 'ml' }
+    ]);
+    
+    // Mock density lookup
+    jest.spyOn(makeableService.ingredientService, 'getDensity')
+      .mockResolvedValue(1.42); // g/ml
+    
+    const result = await makeableService.checkMakeable('honey_cocktail_id', 1);
+    
+    // 50g honey = 35.21ml, user has 100ml
+    expect(result.isMakeable).toBe(true);
+  });
+
+  it('should fail makeability when density conversion shows insufficient inventory', async () => {
+    const makeableService = new MakeableCocktailsService();
+    
+    // Cocktail requires 200g of Honey
+    jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'honey', amount: 200, unit: 'g' }
+    ]);
+    
+    // User has 100ml of Honey
+    jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
+      { ingredientId: 'honey', quantity: 100, unit: 'ml' }
+    ]);
+    
+    jest.spyOn(makeableService.ingredientService, 'getDensity')
+      .mockResolvedValue(1.42);
+    
+    const result = await makeableService.checkMakeable('honey_cocktail_id', 1);
+    
+    // 200g honey = 140.85ml, user has only 100ml
+    expect(result.isMakeable).toBe(false);
+    expect(result.missingAmounts[0].amount).toBeCloseTo(40.85, 2); // Missing ml
+  });
+
+  it('should handle ingredients with default density of 1.0', () => {
+    const converter = new UnitConverterService();
+    
+    // Water has density ≈ 1.0 g/ml
+    const result = converter.convertMassToVolume(100, 'g', 'ml', 1.0);
+    
+    // 100g water = 100ml
+    expect(result).toBe(100);
+  });
+
+  it('should throw error when density is not provided for mass↔volume conversion', () => {
+    const converter = new UnitConverterService();
+    
+    expect(() => converter.convertMassToVolume(100, 'g', 'ml', null))
+      .toThrow('Density required for mass to volume conversion');
+    
+    expect(() => converter.convertVolumeToMass(100, 'ml', 'g', null))
+      .toThrow('Density required for volume to mass conversion');
+  });
+});
 ```
 ```

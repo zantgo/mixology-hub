@@ -857,6 +857,690 @@ describe('Cocktail Preparation - Synonym Greedy Deduction', () => {
     );
   });
 });
+
+**Example TDD for Undo with Manual Stock Addition (UC 4.14):**
+```typescript
+it('should correctly sum inventory if manual additions occurred before undo', async () => {
+  const inventoryService = new UserInventoryService();
+  
+  // 1. Initial Prep (10oz - 2oz = 8oz)
+  const txId = await inventoryService.prepareCocktail('cocktail123', 2);
+  
+  // 2. Manual UI Addition (+5oz = 13oz)
+  await inventoryService.addToInventory('user123', { ingredientId: 'vodka', quantity: 5 });
+  
+  // 3. Undo Prep (+2oz)
+  await inventoryService.undoCocktailPreparation(txId);
+  
+  // Final balance should be 15oz
+  const balance = await inventoryService.getInventoryQuantity('user123', 'vodka');
+  expect(balance).toBe(15);
+});
+```
+
+**Example TDD for Idempotency (UC 4.19):**
+```typescript
+describe('Preparation Service - Idempotency', () => {
+  it('should prevent double inventory restoration on duplicate undo', async () => {
+    const preparationService = new PreparationService();
+    const preparationLogRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'log-123',
+        user_id: 'user123',
+        cocktail_id: 'cocktail-456',
+        servings: 1,
+        deducted_ingredients: [{ ingredientId: 'vodka', amount: 2, unit: 'oz' }],
+        created_at: new Date(Date.now() - 5 * 60 * 1000), // 5 minutes ago
+        undone: false
+      }),
+      save: jest.fn().mockImplementation((log) => Promise.resolve({ ...log, undone: true }))
+    };
+    
+    const inventoryService = {
+      restoreFromPreparation: jest.fn().mockResolvedValue(undefined)
+    };
+    
+    preparationService.preparationLogRepo = preparationLogRepo;
+    preparationService.inventoryService = inventoryService;
+    
+    // First undo - should succeed
+    await preparationService.undoPreparation('log-123', 'user123');
+    
+    // Update mock to reflect undone state
+    preparationLogRepo.findOne.mockResolvedValue({
+      id: 'log-123',
+      undone: true
+    });
+    
+    // Second undo - should be idempotent
+    const result = await preparationService.undoPreparation('log-123', 'user123');
+    
+    // Should detect already undone and not restore inventory again
+    expect(inventoryService.restoreFromPreparation).toHaveBeenCalledTimes(1);
+    expect(result.undone).toBe(true);
+  });
+  
+  it('should handle concurrent undo requests with database lock', async () => {
+    const preparationService = new PreparationService();
+    let isProcessing = false;
+    
+    const preparationLogRepo = {
+      findOne: jest.fn().mockImplementation(() => {
+        if (isProcessing) {
+          // Simulate database lock/constraint during concurrent access
+          throw new Error('Row is locked');
+        }
+        isProcessing = true;
+        return Promise.resolve({
+          id: 'log-123',
+          undone: false
+        });
+      }),
+      save: jest.fn().mockResolvedValue({ id: 'log-123', undone: true })
+    };
+    
+    preparationService.preparationLogRepo = preparationLogRepo;
+    
+    // Concurrent undo attempts
+    const undoPromises = [
+      preparationService.undoPreparation('log-123', 'user123'),
+      preparationService.undoPreparation('log-123', 'user123')
+    ];
+    
+    const results = await Promise.allSettled(undoPromises);
+    
+    // One should succeed, one should fail due to lock
+    const successes = results.filter(r => r.status === 'fulfilled');
+    const failures = results.filter(r => r.status === 'rejected');
+    
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+  });
+});
+
+**Example TDD for Idempotency Keys for Preparation (UC 4.21):**
+```typescript
+describe('Preparation Service - Idempotency Key', () => {
+  it('should not deduct inventory twice for the same Idempotency-Key', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    // Arrange
+    const idempotencyKey = 'mobile-click-uuid-123';
+    const userId = 'userA';
+    const cocktailId = 'cocktail-1';
+    
+    // Mock Redis cache check
+    jest.spyOn(redisService, 'get').mockResolvedValue(null); // First call: key not found
+    jest.spyOn(redisService, 'setex').mockResolvedValue('OK'); // Cache the result
+    jest.spyOn(redisService, 'get').mockResolvedValueOnce(null).mockResolvedValueOnce(
+      JSON.stringify({ status: 200, body: { success: true } }) // Second call: cached response
+    );
+    
+    // Mock inventory service
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act: Fire two requests simulating a network retry
+    await preparationService.prepareCocktail(cocktailId, 1, userId, idempotencyKey);
+    await preparationService.prepareCocktail(cocktailId, 1, userId, idempotencyKey);
+    
+    // Assert: Inventory deducted only ONCE, Redis caching caught the second
+    expect(inventoryService.deductInventory).toHaveBeenCalledTimes(1);
+    expect(redisService.get).toHaveBeenCalledWith(`idempotency:${idempotencyKey}`);
+  });
+
+  it('should return cached response for duplicate idempotency key', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    const idempotencyKey = 'test-key-456';
+    const cachedResponse = { status: 200, body: { success: true, preparationId: 'prep-789' } };
+    
+    // Mock Redis returning cached response
+    jest.spyOn(redisService, 'get').mockResolvedValue(JSON.stringify(cachedResponse));
+    
+    preparationService.redisService = redisService;
+    
+    // Act: Request with existing idempotency key
+    const result = await preparationService.prepareCocktail('cocktail-1', 1, 'user123', idempotencyKey);
+    
+    // Assert: Should return cached response without processing
+    expect(result).toEqual(cachedResponse.body);
+    expect(redisService.get).toHaveBeenCalledWith(`idempotency:${idempotencyKey}`);
+  });
+
+  it('should generate idempotency key if not provided', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    // Mock UUID generation
+    const mockUuid = 'auto-generated-uuid';
+    jest.spyOn(preparationService, 'generateIdempotencyKey').mockReturnValue(mockUuid);
+    jest.spyOn(redisService, 'get').mockResolvedValue(null);
+    jest.spyOn(redisService, 'setex').mockResolvedValue('OK');
+    
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act: Request without idempotency key
+    await preparationService.prepareCocktail('cocktail-1', 1, 'user123');
+    
+    // Assert: Should generate and use auto key
+    expect(preparationService.generateIdempotencyKey).toHaveBeenCalled();
+    expect(redisService.setex).toHaveBeenCalledWith(
+      `idempotency:${mockUuid}`,
+      3600, // 1 hour TTL
+      expect.any(String)
+    );
+  });
+
+  it('should handle Redis failure gracefully', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    // Mock Redis failure
+    jest.spyOn(redisService, 'get').mockRejectedValue(new Error('Redis unavailable'));
+    
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act: Should still process request even if Redis fails
+    await expect(
+      preparationService.prepareCocktail('cocktail-1', 1, 'user123', 'test-key')
+    ).resolves.not.toThrow();
+    
+    // Assert: Should have attempted Redis, then proceeded anyway
+    expect(redisService.get).toHaveBeenCalled();
+    expect(inventoryService.deductInventory).toHaveBeenCalled();
+  });
+
+  it('should use different idempotency keys for different users', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    const idempotencyKey = 'same-key';
+    
+    // Mock Redis: first call returns null, second returns cached
+    let callCount = 0;
+    jest.spyOn(redisService, 'get').mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) return Promise.resolve(null); // User A first request
+      if (callCount === 2) return Promise.resolve(JSON.stringify({ status: 200 })); // User A second request (cached)
+      if (callCount === 3) return Promise.resolve(null); // User B first request (different user)
+      return Promise.resolve(null);
+    });
+    
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act: Same key, different users
+    await preparationService.prepareCocktail('cocktail-1', 1, 'userA', idempotencyKey);
+    await preparationService.prepareCocktail('cocktail-1', 1, 'userA', idempotencyKey); // Should be cached
+    await preparationService.prepareCocktail('cocktail-1', 1, 'userB', idempotencyKey); // Different user, should process
+    
+    // Assert: User A: 1 deduction, User B: 1 deduction
+    expect(inventoryService.deductInventory).toHaveBeenCalledTimes(2);
+  });
+
+  it('should include idempotency key in response headers', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    const idempotencyKey = 'header-test-key';
+    jest.spyOn(redisService, 'get').mockResolvedValue(null);
+    jest.spyOn(redisService, 'setex').mockResolvedValue('OK');
+    
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act
+    const result = await preparationService.prepareCocktail('cocktail-1', 1, 'user123', idempotencyKey);
+    
+    // Assert: Response should include idempotency key
+    expect(result.headers).toBeDefined();
+    expect(result.headers['Idempotency-Key']).toBe(idempotencyKey);
+  });
+
+  it('should expire idempotency keys after TTL', async () => {
+    const preparationService = new PreparationService();
+    const redisService = new RedisService();
+    
+    const idempotencyKey = 'expiring-key';
+    
+    // Mock: First call caches, second call after TTL returns null
+    jest.spyOn(redisService, 'get')
+      .mockResolvedValueOnce(null) // First request
+      .mockResolvedValueOnce(null); // Second request after TTL expired
+    
+    jest.spyOn(redisService, 'setex').mockResolvedValue('OK');
+    
+    const inventoryService = {
+      deductInventory: jest.fn().mockResolvedValue(true)
+    };
+    
+    preparationService.redisService = redisService;
+    preparationService.inventoryService = inventoryService;
+    
+    // Act: Two requests with same key after TTL would expire
+    await preparationService.prepareCocktail('cocktail-1', 1, 'user123', idempotencyKey);
+    await preparationService.prepareCocktail('cocktail-1', 1, 'user123', idempotencyKey);
+    
+    // Assert: Should process both since cache expired
+    expect(inventoryService.deductInventory).toHaveBeenCalledTimes(2);
+  });
+ });
+```
+
+**Example TDD for Zero-Volume Rinse Edge Case (UC 4.22):**
+```typescript
+describe('Cocktail Preparation - Zero-Volume Rinse Edge Case', () => {
+  it('should validate presence but NOT deduct volume for "rinse" ingredients', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // User has exactly 10ml of Absinthe
+    jest.spyOn(inventoryService, 'getInventoryQuantity').mockResolvedValue(10);
+    const mockDeduct = jest.spyOn(inventoryService, 'deductInventory');
+    
+    // Cocktail requires an Absinthe Rinse
+    await inventoryService.prepareCocktail('sazerac_id', 1, [
+      { ingredientId: 'absinthe', amount: null, unit: 'rinse' }
+    ]);
+    
+    // Transaction succeeds (because they HAVE absinthe)
+    // BUT deductInventory is NEVER called for Absinthe
+    expect(mockDeduct).not.toHaveBeenCalledWith(expect.any(String), 'absinthe', expect.any(Number));
+  });
+
+  it('should fail preparation if rinse ingredient is completely absent', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // User has NO Absinthe (0ml)
+    jest.spyOn(inventoryService, 'getInventoryQuantity').mockResolvedValue(0);
+    
+    // Cocktail requires an Absinthe Rinse
+    await expect(
+      inventoryService.prepareCocktail('sazerac_id', 1, [
+        { ingredientId: 'absinthe', amount: null, unit: 'rinse' }
+      ])
+    ).rejects.toThrow('Missing required rinse ingredient: absinthe');
+  });
+
+  it('should handle mixed rinse and regular ingredients in same cocktail', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // User has Rye and Absinthe
+    jest.spyOn(inventoryService, 'getInventoryQuantity')
+      .mockImplementation(async (_, ingredientId) => {
+        if (ingredientId === 'rye') return 100; // 100ml Rye
+        if (ingredientId === 'absinthe') return 10; // 10ml Absinthe
+        return 0;
+      });
+    
+    const mockDeduct = jest.spyOn(inventoryService, 'deductInventory');
+    
+    // Sazerac: 2oz Rye + Absinthe Rinse
+    await inventoryService.prepareCocktail('sazerac_id', 1, [
+      { ingredientId: 'rye', amount: 60, unit: 'ml' },
+      { ingredientId: 'absinthe', amount: null, unit: 'rinse' }
+    ]);
+    
+    // Should deduct Rye (60ml) but NOT Absinthe
+    expect(mockDeduct).toHaveBeenCalledTimes(1);
+    expect(mockDeduct).toHaveBeenCalledWith(expect.any(String), 'rye', 60);
+    expect(mockDeduct).not.toHaveBeenCalledWith(expect.any(String), 'absinthe', expect.any(Number));
+  });
+
+  it('should treat "rinse" as a special unit type in validation', () => {
+    const measureParser = new MeasureParserService();
+    
+    const parsedRinse = measureParser.parse('Absinthe rinse');
+    expect(parsedRinse.unit).toBe('rinse');
+    expect(parsedRinse.amount).toBeNull();
+    expect(parsedRinse.requiresPresenceOnly).toBe(true);
+    
+    const parsedDash = measureParser.parse('2 dashes Angostura');
+    expect(parsedDash.unit).toBe('dash');
+    expect(parsedDash.amount).toBe(2);
+    expect(parsedDash.requiresPresenceOnly).toBe(false);
+  });
+
+  it('should include rinse ingredients in preparation logs with special flag', async () => {
+    const preparationService = new CocktailPreparationService();
+    const inventoryService = new UserInventoryService();
+    
+    jest.spyOn(inventoryService, 'getInventoryQuantity').mockResolvedValue(10);
+    const mockLog = jest.spyOn(preparationService, 'logPreparation').mockResolvedValue({} as any);
+    
+    preparationService.inventoryService = inventoryService;
+    
+    await preparationService.prepareCocktail('sazerac_id', 1, 'user123', [
+      { ingredientId: 'absinthe', amount: null, unit: 'rinse' }
+    ]);
+    
+    // Log should include rinse with special flag
+    expect(mockLog).toHaveBeenCalledWith(
+      'user123',
+      'sazerac_id',
+      1,
+      expect.arrayContaining([
+        expect.objectContaining({
+          ingredientId: 'absinthe',
+          amount: null,
+          unit: 'rinse',
+          isRinse: true
+        })
+      ])
+    );
+  });
+
+  it('should not restore rinse ingredients during undo', async () => {
+    const preparationService = new CocktailPreparationService();
+    const inventoryService = new UserInventoryService();
+    
+    // Mock preparation log with rinse
+    const preparationLog = {
+      id: 'log-123',
+      userId: 'user123',
+      cocktailId: 'sazerac_id',
+      servings: 1,
+      deductedIngredients: [
+        { ingredientId: 'rye', amount: 60, unit: 'ml' },
+        { ingredientId: 'absinthe', amount: null, unit: 'rinse', isRinse: true }
+      ],
+      createdAt: new Date(Date.now() - 5 * 60000)
+    };
+    
+    jest.spyOn(preparationService.preparationLogRepo, 'findOne').mockResolvedValue(preparationLog);
+    const mockRestore = jest.spyOn(inventoryService, 'restoreInventory').mockResolvedValue();
+    
+    preparationService.inventoryService = inventoryService;
+    
+    await preparationService.undoPreparation('log-123', 'user123');
+    
+    // Should restore Rye but NOT Absinthe (rinse)
+    expect(mockRestore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ingredients: [
+          { ingredientId: 'rye', amount: 60, unit: 'ml' }
+          // Absinthe rinse NOT included
+        ]
+      })
+    );
+  });
+
+  it('should handle multiple rinse ingredients in same cocktail', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // User has both Absinthe and Pastis
+    jest.spyOn(inventoryService, 'getInventoryQuantity')
+      .mockImplementation(async (_, ingredientId) => {
+        if (ingredientId === 'absinthe') return 5;
+        if (ingredientId === 'pastis') return 8;
+        return 0;
+      });
+    
+    const mockDeduct = jest.spyOn(inventoryService, 'deductInventory');
+    
+    // Experimental cocktail with multiple rinses
+    await inventoryService.prepareCocktail('experimental_id', 1, [
+      { ingredientId: 'gin', amount: 60, unit: 'ml' },
+      { ingredientId: 'absinthe', amount: null, unit: 'rinse' },
+      { ingredientId: 'pastis', amount: null, unit: 'rinse' }
+    ]);
+    
+    // Should deduct Gin only
+    expect(mockDeduct).toHaveBeenCalledTimes(1);
+    expect(mockDeduct).toHaveBeenCalledWith(expect.any(String), 'gin', 60);
+  });
+
+  it('should validate rinse ingredients exist even with 0.01ml quantity', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // User has barely any Absinthe (0.01ml - trace amount)
+    jest.spyOn(inventoryService, 'getInventoryQuantity').mockResolvedValue(0.01);
+    
+    // Should succeed - any amount > 0 is sufficient for rinse
+    await expect(
+      inventoryService.prepareCocktail('sazerac_id', 1, [
+        { ingredientId: 'absinthe', amount: null, unit: 'rinse' }
+      ])
+    ).resolves.not.toThrow();
+   });
+});
+
+**Example TDD for Security & Overflow (UC 4.23):**
+```typescript
+describe('Cocktail Preparation - Security & Overflow', () => {
+  it('should block Integer Overflow attacks on serving size', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Attacker passes max integer to cause DB overflow or negative bypass
+    const maliciousServings = 2147483647; 
+    
+    await expect(
+      prepService.prepareCocktail('cocktail123', maliciousServings, 'userA')
+    ).rejects.toThrow('Servings must not exceed maximum allowed (1000)');
+  });
+
+  it('should validate serving size is positive integer', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Test various malicious inputs
+    const testCases = [
+      { servings: 0, shouldThrow: true, message: 'Servings must be at least 1' },
+      { servings: -1, shouldThrow: true, message: 'Servings must be positive' },
+      { servings: 1001, shouldThrow: true, message: 'Servings must not exceed maximum allowed (1000)' },
+      { servings: 1.5, shouldThrow: true, message: 'Servings must be an integer' },
+      { servings: 10, shouldThrow: false, message: 'Should accept valid serving size' }
+    ];
+    
+    for (const testCase of testCases) {
+      if (testCase.shouldThrow) {
+        await expect(
+          prepService.prepareCocktail('cocktail123', testCase.servings, 'userA')
+        ).rejects.toThrow(testCase.message);
+      } else {
+        // Mock successful preparation
+        jest.spyOn(prepService.inventoryService, 'deductInventory').mockResolvedValue(true);
+        await expect(
+          prepService.prepareCocktail('cocktail123', testCase.servings, 'userA')
+        ).resolves.not.toThrow();
+      }
+    }
+  });
+
+  it('should prevent decimal overflow in quantity calculations', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Mock cocktail requiring 0.01ml per serving
+    jest.spyOn(prepService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'vodka', amount: 0.01, unit: 'ml' }
+    ]);
+    
+    // Attacker requests huge number of servings to cause overflow
+    const maliciousServings = 1000000; // 1 million servings
+    
+    // 0.01 * 1,000,000 = 10,000ml (10L) - should be valid calculation
+    // But system should reject due to serving limit first
+    await expect(
+      prepService.prepareCocktail('cocktail123', maliciousServings, 'userA')
+    ).rejects.toThrow('Servings must not exceed maximum allowed (1000)');
+  });
+
+  it('should validate total volume bounds for part-based cocktails', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Mock part-based cocktail
+    jest.spyOn(prepService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'gin', amount: 1, unit: 'part' },
+      { ingredientId: 'vermouth', amount: 1, unit: 'part' }
+    ]);
+    
+    // Attacker tries to cause overflow with huge total volume
+    const maliciousVolume = 1000000; // 1,000L
+    
+    await expect(
+      prepService.prepareCocktail('martini_id', 1, 'userA', { totalVolumeMl: maliciousVolume })
+    ).rejects.toThrow('Total volume cannot exceed 10,000 ml (10 liters)');
+  });
+
+  it('should prevent negative quantity attacks via batch preparation', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Mock inventory service
+    const mockInventory = {
+      getInventoryQuantity: jest.fn().mockResolvedValue(100),
+      deductInventory: jest.fn().mockImplementation((userId, ingredientId, amount) => {
+        // Should reject negative amounts
+        if (amount < 0) {
+          throw new Error('Cannot deduct negative amount');
+        }
+        return Promise.resolve(true);
+      })
+    };
+    
+    prepService.inventoryService = mockInventory;
+    
+    // Attacker tries to pass negative servings
+    await expect(
+      prepService.prepareCocktail('cocktail123', -5, 'userA')
+    ).rejects.toThrow('Servings must be positive');
+  });
+
+  it('should sanitize ingredient IDs to prevent NoSQL/SQL injection', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Malicious ingredient IDs
+    const maliciousIds = [
+      "vodka'; DROP TABLE users; --",
+      '{"$ne": null}',
+      '1 OR 1=1',
+      '<script>alert(1)</script>'
+    ];
+    
+    for (const maliciousId of maliciousIds) {
+      // Mock cocktail with malicious ingredient
+      jest.spyOn(prepService, 'getCocktailRequirements').mockResolvedValue([
+        { ingredientId: maliciousId, amount: 2, unit: 'oz' }
+      ]);
+      
+      // Should sanitize or reject the ID
+      await expect(
+        prepService.prepareCocktail('cocktail123', 1, 'userA')
+      ).rejects.toThrow(); // Should throw some validation error
+    }
+  });
+
+  it('should enforce maximum batch size for bulk operations', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Attacker tries to prepare 1000 cocktails at once
+    const bulkRequest = Array(1000).fill({ cocktailId: 'cocktail123', servings: 1 });
+    
+    await expect(
+      prepService.prepareCocktailsBulk('userA', bulkRequest)
+    ).rejects.toThrow('Maximum 100 cocktails per bulk request');
+  });
+
+  it('should prevent timing attacks on inventory checks', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    // Mock inventory check with consistent timing regardless of existence
+    const mockInventory = {
+      getInventoryQuantity: jest.fn().mockImplementation(async (userId, ingredientId) => {
+        // Always take same time regardless of whether ingredient exists
+        await new Promise(resolve => setTimeout(resolve, 100)); // Fixed delay
+        return ingredientId === 'existing-vodka' ? 100 : 0;
+      })
+    };
+    
+    prepService.inventoryService = mockInventory;
+    
+    // Time both requests
+    const start1 = Date.now();
+    await expect(
+      prepService.prepareCocktail('cocktail123', 1, 'userA', [
+        { ingredientId: 'existing-vodka', amount: 50, unit: 'ml' }
+      ])
+    ).resolves.not.toThrow();
+    const duration1 = Date.now() - start1;
+    
+    const start2 = Date.now();
+    await expect(
+      prepService.prepareCocktail('cocktail123', 1, 'userA', [
+        { ingredientId: 'non-existent', amount: 50, unit: 'ml' }
+      ])
+    ).rejects.toThrow();
+    const duration2 = Date.now() - start2;
+    
+    // Timing difference should be minimal (defense against timing attacks)
+    const timingDifference = Math.abs(duration1 - duration2);
+    expect(timingDifference).toBeLessThan(50); // Within 50ms
+  });
+
+  it('should validate unit strings to prevent injection', async () => {
+    const prepService = new CocktailPreparationService();
+    
+    const maliciousUnits = [
+      'ml\'); DROP TABLE users; --',
+      'oz<script>',
+      'part\nDELETE FROM inventory',
+      'dash\0' // Null byte
+    ];
+    
+    for (const maliciousUnit of maliciousUnits) {
+      await expect(
+        prepService.prepareCocktail('cocktail123', 1, 'userA', [
+          { ingredientId: 'vodka', amount: 50, unit: maliciousUnit }
+        ])
+      ).rejects.toThrow('Invalid unit');
+    }
+  });
+
+  it('should prevent recursion attacks in hierarchical ingredient resolution', async () => {
+    const prepService = new CocktailPreparationService();
+    const ingredientService = new IngredientService();
+    
+    // Mock circular hierarchy: A → B → C → A
+    jest.spyOn(ingredientService, 'resolveHierarchy').mockImplementation(async (ingredientId) => {
+      // Simulate infinite recursion
+      if (ingredientId === 'circular-a') return ['circular-b'];
+      if (ingredientId === 'circular-b') return ['circular-c'];
+      if (ingredientId === 'circular-c') return ['circular-a']; // Circular!
+      return [];
+    });
+    
+    prepService.ingredientService = ingredientService;
+    
+    // Should detect circular reference and throw
+    await expect(
+      prepService.prepareCocktail('cocktail123', 1, 'userA', [
+        { ingredientId: 'circular-a', amount: 50, unit: 'ml' }
+      ])
+    ).rejects.toThrow('Circular reference detected in ingredient hierarchy');
+  });
+});
 ```
 ```
 ```

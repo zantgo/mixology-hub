@@ -30,6 +30,14 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'warn',
       '@typescript-eslint/no-unsafe-argument': 'warn',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
+      // Custom rule to encourage decimal.js usage for inventory math
+      '@typescript-eslint/no-restricted-syntax': [
+        'warn',
+        {
+          selector: 'BinaryExpression[operator=/[+\\-*/]/]',
+          message: 'For inventory mathematical operations, use decimal.js methods (.plus(), .minus(), .times(), .div()) instead of native operators to avoid floating-point precision errors.',
+        },
+      ],
     },
   },
 );

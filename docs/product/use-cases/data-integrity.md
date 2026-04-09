@@ -53,3 +53,13 @@
 * **Then** the custom ingredient remains `is_global: false` (not in the global search catalog).
 * **But** the system grants "Read-Only context visibility" to User B when viewing that specific recipe.
 * **And** allows User B to add that specific ingredient to their inventory directly from the recipe page so they can prepare it.
+
+**UC 10.9: Concurrent Custom Cocktail Modification & Preparation**
+* **Given** User A is preparing a cocktail (transaction started).
+* **And** User B concurrently submits an edit to that exact cocktail's ingredients.
+* **When** both transactions attempt to commit.
+* **Then** the database utilizes `READ COMMITTED` isolation level (PostgreSQL default).
+* **And** the preparation transaction strictly uses the ingredient snapshot from the moment the transaction began.
+* **And** the edit transaction succeeds independently, updating the cocktail for future preparations.
+* **And** prevents data corruption by ensuring each transaction operates on a consistent snapshot.
+* **Implementation:** Uses PostgreSQL's MVCC (Multi-Version Concurrency Control) to maintain consistency without explicit locking.

@@ -198,7 +198,7 @@ Creates a new custom cocktail recipe. The cocktail is automatically linked to th
 - **Validation:**
   - `name`: Required, string, max 100 chars
   - `instructions`: Required, string
-  - `imageUrl`: Optional, must be valid URL format if provided
+  - `imageUrl`: Optional, must be valid URL format if provided (string only, no binary uploads)
   - `isPublic`: Optional boolean (default: true)
   - `ingredients`: Required array with at least 1 ingredient
 
@@ -273,27 +273,77 @@ Deletes a custom cocktail. Only the original creator can delete their cocktail.
 - **Error (404 Not Found):** Cocktail not found
 
    
-
+    
 #### `POST /cocktails/:id/prepare`
 
 Calculates required ingredient amounts, mathematically converts units to match the user's inventory, and deducts the stock within an ACID-compliant database transaction.
 
-  
+**Headers:**
+- `Idempotency-Key`: Optional UUID string to prevent duplicate preparations from network retries. If provided and matches a recent successful preparation, returns the previous response without performing the operation again.
 
-- **Response (200 OK):**
-
+**Request Body (optional):**
 ```json
-
-{ "message": "Cocktail Mojito prepared successfully!" }
-
+{
+  "servings": 1,
+  "partSize": 30
+}
 ```
 
-- **Error (400 Bad Request):**
+**Parameters:**
+- `servings`: Optional number of servings (default: 1, min: 1, max: 1000)
+- `partSize`: Optional size in ml for part-based recipes (default: 30, min: 1, max: 10000)
 
+**Response (200 OK):**
 ```json
+{
+  "message": "Cocktail Mojito prepared successfully!",
+  "preparationId": "uuid-of-preparation-log",
+  "deductedIngredients": [
+    {
+      "ingredientId": "rum-uuid",
+      "ingredientName": "Rum",
+      "amount": 2,
+      "unit": "oz",
+      "remainingStock": 480
+    }
+  ]
+}
+```
 
-{ "statusCode": 400, "message": "Not enough stock for ingredient: light rum" }
+**Response (200 OK - Idempotent Replay):**
+If the same `Idempotency-Key` is reused within 24 hours:
+```json
+{
+  "message": "Cocktail already prepared with this idempotency key",
+  "preparationId": "uuid-of-original-preparation",
+  "preparedAt": "2026-04-08T10:30:00.000Z",
+  "isReplay": true
+}
+```
 
+**Headers (Idempotent Response):**
+- `X-Idempotent-Replayed`: `true` when returning cached response
+
+**Error (400 Bad Request):**
+```json
+{
+  "statusCode": 400,
+  "message": "Not enough stock for ingredient: light rum",
+  "details": {
+    "ingredient": "light rum",
+    "required": 2,
+    "available": 1.5,
+    "unit": "oz"
+  }
+}
+```
+
+**Error (400 Bad Request - Part Size):**
+```json
+{
+  "statusCode": 400,
+  "message": "Part size (50.0 L) exceeds maximum allowed (10.0 L)"
+}
 ```
 
   
@@ -465,6 +515,39 @@ Fetches a paginated list of cocktails authored by the authenticated user.
 }
 ```
 
+#### `GET /users/me/preparations` (Get Recent Preparations)
+Fetches the user's recent preparation logs, primarily used to populate the "Undo" history UI.
+
+- **Query Parameters:** `limit` (default 10)
+- **Response (200 OK):** Array of `PREPARATION_LOGS` objects, including a calculated boolean `can_undo` (true if `created_at` is within the last 15 minutes and `undone` is false).
+```json
+{
+  "data": [
+    {
+      "id": "prep-uuid-123",
+      "cocktail_id": "cocktail-uuid-456",
+      "external_cocktail_id": "11000",
+      "cocktail_name": "Mojito",
+      "servings": 2,
+      "deducted_ingredients": [
+        {
+          "ingredient_id": "rum-uuid",
+          "ingredient_name": "Rum",
+          "amount": 4,
+          "unit": "oz"
+        }
+      ],
+      "created_at": "2026-04-08T10:30:00.000Z",
+      "undone": false,
+      "can_undo": true
+    }
+  ],
+  "nextCursor": "2026-04-08T10:30:00.000Z_abc123",
+  "hasMore": false,
+  "limit": 10
+}
+```
+
 #### `GET /users/me/preferences` (Get User Preferences)
 Fetches the authenticated user's preferences (unit system, theme).
 
@@ -472,7 +555,10 @@ Fetches the authenticated user's preferences (unit system, theme).
 ```json
 {
   "unitSystem": "metric",
-  "theme": "system"
+  "theme": "system",
+  "defaultPartSize": 30,
+  "showTutorial": true,
+  "enableOfflineMode": true
 }
 ```
 
@@ -483,17 +569,199 @@ Updates the authenticated user's preferences.
 ```json
 {
   "unitSystem": "imperial",
-  "theme": "dark"
+  "theme": "dark",
+  "defaultPartSize": 50,
+  "showTutorial": false,
+  "enableOfflineMode": false
 }
 ```
 
 - **Validation:**
   - `unitSystem`: Optional, must be either "metric" or "imperial"
   - `theme`: Optional, must be either "light", "dark", or "system"
+  - `defaultPartSize`: Optional, integer between 1 and 10000
+  - `showTutorial`: Optional boolean
+  - `enableOfflineMode`: Optional boolean
 
 - **Response (200 OK):** Updated preferences object
 - **Error (400 Bad Request):** Invalid input data
 - **Error (401 Unauthorized):** User not authenticated
+
+#### `POST /offline/sync` (Bulk Offline Queue Sync)
+Processes multiple offline operations in a single request to reduce network overhead during reconnection.
+
+**Headers:**
+- `Idempotency-Key`: Optional UUID string for the entire batch operation
+
+**Request Body:**
+```json
+{
+  "operations": [
+    {
+      "type": "prepare_cocktail",
+      "cocktailId": "cocktail-uuid-123",
+      "servings": 2,
+      "timestamp": "2026-04-08T10:30:00.000Z",
+      "localId": "local-operation-uuid"
+    },
+    {
+      "type": "add_inventory",
+      "ingredientId": "ingredient-uuid-456",
+      "quantity": 500,
+      "unit": "ml",
+      "timestamp": "2026-04-08T10:31:00.000Z",
+      "localId": "local-operation-uuid-2"
+    },
+    {
+      "type": "update_preferences",
+      "preferences": { "theme": "dark" },
+      "timestamp": "2026-04-08T10:32:00.000Z",
+      "localId": "local-operation-uuid-3"
+    }
+  ]
+}
+```
+
+**Response (207 Multi-Status):**
+```json
+{
+  "results": [
+    {
+      "localId": "local-operation-uuid",
+      "status": "success",
+      "serverId": "server-preparation-uuid",
+      "timestamp": "2026-04-08T10:30:05.000Z"
+    },
+    {
+      "localId": "local-operation-uuid-2",
+      "status": "success",
+      "serverId": "server-inventory-uuid",
+      "timestamp": "2026-04-08T10:31:05.000Z"
+    },
+    {
+      "localId": "local-operation-uuid-3",
+      "status": "conflict",
+      "error": "Preferences already updated to this value",
+      "resolvedValue": { "theme": "dark" }
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "success": 2,
+    "conflict": 1,
+    "failed": 0
+  }
+}
+```
+
+**Error (400 Bad Request):** Invalid operation format or validation failure
+**Error (413 Payload Too Large):** Too many operations in single batch (max: 100)
+**Error (429 Too Many Requests):** Rate limit exceeded for batch operations
+
+---
+
+### 7. Admin Moderation (Admin Only)
+
+#### `GET /admin/reported-content`
+Fetches reported content for moderation review.
+
+**Headers:**
+- `Authorization: Bearer <admin-token>`
+
+**Query Parameters:**
+- `status`: Filter by status (`pending`, `reviewed`, `resolved`, `dismissed`)
+- `type`: Filter by content type (`cocktail`, `comment`, `user`)
+- `limit`, `cursor`: Standard pagination
+
+**Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "report-uuid-123",
+      "contentType": "cocktail",
+      "contentId": "cocktail-uuid-456",
+      "reason": "inappropriate_content",
+      "description": "Contains offensive language",
+      "reportedBy": "user-uuid-789",
+      "reportedAt": "2026-04-08T10:30:00.000Z",
+      "status": "pending",
+      "contentSnapshot": {
+        "name": "Offensive Cocktail Name",
+        "createdBy": "author-uuid",
+        "createdAt": "2026-04-07T14:20:00.000Z"
+      }
+    }
+  ],
+  "nextCursor": "cursor-string",
+  "hasMore": true,
+  "limit": 20
+}
+```
+
+#### `POST /admin/reported-content/:id/review`
+Updates the status of a reported content item.
+
+**Headers:**
+- `Authorization: Bearer <admin-token>`
+
+**Request Body:**
+```json
+{
+  "status": "resolved",
+  "action": "hide_content",
+  "notes": "Content violates community guidelines",
+  "notifyReporter": true,
+  "notifyAuthor": true
+}
+```
+
+**Validation:**
+- `status`: Required, must be `reviewed`, `resolved`, or `dismissed`
+- `action`: Optional, depends on status (`no_action`, `hide_content`, `warn_author`, `suspend_author`, `delete_content`)
+- `notes`: Optional string for internal documentation
+- `notifyReporter`: Optional boolean (default: false)
+- `notifyAuthor`: Optional boolean (default: false)
+
+**Response (200 OK):**
+```json
+{
+  "id": "report-uuid-123",
+  "status": "resolved",
+  "action": "hide_content",
+  "resolvedAt": "2026-04-08T11:30:00.000Z",
+  "resolvedBy": "admin-uuid",
+  "contentStatus": "hidden",
+  "notificationsSent": {
+    "reporter": true,
+    "author": true
+  }
+}
+```
+
+**Error (401 Unauthorized):** Not an admin user
+**Error (404 Not Found):** Report not found
+**Error (409 Conflict):** Report already resolved
+
+---
+
+### 8. Authentication
+
+#### `POST /auth/register`
+- **Request Body:** `{ "email": "...", "password": "..." }`
+- **Response (201):** User object (without password hash).
+
+#### `POST /auth/login`
+- **Request Body:** `{ "email": "...", "password": "..." }`
+- **Response (200):** `{ "accessToken": "jwt..." }`
+- **Headers:** `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict`
+
+#### `POST /auth/refresh`
+- **Headers:** Requires the `refreshToken` HttpOnly cookie.
+- **Response (200):** `{ "accessToken": "new_jwt..." }` (and sets a newly rotated `refreshToken` cookie).
+
+#### `POST /auth/logout`
+- **Response (200):** Clears the HttpOnly cookie and updates `last_logout_timestamp` in the DB.
 
 ---
 

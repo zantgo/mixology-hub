@@ -130,6 +130,75 @@ test.describe('AI Bartender Flow', () => {
     await expect(page.locator('.cocktail-card')).toContainText('AI Generated');
   });
 });
+
+### Deterministic AI Testing Strategy
+```typescript
+test.describe('E2E - AI Determinism & Cost Control', () => {
+  test('Should mock LLM network requests during CI/CD execution', async ({ page }) => {
+    // Intercept outbound network requests to the AI provider
+    await page.route('**/api/ai/generate', async route => {
+      const json = {
+        id: "mock-uuid",
+        prompt: "Ingredients: Vodka",
+        generated_recipe: {
+          name: "Mocked Vodka Drink",
+          ingredients: [{ name: "vodka", measure: "2 oz" }],
+          instructions: "Test instructions"
+        }
+      };
+      await route.fulfill({ json });
+    });
+
+    await page.goto('/ai-bartender');
+    await page.fill('textarea[name="ingredients"]', 'Vodka');
+    await page.click('button:has-text("Generate Recipe")');
+    
+    // Assert against the mocked deterministic response
+    await expect(page.locator('.recipe-name')).toContainText('Mocked Vodka Drink');
+  });
+
+  test('Should handle AI API timeouts gracefully', async ({ page }) => {
+    // Mock a timeout response
+    await page.route('**/api/ai/generate', async route => {
+      await route.abort('timedout');
+    });
+
+    await page.goto('/ai-bartender');
+    await page.fill('textarea[name="ingredients"]', 'Vodka');
+    await page.click('button:has-text("Generate Recipe")');
+    
+    // Should show error UI
+    await expect(page.locator('.ai-error-message')).toBeVisible();
+    await expect(page.locator('.ai-error-message')).toContainText('AI service timeout');
+  });
+
+  test('Should handle AI API rate limits', async ({ page }) => {
+    // Mock rate limit response
+    await page.route('**/api/ai/generate', async route => {
+      await route.fulfill({
+        status: 429,
+        json: { error: 'Rate limit exceeded', retryAfter: 60 }
+      });
+    });
+
+    await page.goto('/ai-bartender');
+    await page.fill('textarea[name="ingredients"]', 'Vodka');
+    await page.click('button:has-text("Generate Recipe")');
+    
+    // Should show rate limit UI
+    await expect(page.locator('.rate-limit-message')).toBeVisible();
+    await expect(page.locator('.rate-limit-message')).toContainText('Please wait 60 seconds');
+  });
+});
+```
+
+**Testing Strategy Documentation:**
+1. **CI/CD Environment:** All E2E tests mock the LLM API to prevent flakiness and costs
+2. **Deterministic Responses:** Mocked responses ensure consistent test outcomes
+3. **Error Scenarios:** Tests cover timeouts, rate limits, and network failures
+4. **Cost Control:** No real API calls during automated testing
+5. **Environment Detection:** Tests detect CI environment and auto-enable mocking
+6. **Local Development:** Developers can toggle between real/mocked AI via environment variable
 ```
 
 ### Unified Search Flow

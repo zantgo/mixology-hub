@@ -23,7 +23,8 @@
 * **Given** the user has exactly `50 ml` of "Vodka".
 * **When** the user manually updates the quantity to `0 ml` OR prepares a drink requiring `50 ml`.
 * **Then** the mathematical deduction results in exactly `0`.
-* **And** the system either gracefully maintains a `0 ml` row OR deletes the row entirely from `user_inventory` (enforcing the chosen business rule).
+* **And** the system maintains the row with `quantity = 0` (does NOT delete it).
+* **Architectural Decision:** Keeping the `0 ml` row allows the frontend to display "Out of Stock" state for the user's favorite ingredients, enabling seamless "Shopping List / Restock" views and preventing the need to recreate rows when users restock.
 * **And** the Makeable list instantly stops showing Vodka-based drinks.
 
 **UC 1.5: Normalizing base units on insertion**
@@ -169,3 +170,41 @@
 * **Then** a single database transaction inserts/updates all inventory items.
 * **And** handles duplicates by summing quantities for existing ingredients.
 * **And** validates all items before any are committed (all-or-nothing).
+
+**UC 1.27: Querying the Global Ingredient Catalog**
+* **Given** a user is adding inventory and starts typing "Whis".
+* **When** the UI calls `GET /ingredients?q=Whis&limit=10`.
+* **Then** the backend searches the `INGREDIENTS` table using fuzzy matching on `normalized_name`.
+* **And** returns paginated results with ingredient IDs, names, and base units.
+* **And** prevents duplicate ingredient creation by suggesting existing matches from the global catalog.
+
+**UC 1.28: All-or-Nothing Bulk Inventory Addition**
+* **Given** a user submits a `POST /user-inventory/bulk` payload with 50 ingredients.
+* **And** ingredient #49 contains a validation error (e.g., `unit: "invalid_unit"`).
+* **When** the request is processed.
+* **Then** the database uses a strict transaction.
+* **And** entirely rolls back the transaction.
+* **And** returns a `400 Bad Request` specifying the exact index/ingredient that failed.
+* **And** 0 items are added to the user's inventory to prevent fragmented state.
+
+**UC 1.29: Preventing Recursive Synonyms in Admin Panel**
+* **Given** an Admin attempts to map "Triple Sec" as a synonym of "Cointreau".
+* **And** "Cointreau" is already mapped as a synonym of "Triple Sec" (or higher up the chain).
+* **When** the `POST /admin/ingredients/synonyms` endpoint is called.
+* **Then** the backend graph validation detects the cycle.
+* **And** rejects the request with `409 Conflict: Cannot create circular synonym mapping`.
+* **And** provides the detected cycle path for debugging: `Triple Sec → Cointreau → Triple Sec`.
+
+**UC 1.30: Handling Out-of-Bounds Expiration Dates (Future-Proofing)**
+* **Given** a user inputs a manual restock via offline sync or raw API.
+* **When** they pass an absurd timestamp for an ingredient (e.g., year 9999 or year 1970).
+* **Then** the system rejects it to prevent PostgreSQL timestamp overflow/underflow errors.
+* **And** validates all timestamps are within reasonable bounds (e.g., 2000-01-01 to 2100-12-31).
+* **And** returns a `400 Bad Request` with clear error: "Expiration date must be between 2000-01-01 and 2100-12-31".
+
+**UC 1.31: Global Ingredient Update Cascade**
+* **Given** an Admin corrects a typo on a global ingredient (e.g., "Wihskey" → "Whiskey").
+* **When** the update commits.
+* **Then** the system asynchronously flushes the Redis search cache for any cocktails containing that ingredient.
+* **And** triggers a background job to update any user-created cocktails that reference the old ingredient name.
+* **And** ensures search results reflect the corrected name immediately.

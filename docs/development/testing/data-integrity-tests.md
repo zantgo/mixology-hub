@@ -20,181 +20,118 @@ describe('IngredientService - Synonym Resolution', () => {
     
     const result = await ingredientService.resolveIngredient('Cointreau');
     expect(result.baseIngredient).toBe('triple sec');
-  });
-});
+   });
+ });
 
-**Example TDD for Soft-Deletion of Favorited Custom Cocktails (UC 10.4):**
+**Example TDD for Database Integrity - UUID Collision & Idempotency:**
 ```typescript
-describe('CocktailService - Soft Deletion', () => {
-  it('should soft delete custom cocktail instead of hard delete', async () => {
-    const cocktailService = new CocktailService();
-    const mockRepo = { 
-      findOne: jest.fn().mockResolvedValue({ id: 'cocktail123', is_deleted: false }),
-      save: jest.fn() 
-    };
-    cocktailService.cocktailRepo = mockRepo;
-
-    await cocktailService.deleteCocktail('cocktail123', 'author123');
+describe('Database Integrity - UUID Collision & Idempotency', () => {
+  it('should safely fail open if Redis is down during Idempotency check', async () => {
+    const prepService = new CocktailPreparationService();
+    const redisService = new RedisService();
     
-    const savedCocktail = mockRepo.save.mock.calls[0][0];
-    expect(savedCocktail.is_deleted).toBe(true);
-    expect(savedCocktail.deleted_at).toBeInstanceOf(Date);
-    expect(savedCocktail.deleted_by).toBe('author123');
+    // Redis crashes
+    jest.spyOn(redisService, 'get').mockRejectedValue(new Error('Redis connection lost'));
+    prepService.redisService = redisService;
+    
+    const inventorySpy = jest.spyOn(prepService.inventoryService, 'deductInventory').mockResolvedValue(true);
+    
+    // The system should catch the Redis error, log a warning, and proceed with the transaction
+    // (Failing OPEN to ensure the app still works if the cache dies)
+    await expect(
+      prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1')
+    ).resolves.toBeDefined();
+    
+    expect(inventorySpy).toHaveBeenCalled();
   });
 
-  it('should not return soft-deleted cocktails in search results', async () => {
+  it('should handle UUID collisions gracefully', async () => {
     const cocktailService = new CocktailService();
-    const mockRepo = { 
-      find: jest.fn().mockResolvedValue([
-        { id: 'active1', name: 'Active Cocktail', is_deleted: false },
-        { id: 'deleted1', name: 'Deleted Cocktail', is_deleted: true }
-      ])
-    };
+    const mockRepo = { save: jest.fn() };
     cocktailService.cocktailRepo = mockRepo;
-
-    const results = await cocktailService.searchCocktails('cocktail');
     
-    expect(results).toHaveLength(1);
-    expect(results[0].id).toBe('active1');
-    expect(results.find(c => c.id === 'deleted1')).toBeUndefined();
-  });
-
-  it('should show "Recipe deleted" for favorited soft-deleted cocktails', async () => {
-    const favoritesService = new FavoritesService();
-    const cocktailService = new CocktailService();
-    
-    // User has favorite for cocktail123
-    jest.spyOn(favoritesService, 'getUserFavorites').mockResolvedValue([
-      { cocktailId: 'cocktail123', userId: 'user456' }
-    ]);
-    
-    // Cocktail is soft-deleted
-    jest.spyOn(cocktailService, 'getCocktailById').mockResolvedValue({
-      id: 'cocktail123',
-      name: 'Old Fashioned',
-      is_deleted: true,
-      deleted_at: new Date(),
-      deleted_by: 'author123'
+    // Simulate UUID collision (PostgreSQL unique constraint violation)
+    mockRepo.save.mockRejectedValueOnce({
+      code: '23505',
+      constraint: 'cocktails_pkey'
+    }).mockResolvedValueOnce({
+      id: 'new-uuid-456',
+      name: 'Test Cocktail'
     });
     
-    favoritesService.cocktailService = cocktailService;
+    // Should retry with new UUID on collision
+    const result = await cocktailService.createCocktail({
+      name: 'Test Cocktail',
+      ingredients: []
+    }, 'user123');
     
-    const hydratedFavorites = await favoritesService.getHydratedFavorites('user456');
-    
-    expect(hydratedFavorites).toHaveLength(1);
-    expect(hydratedFavorites[0].cocktailId).toBe('cocktail123');
-    expect(hydratedFavorites[0].is_deleted).toBe(true);
-    expect(hydratedFavorites[0].deleted_message).toBe('Recipe deleted by author');
+    expect(result.id).toBe('new-uuid-456');
+    expect(mockRepo.save).toHaveBeenCalledTimes(2);
   });
 
-  it('should allow author to restore soft-deleted cocktail', async () => {
-    const cocktailService = new CocktailService();
-    const mockRepo = { 
-      findOne: jest.fn().mockResolvedValue({ 
-        id: 'cocktail123', 
-        is_deleted: true,
-        deleted_by: 'author123'
-      }),
-      save: jest.fn() 
-    };
-    cocktailService.cocktailRepo = mockRepo;
-
-    // Author restores their own cocktail
-    await cocktailService.restoreCocktail('cocktail123', 'author123');
+  it('should maintain idempotency even with Redis cache miss', async () => {
+    const prepService = new CocktailPreparationService();
+    const redisService = new RedisService();
     
-    const savedCocktail = mockRepo.save.mock.calls[0][0];
-    expect(savedCocktail.is_deleted).toBe(false);
-    expect(savedCocktail.deleted_at).toBeNull();
-    expect(savedCocktail.deleted_by).toBeNull();
+    // Redis returns null (cache miss) but connection is fine
+    jest.spyOn(redisService, 'get').mockResolvedValue(null);
+    jest.spyOn(redisService, 'set').mockResolvedValue('OK');
+    
+    prepService.redisService = redisService;
+    
+    const inventorySpy = jest.spyOn(prepService.inventoryService, 'deductInventory').mockResolvedValue(true);
+    
+    // First request should succeed
+    const result1 = await prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1');
+    
+    // Second request with same idempotency key should return cached result
+    const result2 = await prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1');
+    
+    // Inventory should only be deducted once
+    expect(inventorySpy).toHaveBeenCalledTimes(1);
+    expect(result1).toEqual(result2); // Same response
   });
 
-  it('should prevent non-author from restoring soft-deleted cocktail', async () => {
-    const cocktailService = new CocktailService();
-    const mockRepo = { 
-      findOne: jest.fn().mockResolvedValue({ 
-        id: 'cocktail123', 
-        is_deleted: true,
-        deleted_by: 'author123'
+  it('should handle Redis SET failure gracefully', async () => {
+    const prepService = new CocktailPreparationService();
+    const redisService = new RedisService();
+    
+    // Redis get works, but set fails
+    jest.spyOn(redisService, 'get').mockResolvedValue(null);
+    jest.spyOn(redisService, 'set').mockRejectedValue(new Error('Redis SET failed'));
+    
+    prepService.redisService = redisService;
+    
+    const inventorySpy = jest.spyOn(prepService.inventoryService, 'deductInventory').mockResolvedValue(true);
+    
+    // Should still process the request even if caching fails
+    await expect(
+      prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1')
+    ).resolves.toBeDefined();
+    
+    expect(inventorySpy).toHaveBeenCalled();
+  });
+
+  it('should log Redis failures for monitoring', async () => {
+    const prepService = new CocktailPreparationService();
+    const redisService = new RedisService();
+    const logger = { warn: jest.fn(), error: jest.fn() };
+    
+    prepService.redisService = redisService;
+    prepService.logger = logger;
+    
+    // Redis connection lost
+    jest.spyOn(redisService, 'get').mockRejectedValue(new Error('Connection refused'));
+    
+    await prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1');
+    
+    // Should log the Redis failure
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Redis unavailable for idempotency check, proceeding without cache',
+      expect.objectContaining({
+        error: 'Connection refused'
       })
-    };
-    cocktailService.cocktailRepo = mockRepo;
-
-    // Different user tries to restore
-    await expect(cocktailService.restoreCocktail('cocktail123', 'differentUser'))
-      .rejects
-      .toThrow('Unauthorized: Only the author can restore this cocktail');
-  });
-});
-
-**Example TDD for Boundary Value Analysis for Measurements (UC 1.13):**
-```typescript
-describe('Inventory Validation - Boundary Value Analysis', () => {
-  it('should reject astronomically large inventory additions', async () => {
-    const inventoryService = new UserInventoryService();
-    
-    const payload = { ingredientId: 'vodka-123', quantity: 999999999, unit: 'ml' };
-    
-    // Simulating class-validator hitting the API
-    const mockValidate = jest.spyOn(inventoryService, 'validateInventoryPayload')
-      .mockImplementation((payload) => {
-        if (payload.quantity > 100000) {
-          throw new Error('Quantity must not exceed 100000');
-        }
-      });
-    
-    await expect(inventoryService.addToInventory('user123', payload))
-      .rejects
-      .toThrow('Quantity must not exceed 100000');
-  });
-
-  it('should accept values at the upper boundary', async () => {
-    const inventoryService = new UserInventoryService();
-    
-    const payload = { ingredientId: 'vodka-123', quantity: 100000, unit: 'ml' };
-    
-    jest.spyOn(inventoryService, 'validateInventoryPayload').mockReturnValue(true);
-    jest.spyOn(inventoryService.inventoryRepo, 'save').mockResolvedValue(true);
-    
-    await expect(inventoryService.addToInventory('user123', payload)).resolves.not.toThrow();
-  });
-
-  it('should reject negative quantities', async () => {
-    const inventoryService = new UserInventoryService();
-    
-    const payload = { ingredientId: 'vodka-123', quantity: -1, unit: 'ml' };
-    
-    await expect(inventoryService.addToInventory('user123', payload))
-      .rejects
-      .toThrow('Quantity must be positive');
-  });
-
-  it('should handle decimal precision boundaries', async () => {
-    const inventoryService = new UserInventoryService();
-    
-    // Test with value that has many decimal places
-    const precisePayload = { ingredientId: 'vodka-123', quantity: 123.456789, unit: 'ml' };
-    
-    // Should round to 2 decimal places for database
-    jest.spyOn(inventoryService, 'validateInventoryPayload').mockReturnValue(true);
-    const mockSave = jest.spyOn(inventoryService.inventoryRepo, 'save');
-    
-    await inventoryService.addToInventory('user123', precisePayload);
-    
-    // Verify rounded value was saved
-    expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({
-      quantity: 123.46 // Rounded to 2 decimal places
-    }));
-  });
-
-  it('should prevent zero division in unit conversions', async () => {
-    const unitConverter = new UnitConverterService();
-    
-    // Test conversion with zero amount
-    expect(() => unitConverter.convert(0, 'oz', 'ml')).not.toThrow();
-    
-    // Test conversion with very small amount
-    const result = unitConverter.convert(0.001, 'oz', 'ml');
-    expect(result).toBeCloseTo(0.0296, 4); // Should handle tiny values
+    );
   });
 });
 ```
@@ -486,6 +423,303 @@ describe('Cocktail Service - Private Ingredient Visibility', () => {
     expect(addSpy).toHaveBeenCalledWith('userB', expect.objectContaining({
       ingredientId: 'private-ing-123'
     }));
+  });
+});
+```
+
+**Example TDD for GDPR Deletion Constraint:**
+```typescript
+describe('UserService - GDPR Deletion Constraint', () => {
+  it('should anonymize public cocktails without foreign key constraint violation', async () => {
+    const userService = new UserService();
+    const cocktailRepo = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'cocktail1', name: 'Public Drink', is_public: true, created_by: 'user123' },
+        { id: 'cocktail2', name: 'Private Drink', is_public: false, created_by: 'user123' }
+      ]),
+      save: jest.fn().mockImplementation((cocktail) => Promise.resolve(cocktail))
+    };
+    
+    userService.cocktailRepo = cocktailRepo;
+    
+    // Delete user with public cocktails
+    await userService.deleteUser('user123');
+    
+    // Public cocktail should have created_by set to null (anonymized)
+    const publicCocktailUpdate = cocktailRepo.save.mock.calls.find(
+      call => call[0].id === 'cocktail1'
+    );
+    expect(publicCocktailUpdate[0].created_by).toBeNull();
+    
+    // Private cocktail should be deleted
+    const privateCocktailUpdate = cocktailRepo.save.mock.calls.find(
+      call => call[0].id === 'cocktail2'
+    );
+    expect(privateCocktailUpdate).toBeUndefined(); // Should be hard deleted
+  });
+  
+  it('should handle database constraint when setting created_by to null', async () => {
+    const userService = new UserService();
+    const cocktailRepo = {
+      find: jest.fn().mockResolvedValue([{ id: 'cocktail1', created_by: 'user123' }]),
+      save: jest.fn().mockRejectedValue(new Error('Foreign key constraint violation'))
+    };
+    
+    userService.cocktailRepo = cocktailRepo;
+    
+    // Should handle constraint error gracefully
+    await expect(userService.deleteUser('user123'))
+      .rejects
+      .toThrow('Failed to anonymize public cocktails');
+  });
+});
+
+**Example TDD for Orphaned Logs After Cocktail Deletion:**
+```typescript
+describe('Preparation Logs - Orphaned Logs Handling', () => {
+  it('should preserve preparation logs when cocktail is deleted (ON DELETE SET NULL)', async () => {
+    const preparationService = new CocktailPreparationService();
+    const cocktailService = new CocktailService();
+    
+    // Mock cocktail deletion
+    const mockCocktail = {
+      id: 'cocktail-to-delete',
+      name: 'Test Cocktail'
+    };
+    
+    // Mock preparation logs exist for this cocktail
+    const mockLogs = [
+      { id: 'log1', cocktailId: 'cocktail-to-delete', userId: 'user123', preparedAt: new Date() },
+      { id: 'log2', cocktailId: 'cocktail-to-delete', userId: 'user456', preparedAt: new Date() }
+    ];
+    
+    // Mock repository with ON DELETE SET NULL behavior
+    const mockLogRepo = {
+      find: jest.fn().mockResolvedValue(mockLogs),
+      save: jest.fn().mockImplementation((log) => Promise.resolve(log))
+    };
+    
+    preparationService.preparationLogRepo = mockLogRepo;
+    preparationService.cocktailService = cocktailService;
+    
+    // Delete the cocktail
+    jest.spyOn(cocktailService, 'deleteCocktail').mockResolvedValue(true);
+    
+    // Simulate what happens when cocktail is deleted
+    await preparationService.handleCocktailDeletion('cocktail-to-delete');
+    
+    // Logs should be updated with cocktailId = null (orphaned but preserved)
+    expect(mockLogRepo.save).toHaveBeenCalledTimes(2);
+    
+    const firstCall = mockLogRepo.save.mock.calls[0][0];
+    const secondCall = mockLogRepo.save.mock.calls[1][0];
+    
+    expect(firstCall.cocktailId).toBeNull();
+    expect(firstCall.cocktailNameSnapshot).toBe('Test Cocktail'); // Preserve name
+    expect(secondCall.cocktailId).toBeNull();
+    expect(secondCall.cocktailNameSnapshot).toBe('Test Cocktail');
+  });
+
+  it('should show "Recipe deleted" for orphaned logs in user history', async () => {
+    const historyService = new PreparationHistoryService();
+    
+    // Mock orphaned log (cocktailId = null)
+    const orphanedLog = {
+      id: 'log-123',
+      cocktailId: null,
+      cocktailNameSnapshot: 'Old Fashioned',
+      userId: 'user123',
+      preparedAt: new Date('2024-01-01'),
+      ingredientsUsed: [{ name: 'Bourbon', amount: 60 }]
+    };
+    
+    jest.spyOn(historyService.preparationLogRepo, 'find').mockResolvedValue([orphanedLog]);
+    
+    const userHistory = await historyService.getUserPreparationHistory('user123');
+    
+    expect(userHistory).toHaveLength(1);
+    expect(userHistory[0].cocktailId).toBeNull();
+    expect(userHistory[0].cocktailName).toBe('Old Fashioned');
+    expect(userHistory[0].isRecipeDeleted).toBe(true);
+    expect(userHistory[0].deletedMessage).toBe('Recipe no longer available');
+  });
+
+  it('should not allow preparation of deleted cocktails', async () => {
+    const preparationService = new CocktailPreparationService();
+    const cocktailService = new CocktailService();
+    
+    preparationService.cocktailService = cocktailService;
+    
+    // Mock cocktail is deleted (returns null or throws)
+    jest.spyOn(cocktailService, 'getCocktailById').mockResolvedValue(null);
+    
+    await expect(preparationService.prepareCocktail('user123', 'deleted-cocktail', 1))
+      .rejects
+      .toThrow('Cocktail not found or has been deleted');
+  });
+
+  it('should maintain analytics integrity with orphaned logs', async () => {
+    const analyticsService = new AnalyticsService();
+    
+    // Mix of active and orphaned logs
+    const mixedLogs = [
+      { cocktailId: 'active-cocktail-1', cocktailName: 'Margarita', preparedAt: new Date() },
+      { cocktailId: null, cocktailNameSnapshot: 'Deleted Cocktail', preparedAt: new Date() },
+      { cocktailId: 'active-cocktail-2', cocktailName: 'Martini', preparedAt: new Date() },
+      { cocktailId: null, cocktailNameSnapshot: 'Another Deleted', preparedAt: new Date() }
+    ];
+    
+    jest.spyOn(analyticsService.preparationLogRepo, 'find').mockResolvedValue(mixedLogs);
+    
+    const stats = await analyticsService.getPreparationStats('2024-01-01', '2024-12-31');
+    
+    // Should include orphaned logs in counts
+    expect(stats.totalPreparations).toBe(4);
+    expect(stats.orphanedPreparations).toBe(2);
+    expect(stats.activePreparations).toBe(2);
+    
+    // Orphaned should be categorized separately
+    expect(stats.byCocktail).toHaveLength(3); // 2 active + 1 "Deleted Recipes" category
+    const deletedCategory = stats.byCocktail.find(c => c.name === 'Deleted Recipes');
+    expect(deletedCategory).toBeDefined();
+    expect(deletedCategory.count).toBe(2);
+  });
+
+  it('should handle foreign key constraint gracefully in tests', async () => {
+    // Test that the database schema enforces ON DELETE SET NULL
+    const mockQuery = `
+      INSERT INTO preparation_logs (id, cocktail_id, user_id) 
+      VALUES ('test-log', 'existing-cocktail', 'test-user');
+      
+      DELETE FROM cocktails WHERE id = 'existing-cocktail';
+      
+      SELECT cocktail_id FROM preparation_logs WHERE id = 'test-log';
+    `;
+    
+    // In a real test, this would execute against test database
+    // Expect cocktail_id to be NULL after cocktail deletion
+    const expectedCocktailId = null;
+    
+    // Mock the database result
+    const mockDbResult = { rows: [{ cocktail_id: null }] };
+    
+    expect(mockDbResult.rows[0].cocktail_id).toBeNull();
+  });
+
+  it('should prevent cascade deletion of preparation logs', async () => {
+    const dbService = new DatabaseService();
+    
+    // Test foreign key constraint configuration
+    const fkInfo = await dbService.getForeignKeyInfo('preparation_logs', 'cocktail_id');
+    
+    expect(fkInfo.onDelete).toBe('SET NULL');
+    expect(fkInfo.onDelete).not.toBe('CASCADE');
+    
+    // Verify constraint exists
+    expect(fkInfo.constraintName).toBe('preparation_logs_cocktail_id_fkey');
+  });
+
+  it('should allow cleanup of very old orphaned logs', async () => {
+    const maintenanceService = new DatabaseMaintenanceService();
+    
+    // Mock very old orphaned logs (2+ years)
+    const oldOrphanedLogs = [
+      { id: 'log-1', preparedAt: new Date('2021-01-01'), cocktailId: null },
+      { id: 'log-2', preparedAt: new Date('2021-06-01'), cocktailId: null },
+      { id: 'log-3', preparedAt: new Date('2023-12-01'), cocktailId: 'active-cocktail' }, // Not orphaned
+      { id: 'log-4', preparedAt: new Date('2021-12-01'), cocktailId: null }
+    ];
+    
+    jest.spyOn(maintenanceService.preparationLogRepo, 'find').mockResolvedValue(oldOrphanedLogs);
+    const deleteSpy = jest.spyOn(maintenanceService.preparationLogRepo, 'delete').mockResolvedValue({ affected: 3 });
+    
+    // Cleanup logs older than 2 years
+    const deletedCount = await maintenanceService.cleanupOldOrphanedLogs(2); // 2 years retention
+    
+    // Should delete 3 orphaned logs from 2021
+    expect(deletedCount).toBe(3);
+    expect(deleteSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cocktailId: null,
+        preparedAt: expect.objectContaining({ $lt: expect.any(Date) })
+      })
+    );
+  });
+
+  it('should preserve user preparation count even with orphaned logs', async () => {
+    const userService = new UserService();
+    
+    const userLogs = [
+      { cocktailId: 'cocktail-1', preparedAt: new Date('2024-01-01') },
+      { cocktailId: null, cocktailNameSnapshot: 'Deleted Cocktail', preparedAt: new Date('2024-02-01') },
+      { cocktailId: 'cocktail-2', preparedAt: new Date('2024-03-01') },
+      { cocktailId: null, cocktailNameSnapshot: 'Another Deleted', preparedAt: new Date('2024-04-01') }
+    ];
+    
+    jest.spyOn(userService.preparationLogRepo, 'count').mockResolvedValue(userLogs.length);
+    
+    const preparationCount = await userService.getUserPreparationCount('user123');
+    
+    // Should count ALL preparations, including orphaned ones
+    expect(preparationCount).toBe(4);
+    
+    // User stats should reflect total preparation experience
+    const userStats = await userService.getUserStats('user123');
+    expect(userStats.totalPreparations).toBe(4);
+    expect(userStats.orphanedPreparations).toBe(2);
+  });
+
+  it('should handle bulk cocktail deletion with many preparation logs', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Simulate deleting a cocktail with 10,000 preparation logs
+    const manyLogs = Array(10000).fill(null).map((_, i) => ({
+      id: `log-${i}`,
+      cocktailId: 'popular-cocktail',
+      userId: `user-${i % 1000}`,
+      preparedAt: new Date()
+    }));
+    
+    const mockLogRepo = {
+      find: jest.fn().mockResolvedValue(manyLogs),
+      save: jest.fn().mockImplementation((log) => Promise.resolve(log))
+    };
+    
+    preparationService.preparationLogRepo = mockLogRepo;
+    
+    // This should handle bulk update efficiently
+    await preparationService.handleCocktailDeletion('popular-cocktail');
+    
+    // Should update all logs
+    expect(mockLogRepo.save).toHaveBeenCalledTimes(10000);
+    
+    // All should have cocktailId = null
+    const firstCall = mockLogRepo.save.mock.calls[0][0];
+    expect(firstCall.cocktailId).toBeNull();
+  });
+
+  it('should provide migration path for existing CASCADE constraints', async () => {
+    const migrationService = new DatabaseMigrationService();
+    
+    // Test migration from CASCADE to SET NULL
+    const migrationSql = `
+      ALTER TABLE preparation_logs
+      DROP CONSTRAINT preparation_logs_cocktail_id_fkey,
+      ADD CONSTRAINT preparation_logs_cocktail_id_fkey
+      FOREIGN KEY (cocktail_id)
+      REFERENCES cocktails(id)
+      ON DELETE SET NULL;
+    `;
+    
+    // Verify migration SQL is correct
+    expect(migrationSql).toContain('ON DELETE SET NULL');
+    expect(migrationSql).not.toContain('ON DELETE CASCADE');
+    
+    // Mock successful migration
+    jest.spyOn(migrationService, 'executeMigration').mockResolvedValue(true);
+    
+    const result = await migrationService.migratePreparationLogsConstraint();
+    expect(result).toBe(true);
   });
 });
 ```

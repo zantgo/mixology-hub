@@ -1296,6 +1296,626 @@ describe('AI Service - Cost Control & Prompt Construction (UC 5.17 & 5.18)', () 
     expect(sentPrompt).toContain('Respond EXCLUSIVELY with valid JSON');
   });
 });
+
+**Example TDD for AI Response Size Bounding (UC 5.22):**
+```typescript
+it('should abort connection if LLM response exceeds byte limit', async () => {
+  const aiService = new AIService();
+  
+  // Mock Axios/HTTP client configured with maxContentLength
+  const mockHttp = {
+    post: jest.fn().mockRejectedValue({
+      message: 'maxContentLength size of 100000 bytes exceeded'
+    })
+  };
+  aiService.httpClient = mockHttp;
+  
+  await expect(aiService.generateRecipe('Vodka'))
+    .rejects
+    .toThrow('AI response exceeded maximum allowed size');
+});
+
+**Example TDD for AI Response Network Drop:**
+```typescript
+it('should handle network drop during JSON streaming', async () => {
+  const aiService = new AIService();
+  
+  // Mock HTTP client that simulates network drop mid-response
+  const mockHttp = {
+    post: jest.fn().mockImplementation(() => {
+      // Simulate partial response then network drop
+      return Promise.resolve({
+        data: '{"name": "Test Cocktail", "ingredients": [{"name": "Vodka"'
+        // Response cut off mid-JSON
+      });
+    })
+  };
+  aiService.httpClient = mockHttp;
+  
+  // Should catch JSON parse error and retry
+  await expect(aiService.generateRecipe('Vodka'))
+    .rejects
+    .toThrow('Failed to parse AI response');
+  
+  // Should have attempted retry
+  expect(mockHttp.post).toHaveBeenCalledTimes(3);
+});
+
+it('should not crash Node.js event loop on malformed JSON', async () => {
+  const aiService = new AIService();
+  
+  // Mock HTTP client returning invalid JSON that would cause JSON.parse to throw
+  const mockHttp = {
+    post: jest.fn().mockResolvedValue({
+      data: 'Invalid JSON { malformed: true, missing quotes }'
+    })
+  };
+  aiService.httpClient = mockHttp;
+  
+  // Should catch the error gracefully
+  await expect(aiService.generateRecipe('Vodka'))
+    .rejects
+    .toThrow('Failed to parse AI response');
+  
+  // Process should not crash
+  expect(mockHttp.post).toHaveBeenCalled();
+});
+
+**Example TDD for Concurrent AI Generation Lock (UC 5.23):**
+```typescript
+describe('AI Service - Concurrent Generation Lock', () => {
+  it('should prevent duplicate LLM calls from concurrent requests', async () => {
+    const aiService = new AIService();
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Test Cocktail',
+        ingredients: [{ name: 'Vodka', amount: 2, unit: 'oz' }]
+      })
+    };
+    
+    // Mock Redis lock
+    const mockRedis = {
+      set: jest.fn().mockImplementation((key, value, options) => {
+        if (options?.NX) {
+          // Simulate lock acquisition
+          return Promise.resolve('OK');
+        }
+        return Promise.resolve(null);
+      }),
+      del: jest.fn().mockResolvedValue(1)
+    };
+    
+    aiService.provider = mockProvider;
+    aiService.redis = mockRedis;
+    
+    // Simulate 3 concurrent requests
+    const concurrentRequests = [
+      aiService.generateRecipe('Vodka', 'user123'),
+      aiService.generateRecipe('Vodka', 'user123'),
+      aiService.generateRecipe('Vodka', 'user123')
+    ];
+    
+    const results = await Promise.allSettled(concurrentRequests);
+    
+    // Only one should reach the LLM provider
+    expect(mockProvider.generateRecipe).toHaveBeenCalledTimes(1);
+    
+    // Others should be rejected
+    const successes = results.filter(r => r.status === 'fulfilled');
+    const failures = results.filter(r => r.status === 'rejected');
+    
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(2);
+    
+    // Verify lock was acquired and released
+    expect(mockRedis.set).toHaveBeenCalledWith(
+      'ai_lock:user123',
+      expect.any(String),
+      { NX: true, EX: 30 }
+    );
+    expect(mockRedis.del).toHaveBeenCalledWith('ai_lock:user123');
+  });
+  
+  it('should handle lock acquisition failure gracefully', async () => {
+    const aiService = new AIService();
+    const mockRedis = {
+      set: jest.fn().mockResolvedValue(null), // Lock already held
+      del: jest.fn().mockResolvedValue(1)
+    };
+
+    aiService.redis = mockRedis;
+
+    // Should reject immediately without hitting LLM
+    await expect(aiService.generateRecipe('Vodka', 'user123'))
+      .rejects
+      .toThrow('AI generation already in progress');
+
+    // Should not attempt to delete lock we never acquired
+    expect(mockRedis.del).not.toHaveBeenCalled();
+  });
+});
+
+**Example TDD for Atomic AI Quota Enforcement (UC 5.25):**
+```typescript
+describe('AI Service - Atomic Quota Enforcement', () => {
+  it('should strictly enforce quota under heavy concurrent load', async () => {
+    const aiService = new AIService();
+    
+    // Mock Redis atomic increment
+    const mockRedis = {
+      incr: jest.fn().mockImplementation(async (key) => {
+        // Simulate atomic Redis increment with initial value of 19
+        const current = 19; // User is at 19/20 for the day
+        const newValue = current + 1;
+        
+        // First call returns 20 (within quota), subsequent calls return >20
+        if (mockRedis.incr.mock.calls.length === 1) {
+          return 20;
+        } else {
+          return 21; // Exceeds quota
+        }
+      }),
+      expire: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue('19')
+    };
+    
+    aiService.redis = mockRedis;
+    
+    // Mock AI provider
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Test Cocktail',
+        ingredients: []
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    // Fire 5 requests at the exact same millisecond
+    const requests = Array(5).fill(null).map(() => 
+      aiService.generateRecipe('Vodka', { userId: 'user123' })
+    );
+    
+    const results = await Promise.allSettled(requests);
+    
+    // Exactly 1 should fulfill, 4 should reject with 429
+    const fulfilled = results.filter(r => r.status === 'fulfilled');
+    const rejected = results.filter(r => r.status === 'rejected');
+    
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(4);
+    
+    // Verify atomic increment was called for each request
+    expect(mockRedis.incr).toHaveBeenCalledTimes(5);
+    
+    // Only 1 request should reach the LLM provider
+    expect(mockProvider.generateRecipe).toHaveBeenCalledTimes(1);
+    
+    // Verify rejected requests have correct error
+    for (const result of rejected) {
+      if (result.status === 'rejected') {
+        expect(result.reason.message).toContain('Daily AI generation limit reached');
+        expect(result.reason.statusCode).toBe(429);
+      }
+    }
+  });
+
+  it('should use Redis INCR with EXPIRE for daily quota tracking', async () => {
+    const aiService = new AIService();
+    const mockRedis = {
+      incr: jest.fn().mockResolvedValue(1), // First generation of the day
+      expire: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue(null) // No previous count
+    };
+    
+    aiService.redis = mockRedis;
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    await aiService.generateRecipe('Vodka', { userId: 'user123' });
+    
+    // Should use atomic Redis operations
+    expect(mockRedis.incr).toHaveBeenCalledWith('ai_quota:user123:2024-01-15');
+    expect(mockRedis.expire).toHaveBeenCalledWith('ai_quota:user123:2024-01-15', 86400); // 24 hours
+    
+    // Should check current count before incrementing
+    expect(mockRedis.get).toHaveBeenCalledWith('ai_quota:user123:2024-01-15');
+  });
+
+  it('should handle race condition where INCR returns >20', async () => {
+    const aiService = new AIService();
+    const mockRedis = {
+      incr: jest.fn().mockResolvedValue(21), // Already at limit
+      get: jest.fn().mockResolvedValue('20') // Already at 20
+    };
+    
+    aiService.redis = mockRedis;
+    
+    await expect(aiService.generateRecipe('Vodka', { userId: 'user123' }))
+      .rejects
+      .toThrow('Daily AI generation limit reached');
+    
+    // Should check current value first
+    expect(mockRedis.get).toHaveBeenCalled();
+    
+    // Should still attempt INCR for atomicity
+    expect(mockRedis.incr).toHaveBeenCalled();
+  });
+
+  it('should reset quota at midnight UTC', async () => {
+    const aiService = new AIService();
+    const mockRedis = {
+      incr: jest.fn().mockImplementation(async (key) => {
+        // Key includes date, so new day = new key
+        if (key.includes('2024-01-16')) {
+          return 1; // New day, first generation
+        }
+        return 21; // Old day, exceeded
+      }),
+      get: jest.fn().mockResolvedValue(null),
+      expire: jest.fn().mockResolvedValue(true)
+    };
+    
+    aiService.redis = mockRedis;
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    // Mock date to simulate new day
+    const realDate = Date;
+    const mockDate = new Date('2024-01-16T00:01:00Z');
+    global.Date = jest.fn(() => mockDate) as any;
+    
+    try {
+      await aiService.generateRecipe('Vodka', { userId: 'user123' });
+      
+      // Should succeed because new day
+      expect(mockProvider.generateRecipe).toHaveBeenCalled();
+      expect(mockRedis.incr).toHaveBeenCalledWith('ai_quota:user123:2024-01-16');
+    } finally {
+      global.Date = realDate;
+    }
+  });
+
+  it('should use database row-level lock as fallback if Redis unavailable', async () => {
+    const aiService = new AIService();
+    
+    // Mock Redis failure
+    const mockRedis = {
+      incr: jest.fn().mockRejectedValue(new Error('Redis unavailable')),
+      get: jest.fn().mockRejectedValue(new Error('Redis unavailable'))
+    };
+    
+    aiService.redis = mockRedis;
+    
+    // Mock database transaction with row-level lock
+    const mockTransaction = jest.fn().mockImplementation(async (callback) => {
+      // Simulate SELECT ... FOR UPDATE
+      return callback();
+    });
+    
+    const mockEntityManager = {
+      transaction: mockTransaction
+    };
+    
+    const mockAiUsageRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        setLock: jest.fn().mockReturnThis(), // FOR UPDATE
+        getOne: jest.fn().mockResolvedValue({ count: 19 }),
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 1 })
+      })
+    };
+    
+    aiService.entityManager = mockEntityManager;
+    aiService.aiUsageRepo = mockAiUsageRepo;
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
+    };
+    aiService.provider = mockProvider;
+    
+    await aiService.generateRecipe('Vodka', { userId: 'user123' });
+    
+    // Should fall back to database locking
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockAiUsageRepo.createQueryBuilder).toHaveBeenCalled();
+    
+    // Should still reach LLM provider
+    expect(mockProvider.generateRecipe).toHaveBeenCalled();
+  });
+
+  it('should prevent quota bypass through time manipulation', async () => {
+    const aiService = new AIService();
+    const mockRedis = {
+      incr: jest.fn().mockImplementation(async (key) => {
+        // Client tries to use yesterday's date to bypass quota
+        if (key.includes('2024-01-14')) {
+          return 1; // Would allow bypass
+        }
+        return 21; // Today's quota exceeded
+      }),
+      get: jest.fn().mockResolvedValue(null)
+    };
+    
+    aiService.redis = mockRedis;
+    
+    // Mock date manipulation attempt
+    const maliciousRequest = {
+      userId: 'user123',
+      dateOverride: '2024-01-14' // Trying to use yesterday's date
+    };
+    
+    // Should ignore client-provided date and use server time
+    const today = new Date().toISOString().split('T')[0];
+    
+    await expect(aiService.generateRecipe('Vodka', { userId: 'user123' }))
+      .rejects
+      .toThrow('Daily AI generation limit reached');
+    
+    // Should use server's current date, not client-provided
+    expect(mockRedis.incr).toHaveBeenCalledWith(`ai_quota:user123:${today}`);
+  });
+
+  it('should handle quota check and LLM call in same atomic transaction', async () => {
+    const aiService = new AIService();
+    
+    let quotaChecked = false;
+    let llmCalled = false;
+    
+    const mockRedis = {
+      incr: jest.fn().mockImplementation(async () => {
+        quotaChecked = true;
+        return 1; // Within quota
+      }),
+      expire: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue(null)
+    };
+    
+    aiService.redis = mockRedis;
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockImplementation(async () => {
+        // Verify quota was checked before LLM call
+        expect(quotaChecked).toBe(true);
+        llmCalled = true;
+        return { name: 'Test', ingredients: [] };
+      })
+    };
+    aiService.provider = mockProvider;
+    
+    await aiService.generateRecipe('Vodka', { userId: 'user123' });
+    
+    expect(quotaChecked).toBe(true);
+    expect(llmCalled).toBe(true);
+    
+    // Order is preserved: quota check → LLM call
+    expect(mockRedis.incr.mock.invocationCallOrder[0])
+      .toBeLessThan(mockProvider.generateRecipe.mock.invocationCallOrder[0]);
+  });
+
+  it('should decrement quota on generation failure', async () => {
+    const aiService = new AIService();
+    
+    const mockRedis = {
+      incr: jest.fn().mockResolvedValue(20), // At quota limit
+      decr: jest.fn().mockResolvedValue(19), // Decrement on failure
+      expire: jest.fn().mockResolvedValue(true),
+      get: jest.fn().mockResolvedValue('19')
+    };
+    
+    aiService.redis = mockRedis;
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockRejectedValue(new Error('LLM API failure'))
+    };
+    aiService.provider = mockProvider;
+    
+    try {
+      await aiService.generateRecipe('Vodka', { userId: 'user123' });
+    } catch (error) {
+      // Should decrement quota since generation failed
+      expect(mockRedis.decr).toHaveBeenCalledWith('ai_quota:user123:2024-01-15');
+    }
+    
+    // Quota should be restored to 19
+    expect(mockRedis.decr).toHaveBeenCalled();
+   });
+});
+
+**Example TDD for AI Entity Resolution on Save (UC 5.26):**
+```typescript
+describe('AI Service - Entity Resolution on Save', () => {
+  it('should fuzzy-match AI string ingredients to global UUIDs instead of duplicating', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    // Global catalog has "Simple Syrup" (UUID: 123)
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue({ id: 'uuid-123', name: 'Simple Syrup' });
+    aiService.ingredientService = ingredientService;
+    
+    // AI hallucinates slightly different text "House Simple Syrup"
+    const aiRecipe = { 
+      name: 'AI Drink', 
+      ingredients: [{ name: 'House Simple Syrup', measure: '1 oz' }] 
+    };
+    
+    const result = await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // It should map to UUID-123, NOT create a new custom ingredient
+    expect(result.ingredients[0].ingredientId).toBe('uuid-123');
+    expect(ingredientService.resolveBaseIngredient).toHaveBeenCalledWith('House Simple Syrup');
+  });
+
+  it('should create new custom ingredient when similarity score is below threshold', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    // AI generates completely novel ingredient "Dragon Fruit Essence"
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue(null); // No match found
+    jest.spyOn(ingredientService, 'createCustomIngredient')
+      .mockResolvedValue({ id: 'new-uuid-456', name: 'dragon fruit essence' });
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Exotic Drink', 
+      ingredients: [{ name: 'Dragon Fruit Essence', measure: '0.5 oz' }] 
+    };
+    
+    const result = await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Should create new custom ingredient
+    expect(result.ingredients[0].ingredientId).toBe('new-uuid-456');
+    expect(ingredientService.createCustomIngredient).toHaveBeenCalledWith(
+      'user1',
+      'Dragon Fruit Essence',
+      'oz'
+    );
+  });
+
+  it('should use same logic as external API ingredient mapping (UC 3.21)', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    // Verify AI service uses same resolveBaseIngredient method as external APIs
+    const resolveSpy = jest.spyOn(ingredientService, 'resolveBaseIngredient');
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Test Drink', 
+      ingredients: [{ name: 'Fresh squeezed lime', measure: '1 oz' }] 
+    };
+    
+    await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Should call the same method used by external API aggregator
+    expect(resolveSpy).toHaveBeenCalledWith('Fresh squeezed lime');
+  });
+
+  it('should handle multiple AI ingredients with mixed matching results', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    // Mock different matching scenarios
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockImplementation(async (name) => {
+        if (name === 'Vodka') return { id: 'vodka-uuid', name: 'Vodka' };
+        if (name === 'Fresh Lime Juice') return { id: 'lime-juice-uuid', name: 'Lime Juice' };
+        if (name === 'Artisanal Bitters') return null; // No match
+        return null;
+      });
+    
+    jest.spyOn(ingredientService, 'createCustomIngredient')
+      .mockResolvedValue({ id: 'custom-bitters-uuid', name: 'artisanal bitters' });
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Complex AI Drink', 
+      ingredients: [
+        { name: 'Vodka', measure: '2 oz' },
+        { name: 'Fresh Lime Juice', measure: '1 oz' },
+        { name: 'Artisanal Bitters', measure: '2 dashes' }
+      ] 
+    };
+    
+    const result = await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Should map existing ingredients and create new one
+    expect(result.ingredients[0].ingredientId).toBe('vodka-uuid');
+    expect(result.ingredients[1].ingredientId).toBe('lime-juice-uuid');
+    expect(result.ingredients[2].ingredientId).toBe('custom-bitters-uuid');
+  });
+
+  it('should apply strict similarity threshold to prevent false matches', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    // Mock similarity scoring
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockImplementation(async (name) => {
+        // "Gin" vs "Ginger" - low similarity, should not match
+        if (name === 'Ginger') return null; // Below threshold
+        if (name === 'Gin') return { id: 'gin-uuid', name: 'Gin' };
+        return null;
+      });
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Confusing Drink', 
+      ingredients: [
+        { name: 'Gin', measure: '2 oz' },
+        { name: 'Ginger', measure: '1 slice' }
+      ] 
+    };
+    
+    const result = await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Gin should match, Ginger should create new ingredient
+    expect(result.ingredients[0].ingredientId).toBe('gin-uuid');
+    expect(result.ingredients[1].ingredientId).not.toBe('gin-uuid');
+    expect(ingredientService.resolveBaseIngredient).toHaveBeenCalledWith('Ginger');
+  });
+
+  it('should normalize ingredient names before matching', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    const resolveSpy = jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue({ id: 'lime-juice-uuid', name: 'Lime Juice' });
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Drink', 
+      ingredients: [
+        { name: 'FRESH LIME JUICE', measure: '1 oz' }, // Uppercase
+        { name: 'lime juice (fresh)', measure: '1 oz' }, // Parentheses
+        { name: 'Lime-Juice', measure: '1 oz' } // Hyphen
+      ] 
+    };
+    
+    await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Should normalize all variations before matching
+    expect(resolveSpy).toHaveBeenCalledWith('fresh lime juice');
+    expect(resolveSpy).toHaveBeenCalledWith('lime juice fresh');
+    expect(resolveSpy).toHaveBeenCalledWith('lime juice');
+  });
+
+  it('should preserve original AI ingredient name in metadata', async () => {
+    const aiService = new AIService();
+    const ingredientService = new IngredientService();
+    
+    jest.spyOn(ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue({ id: 'simple-syrup-uuid', name: 'Simple Syrup' });
+    
+    aiService.ingredientService = ingredientService;
+    
+    const aiRecipe = { 
+      name: 'Drink', 
+      ingredients: [{ name: 'House Simple Syrup', measure: '1 oz' }] 
+    };
+    
+    const result = await aiService.saveAsCocktail('user1', aiRecipe);
+    
+    // Should store original AI name for reference
+    expect(result.ingredients[0].originalAiName).toBe('House Simple Syrup');
+    expect(result.ingredients[0].displayName).toBe('House Simple Syrup');
+    expect(result.ingredients[0].ingredientId).toBe('simple-syrup-uuid');
+  });
+});
 ```
 ```
 ```

@@ -549,7 +549,7 @@ describe('Frontend - Network Loss (Offline State)', () => {
 });
 ```
 
-**Example TDD for User Preferences - Frontend Sync (UC 9.10):**
+**Example TDD for User Preferences - Frontend Sync (UC 7.23):**
 ```typescript
 describe('User Preferences - Frontend Sync', () => {
   it('should instantly update the UI unit system via Angular Signals when preferences change', () => {
@@ -567,6 +567,201 @@ describe('User Preferences - Frontend Sync', () => {
     
     // UI signal instantly reflects 'imperial' (ounces) globally
     expect(userStore.preferences().unitSystem).toBe('imperial');
+  });
+});
+
+**Example TDD for Cross-Tab State Synchronization (UC 7.25):**
+```typescript
+describe('CrossTabSyncService - BroadcastChannel API', () => {
+  beforeEach(() => {
+    // Mock BroadcastChannel API
+    global.BroadcastChannel = jest.fn().mockImplementation(() => ({
+      postMessage: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      close: jest.fn()
+    }));
+  });
+
+  it('should broadcast inventory updates to other tabs', () => {
+    const crossTabService = TestBed.inject(CrossTabSyncService);
+    const mockChannel = (global.BroadcastChannel as jest.Mock).mock.results[0].value;
+    
+    // Simulate inventory update
+    const inventoryUpdate = {
+      type: 'INVENTORY_UPDATE',
+      payload: { ingredientId: 'vodka', newQuantity: 450 }
+    };
+    
+    crossTabService.broadcastUpdate(inventoryUpdate);
+    
+    // Should post message to BroadcastChannel
+    expect(mockChannel.postMessage).toHaveBeenCalledWith(inventoryUpdate);
+  });
+
+  it('should receive updates from other tabs and update Angular Signals', () => {
+    const crossTabService = TestBed.inject(CrossTabSyncService);
+    const inventoryStore = TestBed.inject(InventoryStore);
+    
+    const mockChannel = (global.BroadcastChannel as jest.Mock).mock.results[0].value;
+    
+    // Spy on inventory store update method
+    const updateSpy = jest.spyOn(inventoryStore, 'updateFromCrossTab');
+    
+    // Simulate message from another tab
+    const messageEvent = new MessageEvent('message', {
+      data: {
+        type: 'INVENTORY_UPDATE',
+        payload: { ingredientId: 'vodka', newQuantity: 450 }
+      }
+    });
+    
+    // Trigger the event listener
+    const eventListener = mockChannel.addEventListener.mock.calls.find(
+      call => call[0] === 'message'
+    )[1];
+    eventListener(messageEvent);
+    
+    // Should update inventory store
+    expect(updateSpy).toHaveBeenCalledWith(messageEvent.data.payload);
+  });
+
+  it('should handle localStorage fallback when BroadcastChannel not supported', () => {
+    // Simulate browser without BroadcastChannel
+    delete (global as any).BroadcastChannel;
+    
+    const crossTabService = TestBed.inject(CrossTabSyncService);
+    
+    // Mock localStorage events
+    const storageListeners: Function[] = [];
+    const originalAddEventListener = window.addEventListener;
+    window.addEventListener = jest.fn().mockImplementation((event, handler) => {
+      if (event === 'storage') {
+        storageListeners.push(handler as Function);
+      }
+    });
+    
+    // Simulate storage event from another tab
+    const storageEvent = new StorageEvent('storage', {
+      key: 'mixologyhub_inventory_update',
+      newValue: JSON.stringify({ ingredientId: 'vodka', newQuantity: 450 })
+    });
+    
+    // Initialize service (should use localStorage fallback)
+    crossTabService.init();
+    
+    // Trigger storage event
+    storageListeners.forEach(handler => handler(storageEvent));
+    
+    // Should handle the update
+    expect(window.addEventListener).toHaveBeenCalledWith('storage', expect.any(Function));
+    
+    // Restore
+    window.addEventListener = originalAddEventListener;
+  });
+});
+
+**Example Playwright E2E Test for Cross-Tab Sync (UC 7.25):**
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('Cross-Tab State Synchronization', () => {
+  test('should sync inventory updates between browser tabs', async ({ browser }) => {
+    // Create two browser contexts (simulating two tabs)
+    const context1 = await browser.newContext();
+    const context2 = await browser.newContext();
+    
+    const page1 = await context1.newPage();
+    const page2 = await context2.newPage();
+    
+    // Login on both pages
+    await page1.goto('http://localhost:4200/login');
+    await page1.fill('[data-testid="email"]', 'test@example.com');
+    await page1.fill('[data-testid="password"]', 'password123');
+    await page1.click('[data-testid="login-button"]');
+    
+    await page2.goto('http://localhost:4200/login');
+    await page2.fill('[data-testid="email"]', 'test@example.com');
+    await page2.fill('[data-testid="password"]', 'password123');
+    await page2.click('[data-testid="login-button"]');
+    
+    // Navigate to inventory on both pages
+    await page1.goto('http://localhost:4200/inventory');
+    await page2.goto('http://localhost:4200/inventory');
+    
+    // Get initial inventory quantity from page 2
+    const initialQuantityText = await page2.textContent('[data-testid="vodka-quantity"]');
+    const initialQuantity = parseInt(initialQuantityText || '0');
+    
+    // Prepare a drink on page 1 (deducts inventory)
+    await page1.click('[data-testid="cocktail-mojito"]');
+    await page1.click('[data-testid="prepare-button"]');
+    
+    // Wait for sync (BroadcastChannel message)
+    await page2.waitForTimeout(1000);
+    
+    // Verify page 2 shows updated quantity
+    const updatedQuantityText = await page2.textContent('[data-testid="vodka-quantity"]');
+    const updatedQuantity = parseInt(updatedQuantityText || '0');
+    
+    // Should be 50ml less (cocktail preparation amount)
+    expect(updatedQuantity).toBe(initialQuantity - 50);
+    
+    // Verify notification appears on page 2
+    const notification = await page2.textContent('[data-testid="cross-tab-notification"]');
+    expect(notification).toContain('Inventory updated from another tab');
+    
+    await context1.close();
+    await context2.close();
+  });
+
+  test('should handle offline queue sync between tabs', async ({ browser }) => {
+    const context1 = await browser.newContext();
+    const context2 = await browser.newContext();
+    
+    const page1 = await context1.newPage();
+    const page2 = await context2.newPage();
+    
+    // Setup both pages
+    await page1.goto('http://localhost:4200/login');
+    await page1.fill('[data-testid="email"]', 'test@example.com');
+    await page1.fill('[data-testid="password"]', 'password123');
+    await page1.click('[data-testid="login-button"]');
+    
+    await page2.goto('http://localhost:4200/login');
+    await page2.fill('[data-testid="email"]', 'test@example.com');
+    await page2.fill('[data-testid="password"]', 'password123');
+    await page2.click('[data-testid="login-button"]');
+    
+    // Go offline on page 1
+    await page1.context().setOffline(true);
+    
+    // Prepare drink while offline (adds to queue)
+    await page1.click('[data-testid="cocktail-mojito"]');
+    await page1.click('[data-testid="prepare-button"]');
+    
+    // Verify offline queue shows 1 item
+    const queueCount1 = await page1.textContent('[data-testid="offline-queue-count"]');
+    expect(queueCount1).toBe('1');
+    
+    // Page 2 should show original inventory (no sync while offline)
+    const quantityPage2 = await page2.textContent('[data-testid="vodka-quantity"]');
+    
+    // Go online on page 1
+    await page1.context().setOffline(false);
+    
+    // Wait for sync to complete
+    await page1.waitForSelector('[data-testid="sync-complete"]', { timeout: 5000 });
+    
+    // Wait for cross-tab sync
+    await page2.waitForTimeout(2000);
+    
+    // Page 2 should now show updated inventory
+    const updatedQuantityPage2 = await page2.textContent('[data-testid="vodka-quantity"]');
+    expect(updatedQuantityPage2).not.toBe(quantityPage2);
+    
+    await context1.close();
+    await context2.close();
   });
 });
 ```

@@ -1219,6 +1219,141 @@ describe('User Service - GDPR & Account Deletion', () => {
     expect(exportData.export_date).toBeDefined();
   });
 });
+
+**Example TDD for JWT Revocation Race Condition:**
+```typescript
+describe('Auth Service - Race Condition Prevention', () => {
+  it('should handle concurrent logout and token validation', async () => {
+    const authService = new AuthService();
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'user123',
+        token_version: 1,
+        last_logout_timestamp: null
+      }),
+      save: jest.fn().mockImplementation((user) => Promise.resolve(user))
+    };
+    
+    authService.userRepo = userRepo;
+    
+    // Simulate race condition: logout updates token_version while old token is being validated
+    const oldToken = authService.generateAccessToken('user123', Date.now(), 1);
+    
+    // Concurrent operations
+    const logoutPromise = authService.logout('user123'); // Increments token_version to 2
+    const validatePromise = authService.validateAccessToken(oldToken); // Checks with version 1
+    
+    const [logoutResult, validationResult] = await Promise.allSettled([
+      logoutPromise,
+      validatePromise
+    ]);
+    
+    // Logout should succeed
+    expect(logoutResult.status).toBe('fulfilled');
+    
+    // Token validation should fail due to version mismatch
+    expect(validationResult.status).toBe('rejected');
+    expect(validationResult.reason.message).toContain('Token version mismatch');
+  });
+});
+
+**Example TDD for JWT Secret Rotation (UC 9.27):**
+```typescript
+describe('Auth Service - JWT Secret Rotation', () => {
+  it('should instantly invalidate all tokens when JWT_SECRET changes', async () => {
+    const authService = new AuthService();
+    
+    // Generate token with original secret
+    const originalSecret = 'original-secret-123';
+    process.env.JWT_SECRET = originalSecret;
+    
+    const token = authService.generateAccessToken('user123', Date.now(), 1);
+    
+    // Verify token validates with original secret
+    await expect(authService.validateAccessToken(token)).resolves.toBeDefined();
+    
+    // Simulate emergency secret rotation (system breach)
+    process.env.JWT_SECRET = 'new-secret-after-breach-456';
+    
+    // Token should be instantly invalid
+    await expect(authService.validateAccessToken(token))
+      .rejects
+      .toThrow('Invalid token signature');
+    
+    // New tokens with new secret should work
+    const newToken = authService.generateAccessToken('user123', Date.now(), 1);
+    await expect(authService.validateAccessToken(newToken)).resolves.toBeDefined();
+  });
+
+  it('should handle concurrent requests during secret rotation', async () => {
+    const authService = new AuthService();
+    
+    // Store original secret reference
+    const originalSecret = 'original-secret';
+    process.env.JWT_SECRET = originalSecret;
+    
+    // Generate multiple tokens before rotation
+    const tokens = Array(5).fill(null).map(() => 
+      authService.generateAccessToken('user123', Date.now(), 1)
+    );
+    
+    // Simulate secret rotation while validating tokens
+    const validationPromises = tokens.map((token, index) => {
+      // Rotate secret halfway through validations
+      if (index === 2) {
+        process.env.JWT_SECRET = 'new-secret-rotated';
+      }
+      return authService.validateAccessToken(token).catch(e => e.message);
+    });
+    
+    const results = await Promise.all(validationPromises);
+    
+    // First 2 tokens should validate (before rotation)
+    expect(results[0]).not.toContain('Invalid token signature');
+    expect(results[1]).not.toContain('Invalid token signature');
+    
+    // Last 3 tokens should fail (after rotation)
+    expect(results[2]).toContain('Invalid token signature');
+    expect(results[3]).toContain('Invalid token signature');
+    expect(results[4]).toContain('Invalid token signature');
+  });
+
+  it('should rotate token_version_salt for global session revocation', async () => {
+    const authService = new AuthService();
+    const redisService = new RedisService();
+    
+    authService.redisService = redisService;
+    
+    // Mock Redis for token version salt
+    const mockGet = jest.spyOn(redisService, 'get').mockResolvedValue('1');
+    const mockSet = jest.spyOn(redisService, 'set').mockResolvedValue('OK');
+    const mockIncr = jest.spyOn(redisService, 'incr').mockResolvedValue(2);
+    
+    // Generate token with current salt version
+    const token = authService.generateAccessToken('user123', Date.now(), 1);
+    
+    // Verify token includes salt version
+    const decoded = authService.decodeToken(token);
+    expect(decoded.saltVersion).toBe(1);
+    
+    // Simulate emergency global revocation
+    await authService.emergencyGlobalRevocation();
+    
+    // Should increment salt version in Redis
+    expect(mockIncr).toHaveBeenCalledWith('global_token_salt_version');
+    expect(mockSet).toHaveBeenCalledWith('global_token_salt_version', '2');
+    
+    // New tokens should use updated salt version
+    const newToken = authService.generateAccessToken('user123', Date.now(), 1);
+    const newDecoded = authService.decodeToken(newToken);
+    expect(newDecoded.saltVersion).toBe(2);
+    
+    // Old token should fail validation due to salt mismatch
+    await expect(authService.validateAccessToken(token))
+      .rejects
+      .toThrow('Token invalidated by global revocation');
+  });
+});
 ```
 ```
 ```

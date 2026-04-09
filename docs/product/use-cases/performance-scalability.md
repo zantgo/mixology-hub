@@ -31,3 +31,28 @@
 * **Then** Redis uses the `allkeys-lru` (Least Recently Used) eviction policy.
 * **And** silently evicts the oldest cached searches to make room without throwing an Out Of Memory (OOM) error to the NestJS application.
 * **And** monitors cache hit/miss ratios to optimize memory allocation for frequently accessed data.
+
+**UC 11.6: Cache Invalidation Strategy Matrix**
+* **Given** various data modification events occur in the system.
+* **When** specific events trigger cache invalidation:
+  * **User Inventory Change:** Invalidate `makeable:${userId}` cache
+  * **Admin Ingredient Synonym Update:** Flush all `makeable:*` caches and `synonym:*` caches
+  * **Public Cocktail Edit:** Invalidate `search:*` caches containing that cocktail
+  * **User Rating Update:** Invalidate `cocktail:${cocktailId}:rating` cache
+  * **New Global Ingredient:** Invalidate `ingredient:search:*` caches
+* **Then** the system applies targeted cache invalidation to maintain data consistency.
+* **And** uses Redis pub/sub for distributed cache invalidation across multiple backend instances.
+
+**UC 11.7: Targeted Cache Invalidation for Public Cocktails**
+* **Given** the Redis cache holds search results for `search:margarita`.
+* **When** a user creates a new Public Custom Cocktail named "Spicy Margarita".
+* **Then** the backend fires a background event to invalidate cache keys matching `search:*margarita*` (or clears the local search cache namespace).
+* **And** subsequent searches immediately reflect the newly added public cocktail.
+* **Note:** Private cocktails do not need to trigger global cache invalidation since they bypass the public cache layer.
+
+**UC 11.8: Distributed Rate Limiting via Redis**
+* **Given** the application is scaled horizontally across 3 Node.js instances behind a Load Balancer.
+* **When** a user spams the `POST /ai/generate` endpoint.
+* **Then** the NestJS `ThrottlerModule` utilizes the Redis storage provider (`ThrottlerStorageRedisService`).
+* **And** the request count is synchronized across all 3 instances, successfully blocking the user globally once the limit is hit.
+* **And** prevents rate limit bypass through horizontal scaling by using shared Redis counters instead of in-memory storage.

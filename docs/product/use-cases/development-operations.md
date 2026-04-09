@@ -38,3 +38,10 @@
 * **And** waits for existing database connections and transactions to commit or rollback gracefully (up to 10 seconds) before terminating the process.
 * **And** logs the shutdown process with transaction completion status for debugging.
 * **And** ensures no data corruption occurs during deployment restarts.
+
+**UC 14.7: Automated cleanup of expired preparation logs**
+* **Given** the `PREPARATION_LOGS` table contains logs older than 30 days.
+* **When** the nightly cron job executes.
+* **Then** the system permanently deletes logs where `created_at` is older than 30 days and `undone = false`.
+* **And** retains logs marked as `undone = true` for 90 days for audit purposes.
+* **And** minimizes database bloat while preserving audit trail for disputed transactions.

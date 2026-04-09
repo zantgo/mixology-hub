@@ -59,7 +59,29 @@
 * **And** provides clear feedback: "Missing 2oz Vodka for 3 servings".
 * **And** maintains accurate categorization as inventory changes relative to serving size.
 
-**UC 3.13: Recursive Hierarchy/Synonym Infinite Loop Prevention**
+**UC 3.9: Ratio/Part-based Measurements**
+* **Given** a cocktail recipe uses "parts" (e.g., 1 part Gin, 1 part Campari).
+* **When** the system evaluates makeability without a `totalVolumeMl` parameter.
+* **Then** it flags the cocktail as `requiresUserInput` to prompt the user for their desired total volume.
+
+**UC 3.10: Synonym Aggregation for Makeability**
+* **Given** a user has 30ml "Triple Sec" and 40ml "Cointreau" (synonyms for Orange Liqueur).
+* **And** a recipe requires 60ml "Orange Liqueur".
+* **When** makeability is calculated.
+* **Then** the engine aggregates the synonyms (70ml total) and marks the drink as Makeable.
+
+**UC 3.11: Makeability with Un-tracked Garnishes**
+* **Given** a cocktail requires an optional garnish (e.g., "Mint Sprig").
+* **When** the user has the base spirits but lacks the garnish.
+* **Then** the cocktail is marked as "Makeable (Missing Garnish)" rather than completely unmakeable.
+
+**UC 3.12: Hierarchical Ingredient Satisfaction**
+* **Given** a cocktail requires generic "Whiskey".
+* **And** the user has specific "Bourbon".
+* **When** makeability is checked.
+* **Then** the engine resolves the IS-A relationship and marks it as Makeable.
+
+**UC 3.17: Recursive Hierarchy/Synonym Infinite Loop Prevention**
 * **Given** the ingredient database has a circular reference: `Bourbon → Whiskey → Bourbon`.
 * **When** the `IngredientService.resolveHierarchy()` method is called for Bourbon.
 * **Then** the method tracks visited nodes to detect circular references.
@@ -67,7 +89,7 @@
 * **And** prevents stack overflow or infinite loops during makeability calculations.
 * **And** logs the circular reference for database cleanup.
 
-**UC 3.14: Deducting from overlapping synonym inventories**
+**UC 3.18: Deducting from overlapping synonym inventories**
 * **Given** a recipe requires `1 oz Light Rum` AND `1 oz Dark Rum`.
 * **And** the user has exactly `1.5 oz` of generic "Rum" (which maps as a hierarchical synonym to both).
 * **When** the makeability engine evaluates the cocktail.
@@ -75,15 +97,56 @@
 * **And** correctly flags the cocktail as "Almost Makeable" (missing 0.5 oz), rather than double-counting the 1.5 oz for both requirements.
 * **And** prevents inventory over-allocation across overlapping synonym hierarchies.
 
-**UC 3.15: Handling 0-Volume / Rinse Ingredients**
+**UC 3.19: Handling 0-Volume / Rinse Ingredients**
 * **Given** a "Sazerac" recipe requires an "Absinthe Rinse" (amount: `0` or `null`, unit: `rinse`).
 * **When** the makeability engine checks the user's inventory.
 * **Then** the system requires the user to have Absinthe in their inventory (quantity > 0).
 * **And** when "Prepared", the system does **not** deduct any volume for the Absinthe, but leaves the inventory untouched while deducting the primary spirits.
 * **And** marks rinse ingredients as "qualitative" rather than "quantitative" for inventory tracking purposes.
 
-**UC 3.16: Fractional Servings / Scaling Down**
+**UC 3.20: Fractional Servings / Scaling Down**
 * **Given** a cocktail requires `2 oz` of Whiskey, but the user only has `1 oz`.
 * **When** the user requests makeability with `servings=0.5`.
 * **Then** the math engine divides the requirements (`1 oz` Whiskey).
 * **And** flags the cocktail as `Makeable` for a half-portion.
+
+**UC 3.21: Evaluating Makeability for External API Cocktails**
+* **Given** TheCocktailDB returns a cocktail with string ingredients like "Light Rum".
+* **When** the Aggregator Service processes external cocktails for makeability.
+* **Then** it calls `resolveBaseIngredient("Light Rum")` to map the string to a local UUID.
+* **And** queries the Redis synonym cache to find canonical ingredient relationships.
+* **And** passes the resolved UUIDs to the Makeability Math Engine for calculation.
+* **And** caches the string-to-UUID mappings to optimize subsequent evaluations.
+
+**UC 3.22: Aggregating Specific Children to satisfy a Generic Parent**
+* **Given** a cocktail requires `4 oz` of generic "Whiskey".
+* **And** the user has NO generic "Whiskey" row, but has `2 oz` of "Bourbon" and `2 oz` of "Rye".
+* **When** the Makeable Cocktails query runs.
+* **Then** the math engine traverses the hierarchy upwards.
+* **And** aggregates the children (`2 + 2 = 4`).
+* **And** flags the cocktail as Makeable.
+* **Note:** This requires hierarchical traversal different from synonym overlapping, as it sums quantities across multiple specific child ingredients.
+
+**UC 3.23: Bounding Part-Based Total Volumes**
+* **Given** a user requests makeability or preparation of a part-based cocktail.
+* **When** they input a `totalVolumeMl` exceeding `10,000 ml` (10 Liters).
+* **Then** the validation pipe rejects the request with `400 Bad Request`.
+* **And** prevents integer overflow or massive decimal calculations in the Math Engine.
+* **And** provides user-friendly error: "Total volume cannot exceed 10 liters (10,000 ml)."
+
+**UC 3.24: Mass-to-Volume Density Conversion**
+* **Given** a recipe requires `50 g` of "Honey" and the user's inventory has `100 ml` of Honey.
+* **When** the `UnitConverterService` attempts to validate makeability.
+* **Then** it references the `density` column on the Honey ingredient record (e.g., `1.42 g/ml`).
+* **And** mathematically calculates that `50 g` equals `35.21 ml`.
+* **And** successfully validates that `100 ml >= 35.21 ml` without throwing an `IncompatibleUnitError`.
+* **Note:** Requires the `density` column in the INGREDIENTS table to enable mass↔volume conversions.
+
+**UC 3.25: The N+1 Makeability Pagination Problem**
+* **Context:** Cannot paginate in SQL after doing in-memory math for makeability validation.
+* **Given** a user requests `GET /makeable?limit=10`.
+* **When** the SQL `HAVING` clause returns 5,000 potentially makeable cocktails.
+* **Then** the Math Engine limits its evaluation strictly to the first X records that satisfy the cursor.
+* **And** evaluates sequentially until exactly `limit=10` perfectly makeable cocktails are found.
+* **And** does NOT calculate math for all 5,000 before returning the first 10.
+* **Performance Optimization:** Uses cursor-based pagination with early termination to prevent O(N²) performance degradation as inventory grows.

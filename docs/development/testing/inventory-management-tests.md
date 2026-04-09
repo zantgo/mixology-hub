@@ -914,6 +914,543 @@ describe('AdminIngredientService - Merge Ingredients', () => {
     expect(deleteSpy).toHaveBeenCalledWith('A');
   });
 });
+
+**Example TDD for Decimal Math Precision on Large Batches:**
+```typescript
+describe('UnitConverterService - Decimal Precision for Large Batches', () => {
+  it('should not lose precision when scaling fractional ingredients by massive servings', () => {
+    // e.g., 0.33 oz (1/3 oz) * 10,000 servings
+    // Ensure the Math engine uses precise decimal libraries (like decimal.js) 
+    // instead of native JS floats to prevent rounding drifts
+    
+    const converter = new UnitConverterService();
+    
+    // Test with recurring decimal (1/3 = 0.333333...)
+    const singleServing = 1/3; // 0.3333333333333333 (JavaScript float)
+    const largeBatch = 10000;
+    
+    // Native JavaScript float multiplication (prone to rounding errors)
+    const nativeResult = singleServing * largeBatch; // 3333.3333333333335
+    
+    // Decimal.js precise multiplication
+    const Decimal = require('decimal.js');
+    const preciseSingle = new Decimal(1).div(3); // 0.33333333333333333333
+    const preciseResult = preciseSingle.times(largeBatch); // 3333.3333333333333333
+    
+    // The difference shows the rounding error
+    const roundingError = Math.abs(nativeResult - preciseResult.toNumber());
+    
+    // JavaScript float error is about 0.0000000000005
+    expect(roundingError).toBeGreaterThan(0);
+    
+    // Our converter should use precise math
+    const converterResult = converter.scaleAmount(singleServing, largeBatch);
+    
+    // Should match precise result within acceptable tolerance
+    expect(Math.abs(converterResult - preciseResult.toNumber())).toBeLessThan(0.0000001);
+  });
+
+  it('should handle very small fractional amounts correctly', () => {
+    const converter = new UnitConverterService();
+    
+    // 1/64 oz (very small amount)
+    const tinyAmount = 1/64; // 0.015625
+    const batchSize = 1000;
+    
+    const result = converter.scaleAmount(tinyAmount, batchSize);
+    
+    // 0.015625 * 1000 = 15.625 exactly
+    expect(result).toBe(15.625);
+    
+    // Should not be 15.624999999999998 (JavaScript float error)
+    expect(result).not.toBe(15.624999999999998);
+  });
+
+  it('should maintain precision across unit conversions and scaling', () => {
+    const converter = new UnitConverterService();
+    
+    // Convert 1/3 oz to ml, then scale by 5000
+    const amountOz = 1/3; // 0.333333...
+    const batchSize = 5000;
+    
+    // Step 1: Convert oz to ml (1 oz = 29.5735 ml)
+    const amountMl = converter.convert(amountOz, 'oz', 'ml');
+    
+    // Step 2: Scale for batch
+    const batchMl = converter.scaleAmount(amountMl, batchSize);
+    
+    // Expected: (1/3) * 29.5735 * 5000 = 49289.16666666667
+    const expected = (1/3) * 29.5735 * 5000;
+    
+    // Check precision
+    const error = Math.abs(batchMl - expected);
+    expect(error).toBeLessThan(0.0001);
+  });
+
+  it('should use decimal.js for all mathematical operations', () => {
+    const converter = new UnitConverterService();
+    
+    // Verify converter uses Decimal internally
+    const amount = new converter.Decimal(1).div(3); // Should be Decimal instance
+    expect(amount.constructor.name).toBe('Decimal');
+    
+    const scaled = amount.times(10000);
+    expect(scaled.constructor.name).toBe('Decimal');
+    
+    // Convert to number for comparison
+    const result = scaled.toNumber();
+    
+    // Should be precise
+    expect(result).toBeCloseTo(3333.333333333333, 10);
+  });
+
+  it('should handle inventory aggregation with fractional amounts', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // Mock multiple inventory entries with fractional amounts
+    jest.spyOn(inventoryService.inventoryRepo, 'find').mockResolvedValue([
+      { ingredientId: 'vodka', quantity: 100.33, unit: 'ml' },
+      { ingredientId: 'vodka', quantity: 50.67, unit: 'ml' },
+      { ingredientId: 'gin', quantity: 75.25, unit: 'ml' },
+      { ingredientId: 'gin', quantity: 25.75, unit: 'ml' }
+    ]);
+    
+    const aggregated = await inventoryService.getAggregatedInventory('user123');
+    
+    // Vodka: 100.33 + 50.67 = 151.00 exactly
+    const vodkaEntry = aggregated.find(i => i.ingredientId === 'vodka');
+    expect(vodkaEntry.quantity).toBe(151.00);
+    
+    // Gin: 75.25 + 25.75 = 101.00 exactly
+    const ginEntry = aggregated.find(i => i.ingredientId === 'gin');
+    expect(ginEntry.quantity).toBe(101.00);
+    
+    // Should not be 150.99999999999997 or 100.99999999999999
+    expect(vodkaEntry.quantity).not.toBe(150.99999999999997);
+    expect(ginEntry.quantity).not.toBe(100.99999999999999);
+  });
+
+  it('should prevent cumulative rounding errors in batch preparation', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Cocktail requires 0.33 oz of vodka per serving
+    const servings = 10000;
+    const requiredPerServing = 1/3; // 0.333333...
+    
+    // Calculate total required
+    const totalRequired = preparationService.calculateTotalRequired(requiredPerServing, servings);
+    
+    // Should be exactly 3333.3333333333335 (or precise equivalent)
+    // Not 3333.333333333333 or 3333.333333333334
+    const expected = (1/3) * 10000;
+    
+    // Check precision
+    const error = Math.abs(totalRequired - expected);
+    expect(error).toBeLessThan(0.000000000001);
+    
+    // Verify deduction uses precise math
+    const mockInventory = { quantity: 5000 };
+    const remaining = preparationService.deductFromInventory(mockInventory, totalRequired);
+    
+    // 5000 - 3333.3333333333335 = 1666.6666666666665
+    const expectedRemaining = 5000 - expected;
+    const remainingError = Math.abs(remaining - expectedRemaining);
+    expect(remainingError).toBeLessThan(0.000000000001);
+  });
+
+  it('should handle edge case of many small fractional deductions', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Simulate preparing 1000 cocktails, each requiring 0.001 oz
+    const smallAmount = 0.001;
+    const manyServings = 1000;
+    
+    // Calculate total
+    const total = preparationService.calculateTotalRequired(smallAmount, manyServings);
+    
+    // 0.001 * 1000 = 1.0 exactly
+    expect(total).toBe(1.0);
+    
+    // Should not be 0.9999999999999999
+    expect(total).not.toBe(0.9999999999999999);
+  });
+
+  it('should validate that database decimal columns match JavaScript precision', () => {
+    // Test that PostgreSQL decimal(10,2) matches our Decimal.js precision
+    
+    const testValues = [
+      0.01,  // Smallest representable in decimal(10,2)
+      0.33,  // Recurring decimal
+      123456.78,  // Large with 2 decimal places
+      999999.99,  // Maximum for decimal(10,2)
+      0.005, // Should round to 0.01
+      0.004  // Should round to 0.00
+    ];
+    
+    const columnTransformer = new ColumnNumericTransformer();
+    
+    testValues.forEach(value => {
+      // Transform to database format
+      const dbValue = columnTransformer.to(value);
+      
+      // Transform back from database
+      const jsValue = columnTransformer.from(dbValue.toString());
+      
+      // Should match within rounding rules
+      const roundedValue = Math.round(value * 100) / 100;
+      expect(jsValue).toBeCloseTo(roundedValue, 2);
+    });
+  });
+});
+
+**Example TDD for Strict Boundary Failsafe (Part-Based Volume Bounding):**
+```typescript
+describe('Inventory Service - Strict Boundary Failsafe', () => {
+  it('should reject part-based cocktails with astronomically large volumes', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Mock cocktail with part-based recipe: 1 part vodka, 1 part lime juice
+    const mockCocktail = {
+      id: 'part-based-cocktail',
+      recipeType: 'parts',
+      ingredients: [
+        { ingredientId: 'vodka', amount: 1, unit: 'part' },
+        { ingredientId: 'lime-juice', amount: 1, unit: 'part' }
+      ]
+    };
+    
+    // User attempts to prepare with partSize = 1000000 (1 million ml per part)
+    const partSize = 1000000; // 1000 liters per part - absurdly large
+    
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, partSize))
+      .rejects
+      .toThrow('Part size exceeds maximum allowed volume (10000 ml per part)');
+  });
+
+  it('should enforce maximum part size boundary', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Test at the boundary
+    const maxPartSize = 10000; // 10 liters per part (maximum allowed)
+    const boundaryPartSize = 10001; // Just over boundary
+    
+    const mockCocktail = {
+      id: 'test-cocktail',
+      recipeType: 'parts',
+      ingredients: [{ ingredientId: 'vodka', amount: 1, unit: 'part' }]
+    };
+    
+    // Should accept at boundary
+    jest.spyOn(preparationService, 'validatePartSize').mockReturnValue(true);
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, maxPartSize))
+      .resolves.not.toThrow();
+    
+    // Should reject just over boundary
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, boundaryPartSize))
+      .rejects
+      .toThrow('Part size exceeds maximum allowed volume');
+  });
+
+  it('should prevent integer overflow attacks with large part counts', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    // Attack scenario: 1000 parts * 10000 ml = 10,000,000 ml total
+    const mockCocktail = {
+      id: 'overflow-attack',
+      recipeType: 'parts',
+      ingredients: [
+        { ingredientId: 'vodka', amount: 1000, unit: 'part' } // 1000 parts!
+      ]
+    };
+    
+    const partSize = 10000; // Maximum allowed per part
+    
+    // Total would be 1000 * 10000 = 10,000,000 ml (10,000 liters!)
+    // Should be rejected even though partSize is within limit
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, partSize))
+      .rejects
+      .toThrow('Total volume exceeds safe limits');
+  });
+
+  it('should calculate total volume safely for part-based recipes', () => {
+    const preparationService = new CocktailPreparationService();
+    
+    const cocktail = {
+      ingredients: [
+        { amount: 2, unit: 'part' }, // 2 parts vodka
+        { amount: 1, unit: 'part' }, // 1 part lime
+        { amount: 0.5, unit: 'part' } // 0.5 part simple syrup
+      ]
+    };
+    
+    const partSize = 50; // 50 ml per part
+    const servings = 2; // Double batch
+    
+    const totalVolume = preparationService.calculateTotalVolume(cocktail, partSize, servings);
+    
+    // (2 + 1 + 0.5) parts = 3.5 parts per serving
+    // 3.5 parts * 50 ml/part * 2 servings = 350 ml total
+    const expected = 3.5 * 50 * 2;
+    
+    expect(totalVolume).toBe(expected);
+    
+    // Should use safe multiplication to prevent overflow
+    expect(() => preparationService.calculateTotalVolume(cocktail, 1000000, 1000000))
+      .toThrow('Total volume calculation would overflow');
+  });
+
+  it('should validate part size before any inventory operations', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    const validateSpy = jest.spyOn(preparationService, 'validatePartSize');
+    const inventorySpy = jest.spyOn(preparationService, 'checkInventoryAvailability');
+    
+    const largePartSize = 50000; // 50 liters per part - should be rejected
+    
+    try {
+      await preparationService.prepareCocktail('user123', 'cocktail-id', 1, largePartSize);
+    } catch (error) {
+      // Validation should happen BEFORE inventory check
+      expect(validateSpy).toHaveBeenCalled();
+      expect(inventorySpy).not.toHaveBeenCalled();
+    }
+  });
+
+  it('should provide user-friendly error messages for boundary violations', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    const testCases = [
+      { partSize: 1000000, expectedMessage: 'Part size (1000.0 L) exceeds maximum allowed (10.0 L)' },
+      { partSize: 50000, expectedMessage: 'Part size (50.0 L) exceeds maximum allowed (10.0 L)' },
+      { partSize: 15000, expectedMessage: 'Part size (15.0 L) exceeds maximum allowed (10.0 L)' }
+    ];
+    
+    for (const testCase of testCases) {
+      try {
+        await preparationService.prepareCocktail('user123', 'cocktail-id', 1, testCase.partSize);
+      } catch (error) {
+        expect(error.message).toContain(testCase.expectedMessage);
+        expect(error.statusCode).toBe(400);
+      }
+    }
+  });
+
+  it('should allow reasonable part sizes for normal use', async () => {
+    const preparationService = new CocktailPreparationService();
+    
+    const reasonableSizes = [30, 50, 100, 500, 1000]; // 30ml to 1L per part
+    
+    for (const partSize of reasonableSizes) {
+      jest.spyOn(preparationService, 'validatePartSize').mockReturnValue(true);
+      jest.spyOn(preparationService, 'checkInventoryAvailability').mockResolvedValue(true);
+      jest.spyOn(preparationService, 'deductInventory').mockResolvedValue();
+      
+      await expect(preparationService.prepareCocktail('user123', 'cocktail-id', 1, partSize))
+        .resolves.not.toThrow();
+    }
+  });
+
+  it('should apply boundary checks to user-provided part size in API', async () => {
+    // This test simulates the API layer validation
+    const cocktailController = new CocktailController();
+    
+    const invalidRequest = {
+      cocktailId: 'part-based-cocktail',
+      servings: 1,
+      partSize: 999999 // Absurdly large
+    };
+    
+    const mockResponse = {
+      status: jest.fn().mockReturnThis(),
+      json: jest.fn()
+    };
+    
+    await cocktailController.prepareCocktail(invalidRequest, mockResponse);
+    
+    // Should return 400 Bad Request
+    expect(mockResponse.status).toHaveBeenCalledWith(400);
+    expect(mockResponse.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: 'Part size exceeds maximum allowed volume'
+      })
+    );
+  });
+
+  it('should log boundary violations for security monitoring', async () => {
+    const preparationService = new CocktailPreparationService();
+    const loggerSpy = jest.spyOn(preparationService.logger, 'warn');
+    
+    const attackAttempt = {
+      userId: 'attacker-123',
+      cocktailId: 'test-cocktail',
+      partSize: 1000000,
+      timestamp: new Date().toISOString()
+    };
+    
+    try {
+      await preparationService.prepareCocktail(
+        attackAttempt.userId,
+        attackAttempt.cocktailId,
+        1,
+        attackAttempt.partSize
+      );
+    } catch (error) {
+      // Should log the attempt
+      expect(loggerSpy).toHaveBeenCalledWith(
+        'Boundary violation attempt detected',
+        expect.objectContaining({
+          userId: attackAttempt.userId,
+          partSize: attackAttempt.partSize,
+          maxAllowed: 10000,
+          ipAddress: expect.any(String)
+        })
+      );
+    }
+  });
+});
+
+**Example TDD for Decimal.js Serialization to JSON:**
+```typescript
+describe('Decimal.js Serialization', () => {
+  it('should serialize decimal.js objects to standard Numbers in JSON responses', () => {
+    const inventoryService = new UserInventoryService();
+    
+    // Mock inventory with decimal.js values
+    const decimalInventory = {
+      id: 'inv-123',
+      ingredientId: 'vodka-456',
+      quantity: new Decimal(500.75), // decimal.js object
+      unit: 'ml'
+    };
+    
+    // Service method that returns inventory
+    jest.spyOn(inventoryService, 'getInventoryItem').mockResolvedValue(decimalInventory);
+    
+    // Controller that serializes to JSON
+    const inventoryController = new InventoryController(inventoryService);
+    
+    // Get response
+    const response = await inventoryController.getInventoryItem('user123', 'inv-123');
+    
+    // Convert to JSON (simulating HTTP response)
+    const jsonResponse = JSON.stringify(response);
+    const parsedResponse = JSON.parse(jsonResponse);
+    
+    // Should be standard Number, not decimal.js internal object
+    expect(typeof parsedResponse.quantity).toBe('number');
+    expect(parsedResponse.quantity).toBe(500.75);
+    
+    // Should NOT contain decimal.js internal structure
+    expect(parsedResponse.quantity).not.toHaveProperty('d');
+    expect(parsedResponse.quantity).not.toHaveProperty('e');
+    expect(parsedResponse.quantity).not.toHaveProperty('s');
+  });
+
+  it('should handle decimal.js in nested objects for API responses', () => {
+    const cocktailService = new CocktailService();
+    
+    // Mock cocktail with decimal.js in nested ingredients
+    const cocktailWithDecimals = {
+      id: 'cocktail-123',
+      name: 'Test Cocktail',
+      ingredients: [
+        {
+          ingredientId: 'vodka-456',
+          amount: new Decimal(2.5), // decimal.js
+          unit: 'oz',
+          measure: '2.5 oz'
+        },
+        {
+          ingredientId: 'lime-789',
+          amount: new Decimal(1), // decimal.js
+          unit: 'oz',
+          measure: '1 oz'
+        }
+      ]
+    };
+    
+    jest.spyOn(cocktailService, 'getCocktail').mockResolvedValue(cocktailWithDecimals);
+    
+    const cocktailController = new CocktailController(cocktailService);
+    
+    // Simulate API response serialization
+    const response = cocktailController.getCocktail('cocktail-123');
+    const jsonString = JSON.stringify(response);
+    const parsed = JSON.parse(jsonString);
+    
+    // All decimal.js values should be converted to Numbers
+    parsed.ingredients.forEach(ingredient => {
+      expect(typeof ingredient.amount).toBe('number');
+      expect(ingredient.amount).not.toHaveProperty('d');
+      expect(ingredient.amount).not.toHaveProperty('e');
+      expect(ingredient.amount).not.toHaveProperty('s');
+    });
+    
+    expect(parsed.ingredients[0].amount).toBe(2.5);
+    expect(parsed.ingredients[1].amount).toBe(1);
+  });
+
+  it('should use class-transformer to automatically convert decimal.js', () => {
+    // DTO with @Transform decorator
+    class InventoryItemDto {
+      @Transform(({ value }) => value instanceof Decimal ? value.toNumber() : value)
+      quantity: number;
+      
+      ingredientId: string;
+      unit: string;
+    }
+    
+    // Entity with decimal.js
+    const inventoryEntity = {
+      quantity: new Decimal(750.50),
+      ingredientId: 'gin-123',
+      unit: 'ml'
+    };
+    
+    // Transform using class-transformer
+    const dto = plainToInstance(InventoryItemDto, inventoryEntity);
+    
+    // Should be plain number
+    expect(typeof dto.quantity).toBe('number');
+    expect(dto.quantity).toBe(750.5);
+    
+    // Serialize to JSON
+    const json = JSON.stringify(dto);
+    const parsed = JSON.parse(json);
+    
+    expect(typeof parsed.quantity).toBe('number');
+    expect(parsed.quantity).toBe(750.5);
+  });
+
+  it('should handle edge cases: null, undefined, and zero decimal.js values', () => {
+    const testCases = [
+      { value: new Decimal(0), expected: 0 },
+      { value: new Decimal(null), expected: 0 },
+      { value: new Decimal(undefined), expected: 0 },
+      { value: null, expected: null },
+      { value: undefined, expected: undefined },
+      { value: new Decimal('NaN'), expected: NaN },
+      { value: new Decimal(Infinity), expected: Infinity }
+    ];
+    
+    testCases.forEach(({ value, expected }) => {
+      const dto = {
+        quantity: value instanceof Decimal ? value.toNumber() : value
+      };
+      
+      const json = JSON.stringify(dto);
+      const parsed = JSON.parse(json);
+      
+      if (expected === undefined) {
+        expect(parsed.quantity).toBeUndefined();
+      } else if (Number.isNaN(expected)) {
+        expect(parsed.quantity).toBeNaN();
+      } else {
+        expect(parsed.quantity).toBe(expected);
+      }
+    });
+  });
+});
 ```
 ```
 ```

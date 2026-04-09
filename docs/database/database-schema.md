@@ -29,13 +29,16 @@ COCKTAILS ||--o{ COCKTAIL_INGREDIENTS : "contains"
 INGREDIENTS ||--o{ COCKTAIL_INGREDIENTS : "used_in"
 
 INGREDIENTS ||--o{ USER_INVENTORY : "stocked_as"
+INGREDIENTS ||--o{ INGREDIENT_RELATIONS : "has_children"
+INGREDIENTS ||--o{ INGREDIENT_RELATIONS : "has_parents"
 
 COCKTAILS ||--o{ FAVORITES : "is_favorited"
 
 USERS ||--o{ COCKTAIL_RATINGS : "rates"
 COCKTAILS ||--o{ COCKTAIL_RATINGS : "is_rated_by"
 USERS ||--o{ PREPARATION_LOGS : "performs"
-COCKTAILS ||--o{ PREPARATION_LOGS : "is_prepared_as"
+COCKTAILS }o--o{ PREPARATION_LOGS : "is_prepared_as"
+USERS ||--o{ REFRESH_TOKENS : "has_sessions"
 
   
 
@@ -66,8 +69,18 @@ string name UK
 
 string baseUnit
 
+decimal density DEFAULT 1.0 "Used for Mass <-> Volume conversions"
+
 uuid created_by FK "nullable: true"
 
+}
+
+  
+
+INGREDIENT_RELATIONS {
+  uuid parent_id FK
+  uuid child_id FK
+  string relationship_type "enum: 'synonym', 'is_a'"
 }
 
   
@@ -88,7 +101,9 @@ boolean is_public
 
   string image_url
   decimal rating
-  uuid created_by FK
+  string category "nullable: true"
+  string glassware "nullable: true"
+  uuid created_by FK "nullable: true"
   }
 
   
@@ -142,17 +157,11 @@ string external_cocktail_id
   
 
 AI_RECIPES {
-
-uuid id PK
-
-string prompt
-
-jsonb generated_recipe
-
-uuid created_by FK
-
+  uuid id PK
+  string prompt
+  jsonb generated_recipe
+  uuid created_by FK "nullable: true"
   timestamp created_at
-
 }
 
 COCKTAIL_RATINGS {
@@ -167,10 +176,35 @@ COCKTAIL_RATINGS {
 PREPARATION_LOGS {
   uuid id PK
   uuid user_id FK
-  uuid cocktail_id FK
+  uuid cocktail_id FK "nullable: true"
+  string external_cocktail_id "nullable: true"
   integer servings
   jsonb deducted_ingredients "Stores exact IDs, amounts, units deducted"
   timestamp created_at "Used for the 15-minute undo window"
+  boolean undone DEFAULT false
+}
+
+REFRESH_TOKENS {
+  uuid id PK
+  uuid user_id FK
+  string token_family "Used for rotating token chains"
+  string hashed_token "bcrypt hash of the current refresh token"
+  boolean is_revoked DEFAULT false
+  timestamp expires_at
+  timestamp created_at
+}
+
+REPORTED_CONTENT {
+  uuid id PK
+  uuid reported_by FK "User who reported the content"
+  uuid cocktail_id FK "nullable: true"
+  string external_cocktail_id "nullable: true"
+  string report_reason "enum: 'inappropriate', 'spam', 'copyright', 'other'"
+  string details "optional text details from reporter"
+  string status "enum: 'pending', 'reviewed', 'dismissed', 'action_taken' DEFAULT 'pending'"
+  uuid reviewed_by FK "nullable: true, admin who reviewed"
+  timestamp created_at
+  timestamp reviewed_at "nullable: true"
 }
 
 ```
@@ -205,6 +239,8 @@ The global catalog of all possible ingredients.
 
 - **`baseUnit`:** A critical field (e.g., `ml`, `g`). It dictates the mathematical baseline for unit conversions when checking inventory.
 
+- **`density`:** Decimal field (`decimal(5,4)`) with default value `1.0`. Used for mass-to-volume conversions (e.g., honey has density ≈ 1.42 g/ml). Enables the `UnitConverterService` to convert between mass and volume units for ingredients where both measurement types are valid.
+
   
 
 ### 3. `user_inventory`
@@ -215,9 +251,19 @@ Tracks what a user physically owns.
 
 - **`quantity`:** Uses PostgreSQL `decimal(10,2)`. *Floating-point types (`float`, `real`) are strictly avoided* to prevent rounding errors during fractional unit conversions.
 
+### 4. `ingredient_relations`
+
+Maps hierarchical and synonym relationships between ingredients.
+
+- **`parent_id` & `child_id`:** Foreign keys to `INGREDIENTS` table, forming a closure table pattern for efficient hierarchical queries.
+- **`relationship_type`:** Enum field with values `'synonym'` (alternative names for same ingredient) or `'is_a'` (hierarchical parent-child relationship).
+- **Composite Unique Constraint:** `['parent_id', 'child_id', 'relationship_type']` prevents duplicate relationship entries.
+- **Self-Referential:** Allows ingredients to have multiple parents/children (e.g., "Vodka" is_a "Spirit", "Gin" is_a "Spirit", "Vodka" synonym "Wódka").
+- **Use Cases:** Supports UC 3.10 (Synonyms) and UC 3.12 (Hierarchy) for intelligent ingredient matching and substitution.
+
   
 
-### 4. `cocktails` & `cocktail_ingredients` (Many-to-Many)
+### 5. `cocktails` & `cocktail_ingredients` (Many-to-Many)
 
 Stores user-created recipes or AI-saved recipes.
 
@@ -233,7 +279,7 @@ Stores user-created recipes or AI-saved recipes.
 
   
 
-### 5. `favorites`
+### 6. `favorites`
 
 A mapping table allowing users to save recipes.
 
@@ -241,13 +287,13 @@ A mapping table allowing users to save recipes.
 
   
 
-### 6. `ai_generated_recipes`
+### 7. `ai_generated_recipes`
 
 Logs the history of AI requests.
 
 - **`generated_recipe`:** Uses the PostgreSQL `JSONB` data type. This allows the backend to store the raw JSON output from the LLM provider efficiently, making it queryable and indexable if needed, before the user decides to convert it into a permanent `Cocktail` record.
 
-### 7. `user_profiles`
+### 8. `user_profiles`
 
 Stores user preferences and settings.
 
@@ -255,13 +301,13 @@ Stores user preferences and settings.
 - **`theme`:** Stores the user's UI theme preference (`light`, `dark`, or `system`).
 - **One-to-One Relationship:** Each user has exactly one profile record, created automatically when a user registers.
 
-### 8. `cocktails.rating` Column
+### 9. `cocktails.rating` Column
 
 - **`rating`:** Decimal field (`decimal(3,2)`) storing average user ratings for cocktails (0.00 to 5.00 scale).
 - **Nullable:** Can be `NULL` for cocktails without ratings.
 - **Precision:** `decimal(3,2)` allows values from 0.00 to 9.99, providing sufficient range for 5-star rating systems with decimal precision.
 
-### 9. `cocktail_ratings` Pivot Table
+### 10. `cocktail_ratings` Pivot Table
 
 - **Purpose:** Stores individual user ratings for cocktails to prevent double-voting and enable rating updates.
 - **Composite Unique Constraint:** `[user_id, cocktail_id]` ensures each user can rate a cocktail only once.
@@ -299,11 +345,21 @@ The global `ingredients` table is initially populated via a migration or seeder 
 
   
 
-1. **Cascading Deletes (`ON DELETE CASCADE`):**
+1. **Cascading Deletes (`ON DELETE CASCADE`) and Nullification (`ON DELETE SET NULL`):**
 
 - If a `User` is deleted, their `UserInventory`, `Favorites`, and custom `Cocktails` are automatically wiped.
 
 - If a `Cocktail` is deleted, its `Cocktail_Ingredients` are cleanly removed, preventing orphaned relational rows.
+
+- If a `Cocktail` is deleted, `PREPARATION_LOGS.cocktail_id` is set to `NULL` (`ON DELETE SET NULL`) to preserve preparation history and enable undo functionality even after the original cocktail is deleted.
+
+2. **Concurrency Control for `PREPARATION_LOGS`:**
+
+- The `undone` column in `PREPARATION_LOGS` must be protected with database-level locking during undo operations to ensure idempotency (UC 4.19).
+
+- Implementation uses `SELECT ... FOR UPDATE` or application-level distributed locks (Redis) when checking and updating the `undone` flag.
+
+- Prevents duplicate inventory restoration from concurrent undo requests.
 
 2. **Eager Loading Optimization:**
 
@@ -350,3 +406,45 @@ export class ColumnNumericTransformer {
 ```
 
 **Why this matters:** The `UnitConverterService` performs precise mathematical calculations for inventory management. String values would cause `NaN` errors or incorrect conversions, potentially allowing users to prepare cocktails they don't have ingredients for.
+
+## 🔍 PostgreSQL Extensions for Advanced Features
+
+### Required Extensions
+The database requires specific PostgreSQL extensions for advanced functionality:
+
+```sql
+-- Enable pg_trgm for fuzzy string matching (AI entity resolution & search)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Create indexes for trigram similarity searches
+CREATE INDEX idx_ingredients_name_trgm ON ingredients USING gin (normalized_name gin_trgm_ops);
+CREATE INDEX idx_cocktails_name_trgm ON cocktails USING gin (name gin_trgm_ops);
+```
+
+### pg_trgm Usage Examples
+1. **AI Entity Resolution (UC 5.26):** Fuzzy matching AI-generated ingredient strings to existing catalog
+   ```sql
+   SELECT id, name, similarity(normalized_name, 'fresh squeezed lime') AS score
+   FROM ingredients 
+   WHERE similarity(normalized_name, 'fresh squeezed lime') > 0.8
+   ORDER BY score DESC
+   LIMIT 1;
+   ```
+
+2. **Typo-Tolerant Search (UC 2.25):** Finding cocktails despite spelling errors
+   ```sql
+   SELECT id, name, similarity(name, 'margaritta') AS score
+   FROM cocktails
+   WHERE similarity(name, 'margaritta') > 0.3
+   ORDER BY score DESC;
+   ```
+
+### Performance Benefits
+- **Trigam similarity** is significantly faster than Levenshtein distance for large datasets
+- **GIN indexes** enable efficient fuzzy matching without full table scans
+- **Threshold-based matching** (e.g., `similarity() > 0.8`) provides accurate results while preventing false positives
+
+### Deployment Requirements
+- Include `CREATE EXTENSION` statements in database migration scripts
+- Ensure PostgreSQL instance has `pg_trgm` extension available
+- Test similarity thresholds during development to balance accuracy and performance

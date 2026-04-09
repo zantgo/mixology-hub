@@ -18,11 +18,11 @@
 * **Then** the rate limiter applies different thresholds (e.g., 5/min for AI generation, 60/min for inventory updates).
 * **And** protects both cost-sensitive and performance-sensitive endpoints appropriately.
 
-**UC 12.4: CSRF Protection for State-Changing Requests (Conditional - If using HTTP-Only cookies)**
-* **Given** the application uses HTTP-Only cookies for authentication.
-* **When** a `POST`, `PUT`, or `DELETE` request is made from an unauthorized origin or missing a CSRF token.
-* **Then** the global CSRF middleware intercepts the request.
-* **And** rejects it with a `403 Forbidden` error.
+**UC 12.4: CSRF Protection for Refresh Token Endpoint**
+* **Given** the `/auth/refresh` endpoint utilizes an `HttpOnly` cookie to issue new Access Tokens.
+* **When** a `POST /auth/refresh` request is made from a cross-origin context.
+* **Then** the backend validates a CSRF token (or relies on strict `SameSite=Strict` cookie policies + CORS origin validation).
+* **And** rejects unauthorized automated requests to prevent session hijacking.
 
 **UC 12.5: SSRF and Malicious Image URL Protection**
 * **Given** a malicious user submits a custom cocktail with an `image_url` pointing to an internal IP (e.g., `http://169.254.169.254` or `javascript:alert(1)`).
@@ -58,3 +58,18 @@
 * **When** they make 100 requests in 10 seconds.
 * **Then** the `ThrottlerGuard` flags the anomalous pagination/search behavior.
 * **And** returns a `429 Too Many Requests` to prevent malicious scraping of the local ingredient and cocktail database.
+
+**UC 12.10: Content Moderation & Reporting**
+* **Given** a user discovers a public cocktail with inappropriate instructions or images.
+* **When** they click "Report Cocktail".
+* **Then** the cocktail is flagged in a new `REPORTED_CONTENT` database table.
+* **And** it is temporarily hidden from the global Aggregator Search until an Admin reviews and clears/deletes it via the Admin Dashboard.
+* **And** the reporting user receives confirmation that their report has been received and will be reviewed.
+
+**UC 12.11: Admin Moderation of Reported Content**
+* **Given** a user has reported a public cocktail (creating a `REPORTED_CONTENT` row).
+* **When** an Admin reviews it and calls `PATCH /admin/reports/:id/resolve` with action `delete_cocktail`.
+* **Then** the cocktail is hard-deleted or soft-deleted.
+* **And** the report status is updated to `action_taken`.
+* **And** the system automatically emails the reporting user thanking them, and the offending author with a warning.
+* **And** maintains audit trail of moderation actions for compliance.
