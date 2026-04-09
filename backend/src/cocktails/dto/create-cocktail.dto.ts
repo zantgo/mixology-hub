@@ -62,4 +62,13 @@ export class CreateCocktailDto {
   @IsOptional()
   @IsUrl({ require_protocol: true }, { message: 'imageUrl must be a valid URL with protocol (http:// or https://)' })
   imageUrl?: string;
+
+  @ApiProperty({ 
+    example: true, 
+    description: 'Whether the cocktail is publicly visible to other users',
+    required: false,
+    default: true 
+  })
+  @IsOptional()
+  isPublic?: boolean;
 }

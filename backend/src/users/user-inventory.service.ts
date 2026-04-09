@@ -10,6 +10,7 @@ import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CheckMakeabilityDto } from './dto/check-makeability.dto';
 import { DepleteInventoryDto } from './dto/deplete-inventory.dto';
+import { BulkSyncDto, BulkSyncResult, BulkSyncResultItem } from './dto/bulk-sync.dto';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 
 export interface MakeabilityResult {
@@ -54,9 +55,9 @@ export class UserInventoryService {
     let quantityToStore = dto.quantity;
     if (dto.unit !== ingredient.baseUnit) {
       try {
-        quantityToStore = this.unitConverter.convert(dto.quantity, dto.unit, ingredient.baseUnit);
+        quantityToStore = this.unitConverter.convert(dto.quantity, dto.unit, ingredient.baseUnit, ingredient);
       } catch (error) {
-        throw new BadRequestException(`Cannot convert ${dto.quantity} ${dto.unit} to ${ingredient.baseUnit}`);
+        throw new BadRequestException(`Cannot convert ${dto.quantity} ${dto.unit} to ${ingredient.baseUnit}: ${error.message}`);
       }
     }
 
@@ -110,9 +111,9 @@ export class UserInventoryService {
     let quantityToStore = quantity;
     if (unit !== item.ingredient.baseUnit) {
       try {
-        quantityToStore = this.unitConverter.convert(quantity, unit, item.ingredient.baseUnit);
+        quantityToStore = this.unitConverter.convert(quantity, unit, item.ingredient.baseUnit, item.ingredient);
       } catch (error) {
-        throw new BadRequestException(`Cannot convert ${quantity} ${unit} to ${item.ingredient.baseUnit}`);
+        throw new BadRequestException(`Cannot convert ${quantity} ${unit} to ${item.ingredient.baseUnit}: ${error.message}`);
       }
     }
 
@@ -186,7 +187,8 @@ export class UserInventoryService {
         directMatch.quantity,
         directMatch.unit,
         requiredAmount,
-        requiredUnit
+        requiredUnit,
+        requiredIngredient
       );
       if (hasEnough) {
         return { item: directMatch, isSubstitution: false };
@@ -210,7 +212,8 @@ export class UserInventoryService {
           substitutionMatch.quantity,
           substitutionMatch.unit,
           requiredAmount,
-          requiredUnit
+          requiredUnit,
+          requiredIngredient
         );
         if (hasEnough) {
           return { 
@@ -269,7 +272,8 @@ export class UserInventoryService {
         const amountToDeplete = this.unitConverter.convert(
           required.amount,
           required.unit,
-          matchingInventory.item.unit
+          matchingInventory.item.unit,
+          requiredIngredient
         );
 
         // Update inventory
@@ -311,6 +315,10 @@ export class UserInventoryService {
     }
 
     // Get all cocktails and filter by makeability
+    // NOTE: This has an N+1 problem. For production, consider:
+    // 1. Creating a PostgreSQL function for unit conversions
+    // 2. Using a materialized view
+    // 3. Implementing pagination at database level with window functions
     const allCocktails = await this.cocktailRepository.find({
       relations: ['ingredients', 'ingredients.ingredient'],
       where: { is_public: true },
@@ -358,7 +366,7 @@ export class UserInventoryService {
       }
       // Convert all to ml for volume summary
       try {
-        const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml');
+        const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
         return sum + volumeInMl;
       } catch {
         return sum; // Skip unconvertible items
@@ -393,7 +401,7 @@ export class UserInventoryService {
           return item.quantity < 5;
         }
         try {
-          const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml');
+          const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
           return volumeInMl < 100;
         } catch {
           return false;
@@ -404,6 +412,44 @@ export class UserInventoryService {
         quantity: item.quantity,
         unit: item.unit,
       })),
+    };
+  }
+
+  async bulkSync(userId: string, dto: BulkSyncDto): Promise<BulkSyncResult> {
+    const results: BulkSyncResultItem[] = [];
+    
+    // Process each operation independently
+    for (const operation of dto.operations) {
+      try {
+        // Use a separate transaction for each operation
+        const result = await this.depleteInventory(userId, {
+          ingredients: operation.ingredients,
+        });
+        
+        results.push({
+          clientOperationId: operation.clientOperationId,
+          success: true,
+          depletedItems: result.depletedItems,
+        });
+      } catch (error) {
+        results.push({
+          clientOperationId: operation.clientOperationId,
+          success: false,
+          error: error.message || 'Unknown error',
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    return {
+      results,
+      summary: {
+        total: results.length,
+        successful,
+        failed,
+      },
     };
   }
 }

@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Expose } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { Cocktail } from './cocktail.entity';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
@@ -7,6 +8,7 @@ import { Ingredient } from '../../ingredients/entities/ingredient.entity';
 export class CocktailIngredient {
   @ApiProperty({ description: 'Unique identifier of the recipe-ingredient relationship' })
   @PrimaryGeneratedColumn('uuid')
+  @Expose()
   id: string;
 
   @ManyToOne(() => Cocktail, (cocktail) => cocktail.ingredients, { onDelete: 'CASCADE' })
@@ -20,6 +22,7 @@ export class CocktailIngredient {
   @ApiProperty({ type: () => Ingredient, description: 'The linked ingredient from the catalog' })
   @ManyToOne(() => Ingredient, { eager: true }) 
   @JoinColumn({ name: 'ingredient_id' })
+  @Expose()
   ingredient: Ingredient;
 
   /**
@@ -28,22 +31,16 @@ export class CocktailIngredient {
    */
   @ApiProperty({ example: '2 oz', description: 'Human-readable measurement string' })
   @Column()
+  @Expose()
   measure: string;
 
-  /**
-   * The exact numeric amount required. 
-   * Crucial for inventory depletion logic and "Makeable" logic.
-   * Using 'decimal' type in TypeORM is best practice for money/quantity to avoid floating-point errors.
-   */
   @ApiProperty({ example: 2.00, description: 'Numeric amount for inventory calculation' })
-  @Column('decimal', { precision: 10, scale: 2, default: 0 })
+  @Column('decimal', { precision: 10, scale: 4, default: 0 })
+  @Expose()
   amount: number;
 
-  /**
-   * The strict unit of measurement (e.g., 'oz', 'ml', 'units').
-   * Must align with the units used in UserInventory for successful mathematical conversion.
-   */
   @ApiProperty({ example: 'oz', description: 'The unit used for calculations (ml, oz, grams)' })
   @Column({ default: 'units' })
+  @Expose()
   unit: string;
 }

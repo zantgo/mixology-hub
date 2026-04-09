@@ -64,6 +64,18 @@ make test-e2e        # Backend E2E tests (Supertest)
 - PostgreSQL: 5433 → 5432
 - Redis: 6379
 
+## 🧭 Documentation Routing (Read before acting)
+
+Depending on the task assigned by the user, use your file reading tool (`read_file`) to consult the exact document:
+
+- 🎨 **If you are going to create or modify UI/Components (Buttons, Cards, Forms):** Read `docs/design/component-library.md` and `docs/design/design-system.md`.
+- 📱 **If you are going to create a new view or flow (e.g., the Inventory screen):** Read `docs/design/ui-ux-flows.md`.
+- ♿ **If you are going to work on accessibility or semantic HTML:** Read `docs/design/accessibility-a11y.md`.
+- ⚙️ **If you are going to create Backend logic (Services, Controllers):** Review `docs/architecture/backend-architecture.md` and the specific use case in `docs/product/use-cases/`.
+- 🗄️ **If you are going to modify the database:** Read `docs/database/database-schema.md`.
+
+_Strict rule:_ DO NOT assume the design. Always verify CSS variables and structure in the `/docs/design/` files before creating a component.
+
 ## Gotchas
 1. **AI Integration**: Must configure `.env` with valid API credentials
 2. **Database**: Uses port 5433 (not standard 5432) to avoid conflicts

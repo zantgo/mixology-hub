@@ -50,6 +50,7 @@
 * **Then** the backend automatically fetches the user's current `user_inventory`.
 * **And** injects the inventory list into the LLM system prompt (e.g., "Only use these ingredients: Vodka, Orange Juice").
 * **And** generates a recipe guaranteed to be 100% makeable immediately.
+* **Frontend Validation:** The "Strict Inventory" toggle/button should be disabled or show a warning if the user's inventory is empty, preventing unnecessary HTTP 400 round-trips.
 
 **UC 5.9: Payload Size / Token Limitation Defense**
 * **Given** a user submits an ingredient list exceeding 500 characters or 20 ingredients.

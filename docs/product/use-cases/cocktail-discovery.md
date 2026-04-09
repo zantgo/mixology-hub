@@ -36,8 +36,12 @@
 **UC 2.6: Unified Pagination Handling**
 * **Given** a unified search where the local DB has 2 results and the external API has 50 results.
 * **When** the user requests `page=1&limit=10`.
-* **Then** the Aggregator Service correctly combines 2 local and 8 external results.
-* **And** preserves the cursor/offset so `page=2` correctly fetches external items 9-18.
+* **Then** the Aggregator Service:
+  * **Local Database:** Uses optimized offset pagination with `WHERE id > last_id` for performance (cursor-like behavior)
+  * **External API:** Uses offset pagination with TheCocktailDB's `page` parameter
+  * **Combination:** Correctly combines 2 local and 8 external results
+* **And** preserves the offset so `page=2` correctly fetches external items 9-18.
+* **And** caches pagination state in Redis to maintain consistency across requests.
 
 **UC 2.7: Manual Custom Cocktail Creation**
 * **Given** a user wants to add their family's secret Margarita recipe.
@@ -189,7 +193,9 @@
 **UC 2.30: Rating a Cocktail**
 * **Given** a user views a cocktail they've prepared or favorited.
 * **When** they submit a 1-5 star rating via `POST /cocktails/:id/rate`.
-* **Then** the system inserts or updates their row in the `COCKTAIL_RATINGS` pivot table.
+* **Then** the system checks if the cocktail exists locally:
+  * **If local cocktail:** Inserts or updates their row in the `COCKTAIL_RATINGS` pivot table.
+  * **If external cocktail:** Auto-forks the external cocktail to create a local copy with `source='api'` and `external_id` preserved, then rates the forked copy.
 * **And** triggers an asynchronous background job to recalculate and update the cached `rating` average on the `COCKTAILS` table.
 * **And** returns the updated average rating in the response.
 

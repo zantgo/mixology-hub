@@ -141,6 +141,15 @@ To keep this README concise, detailed engineering documentation has been separat
   * [Features Deep-Dive](./docs/product/features.md) – Use cases and business logic implementation
   * [Future Roadmap](./docs/product/roadmap.md) – Phased development plan and scalability roadmap
 
+* **Design & User Experience:**
+  * [Design System](./docs/design/design-system.md) – Colors, typography, spacing, and visual tokens
+  * [Component Library](./docs/design/component-library.md) – Reusable UI components and specifications
+  * [UI/UX Flows](./docs/design/ui-ux-flows.md) – User journeys and screen interactions
+  * [Responsive Layout](./docs/design/responsive-layout.md) – Breakpoints, grids, and device-specific rules
+  * [Motion & States](./docs/design/motion-and-states.md) – Animations, loading, and interactive feedback
+  * [Accessibility (A11Y)](./docs/design/accessibility-a11y.md) – Screen reader support and WCAG compliance
+  * [Asset Management](./docs/design/asset-management.md) – Icons, images, and fallback strategies
+
 * **Development & DevOps:**
   * [Local Setup Guide](./docs/development/setup.md) – Docker-first development environment
   * [Coding Standards](./docs/development/coding-standards.md) – TypeScript best practices, LLM security patterns

@@ -14,10 +14,10 @@ export interface Cocktail {
   name: string;
   description?: string;
   instructions: string;
-  is_public: boolean;
+  isPublic: boolean;
   source: 'local' | 'api' | 'ai';
-  external_id?: string;
-  image_url?: string;
+  externalId?: string;
+  imageUrl?: string;
   ingredients: CocktailIngredient[];
-  created_at: Date;
+  createdAt: Date;
 }

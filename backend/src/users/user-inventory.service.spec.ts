@@ -101,11 +101,6 @@ describe('UserInventoryService', () => {
           provide: getRepositoryToken(Cocktail),
           useValue: {
             find: jest.fn(),
-            createQueryBuilder: jest.fn(() => ({
-              leftJoinAndSelect: jest.fn().mockReturnThis(),
-              where: jest.fn().mockReturnThis(),
-              getMany: jest.fn(),
-            })),
           },
         },
         {
@@ -218,7 +213,11 @@ describe('UserInventoryService', () => {
 
       await service.addToInventory(mockUser as User, addInventoryDto);
 
-      expect(unitConverterService.convert).toHaveBeenCalledWith(16.9, 'oz', 'ml');
+      expect(unitConverterService.convert).toHaveBeenCalledWith(16.9, 'oz', 'ml', expect.objectContaining({
+        id: 'ingredient-123',
+        name: 'vodka',
+        baseUnit: 'ml'
+      }));
     });
 
     it('should throw error for invalid ingredient', async () => {
@@ -331,7 +330,11 @@ describe('UserInventoryService', () => {
 
       await service.updateInventoryItem(mockUser.id, 'inventory-123', 16, 'oz');
 
-      expect(unitConverterService.convert).toHaveBeenCalledWith(16, 'oz', 'ml');
+      expect(unitConverterService.convert).toHaveBeenCalledWith(16, 'oz', 'ml', expect.objectContaining({
+        id: 'ingredient-123',
+        name: 'vodka',
+        baseUnit: 'ml'
+      }));
     });
 
     it('should throw error for invalid inventory item', async () => {

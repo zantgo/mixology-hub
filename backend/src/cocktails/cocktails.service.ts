@@ -27,7 +27,7 @@ export class CocktailsService {
     private readonly unitConverter: UnitConverterService,
   ) {}
 
-  async create(createCocktailDto: CreateCocktailDto) {
+  async create(createCocktailDto: CreateCocktailDto): Promise<Cocktail> {
     const mockUser = await this.userRepository.findOne({ 
         where: { email: 'mock@test.com' } 
     });
@@ -36,12 +36,13 @@ export class CocktailsService {
         throw new NotFoundException('Mock user not found in database');
     }
 
-    return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
+    const cocktail = await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
       const newCocktail = this.cocktailRepository.create({
         name: createCocktailDto.name,
         description: createCocktailDto.description,
         instructions: createCocktailDto.instructions,
         image_url: createCocktailDto.imageUrl,
+        is_public: createCocktailDto.isPublic ?? true, // Default to true if not provided
         user: mockUser,
       });
 
@@ -69,6 +70,18 @@ export class CocktailsService {
 
       return savedCocktail;
     });
+
+    // Load the complete cocktail with relations
+    const completeCocktail = await this.cocktailRepository.findOne({
+      where: { id: cocktail.id },
+      relations: ['ingredients', 'ingredients.ingredient', 'user'],
+    });
+
+    if (!completeCocktail) {
+      throw new InternalServerErrorException('Failed to retrieve created cocktail');
+    }
+
+    return completeCocktail;
   }
 
   async prepare(cocktailId: string) {
@@ -85,7 +98,7 @@ export class CocktailsService {
 
         const stock = inventory.find(i => i.ingredient && i.ingredient.id === req.ingredient.id);
         
-        if (!stock || !this.unitConverter.hasEnoughStock(Number(stock.quantity), stock.unit, req.amount, req.unit)) {
+        if (!stock || !this.unitConverter.hasEnoughStock(Number(stock.quantity), stock.unit, req.amount, req.unit, req.ingredient)) {
           throw new BadRequestException(`Not enough stock for ingredient: ${req.ingredient.name || 'Unknown'}`);
         }
       }
@@ -93,7 +106,7 @@ export class CocktailsService {
       for (const req of cocktail.ingredients) {
         const stock = inventory.find(i => i.ingredient.id === req.ingredient.id);
         if (stock) {
-            const amountToSubtract = this.unitConverter.convert(req.amount, req.unit, stock.unit);
+            const amountToSubtract = this.unitConverter.convert(req.amount, req.unit, stock.unit, req.ingredient);
             stock.quantity -= amountToSubtract;
             await transactionalEntityManager.save(stock);
         }

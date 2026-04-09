@@ -1,4 +1,6 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -30,6 +32,7 @@ export class CocktailAggregatorService {
     private readonly localService: CocktailsService,
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly inventoryService: UserInventoryService,
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
   /**
@@ -51,41 +54,57 @@ export class CocktailAggregatorService {
 
       const sanitizedName = name ? name.trim() : '';
 
-      // 1. Fetch data from all sources in parallel
-      const [localCocktails, externalCocktails] = await Promise.all([
-        options.includeLocal !== false ? this.fetchLocalCocktails(sanitizedName) : Promise.resolve([]),
-        options.includeExternal !== false ? this.fetchExternalCocktails(sanitizedName) : Promise.resolve([]),
-      ]);
-
-      // 2. Normalize and combine
-      const normalizedExternal = Array.isArray(externalCocktails) 
-        ? externalCocktails.map(drink => this.mapExternalToLocal(drink))
-        : [];
-
-      let unifiedList = [...localCocktails, ...normalizedExternal];
-
-      // 3. Apply filters
-      if (options.filters) {
-        unifiedList = this.applyFilters(unifiedList, options.filters);
+      // Generate cache key for this search
+      const cacheKey = this.generateSearchCacheKey(sanitizedName, options, userId);
+      
+      // Try to get pagination state from cache
+      let paginationState = await this.cacheManager.get<any>(`pagination:${cacheKey}`);
+      
+      if (!paginationState || offset === 0) {
+        // Cache miss or first page - fetch fresh data
+        paginationState = await this.fetchAndCacheSearchResults(
+          sanitizedName, options, userId, cacheKey
+        );
       }
 
-      // 4. Calculate makeability scores if user ID provided
-      if (userId) {
-        unifiedList = await this.calculateMakeabilityScores(unifiedList, userId);
+      // Apply pagination using cached state
+      const { unifiedList, lastId } = paginationState;
+      
+      // Use optimized pagination: if we have lastId, use cursor-based pagination
+      let paginatedList;
+      if (lastId && offset > 0) {
+        // Find position of lastId and slice from there
+        const lastIndex = unifiedList.findIndex(item => item.id === lastId);
+        if (lastIndex !== -1) {
+          paginatedList = unifiedList.slice(lastIndex + 1, lastIndex + 1 + limit);
+        } else {
+          // Fallback to offset pagination
+          paginatedList = unifiedList.slice(offset, offset + limit);
+        }
+      } else {
+        // First page or no lastId - use offset pagination
+        paginatedList = unifiedList.slice(offset, offset + limit);
       }
 
-      // 5. Sort results
-      unifiedList = this.sortCocktails(unifiedList, options.sortBy, options.sortOrder);
-
-      // 6. Apply pagination
-      const paginatedList = unifiedList.slice(offset, offset + limit);
+      // Update lastId in cache for next page
+      if (paginatedList.length > 0) {
+        const newLastId = paginatedList[paginatedList.length - 1].id;
+        await this.cacheManager.set(`pagination:${cacheKey}`, {
+          ...paginationState,
+          lastId: newLastId,
+        }, 300); // 5 minute TTL
+      }
 
       // 7. Add metadata
+      // Count local vs external cocktails in the paginated results
+      const localCount = paginatedList.filter(item => item.source === 'local').length;
+      const externalCount = paginatedList.filter(item => item.source === 'api').length;
+      
       const metadata = {
         sources: {
-          local: localCocktails.length,
-          external: normalizedExternal.length,
-          total: unifiedList.length,
+          local: localCount,
+          external: externalCount,
+          total: paginationState.unifiedList.length,
         },
         filters: options.filters || {},
         sort: {
@@ -119,52 +138,7 @@ export class CocktailAggregatorService {
     }
   }
 
-  private async fetchLocalCocktails(name: string) {
-    try {
-      // Use a high limit internally to allow filtering
-      const response = await this.localService.findAll({ limit: 10000, offset: 0 });
-      const localCocktails = response.data;
-      
-      if (!name) {
-        return localCocktails;
-      }
-      
-      // Fuzzy search with multiple criteria
-      return localCocktails.filter(c => 
-        c.name.toLowerCase().includes(name.toLowerCase()) ||
-        (c.description && c.description.toLowerCase().includes(name.toLowerCase())) ||
-        c.ingredients.some(ing => 
-          ing.ingredient.name.toLowerCase().includes(name.toLowerCase())
-        )
-      );
-    } catch (error) {
-      this.logger.warn('Failed to fetch local cocktails:', error);
-      return [];
-    }
-  }
 
-  private async fetchExternalCocktails(name: string) {
-    try {
-      if (!name) {
-        // For empty search, get random cocktails
-        const randomCocktails: any[] = [];
-        for (let i = 0; i < 5; i++) {
-          try {
-            const random = await this.externalService.getRandomCocktail();
-            if (random) randomCocktails.push(random);
-          } catch (error) {
-            // Ignore individual random cocktail failures
-          }
-        }
-        return randomCocktails;
-      }
-      
-      return await this.externalService.searchByName(name);
-    } catch (error) {
-      this.logger.warn('Failed to fetch external cocktails:', error);
-      return [];
-    }
-  }
 
   private applyFilters(cocktails: any[], filters: SearchFilters): any[] {
     return cocktails.filter(cocktail => {
@@ -441,6 +415,116 @@ export class CocktailAggregatorService {
     } catch (error) {
       this.logger.warn(`Invalid image URL: ${url}`, error);
       return null;
+    }
+  }
+
+  private generateSearchCacheKey(
+    name: string, 
+    options: SearchOptions, 
+    userId?: string
+  ): string {
+    const keyParts = [
+      'search',
+      name || 'all',
+      options.includeLocal ? 'local' : '',
+      options.includeExternal ? 'external' : '',
+      options.sortBy || 'name',
+      options.sortOrder || 'asc',
+      userId || 'anonymous',
+      JSON.stringify(options.filters || {}),
+    ];
+    
+    return keyParts.filter(part => part).join(':');
+  }
+
+  private async fetchAndCacheSearchResults(
+    name: string,
+    options: SearchOptions,
+    userId?: string,
+    cacheKey?: string
+  ): Promise<{ unifiedList: any[]; lastId?: string }> {
+    // 1. Fetch data from all sources in parallel
+    const [localCocktails, externalCocktails] = await Promise.all([
+      options.includeLocal !== false ? this.fetchLocalCocktails(name) : Promise.resolve([]),
+      options.includeExternal !== false ? this.fetchExternalCocktails(name) : Promise.resolve([]),
+    ]);
+
+    // 2. Normalize and combine
+    const normalizedExternal = Array.isArray(externalCocktails) 
+      ? externalCocktails.map(drink => this.mapExternalToLocal(drink))
+      : [];
+
+    let unifiedList = [...localCocktails, ...normalizedExternal];
+
+    // 3. Apply filters
+    if (options.filters) {
+      unifiedList = this.applyFilters(unifiedList, options.filters);
+    }
+
+    // 4. Calculate makeability scores if user ID provided
+    if (userId) {
+      unifiedList = await this.calculateMakeabilityScores(unifiedList, userId);
+    }
+
+    // 5. Sort results
+    unifiedList = this.sortCocktails(unifiedList, options.sortBy, options.sortOrder);
+
+    // Cache the full results
+    if (cacheKey) {
+      await this.cacheManager.set(
+        `pagination:${cacheKey}`,
+        { unifiedList, lastId: undefined },
+        300 // 5 minute TTL
+      );
+    }
+
+    return { unifiedList };
+  }
+
+  private async fetchLocalCocktails(name: string): Promise<any[]> {
+    try {
+      // Use a high limit internally to allow filtering
+      const response = await this.localService.findAll({ limit: 10000, offset: 0 });
+      const localCocktails = response.data;
+      
+      if (!name) {
+        return localCocktails;
+      }
+      
+      // Fuzzy search with multiple criteria
+      return localCocktails.filter(c => 
+        c.name.toLowerCase().includes(name.toLowerCase()) ||
+        (c.description && c.description.toLowerCase().includes(name.toLowerCase())) ||
+        c.ingredients.some(ing => 
+          ing.ingredient.name.toLowerCase().includes(name.toLowerCase())
+        )
+      );
+    } catch (error) {
+      this.logger.warn('Failed to fetch local cocktails:', error);
+      return [];
+    }
+  }
+
+  private async fetchExternalCocktails(name: string): Promise<any[]> {
+    try {
+      if (!name) {
+        // For empty search, get random cocktails
+        const randomCocktails: any[] = [];
+        for (let i = 0; i < 5; i++) {
+          try {
+            const random = await this.externalService.getRandomCocktail();
+            if (random) randomCocktails.push(random);
+          } catch (error) {
+            // Ignore individual random cocktail failures
+          }
+        }
+        return randomCocktails;
+      }
+      
+      return await this.externalService.searchByName(name);
+    } catch (error) {
+      this.logger.warn('Failed to fetch external cocktails:', error);
+      return [];
     }
   }
 }

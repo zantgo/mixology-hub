@@ -23,7 +23,7 @@ export class CocktailService {
   }
 
   // Create a new cocktail
-  createCocktail(cocktail: Omit<Cocktail, 'id' | 'created_at' | 'is_public' | 'source'> & { imageUrl?: string }): Observable<Cocktail> {
+  createCocktail(cocktail: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'> & { imageUrl?: string }): Observable<Cocktail> {
     return this.http.post<Cocktail>(this.apiUrl, cocktail);
   }
 

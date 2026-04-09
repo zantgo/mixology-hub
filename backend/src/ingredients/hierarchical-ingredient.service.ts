@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { Ingredient } from './entities/ingredient.entity';
 
 export interface IngredientMatch {
@@ -21,13 +23,13 @@ export interface IngredientSubstitution {
 @Injectable()
 export class HierarchicalIngredientService {
   private readonly logger = new Logger(HierarchicalIngredientService.name);
-  private ingredientCache: Map<string, Ingredient> = new Map();
-  private hierarchyCache: Map<string, Ingredient[]> = new Map();
-  private synonymCache: Map<string, string[]> = new Map();
+  private readonly CACHE_TTL = 3600; // 1 hour in seconds
+  private readonly CACHE_PREFIX = 'ingredient:hierarchy:';
 
   constructor(
     @InjectRepository(Ingredient)
     private readonly ingredientRepository: Repository<Ingredient>,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async findBestMatch(
@@ -242,9 +244,12 @@ export class HierarchicalIngredientService {
   }
 
   private async findExactMatch(normalizedName: string): Promise<Ingredient | null> {
-    // Check cache first
-    if (this.ingredientCache.has(normalizedName)) {
-      return this.ingredientCache.get(normalizedName)!;
+    const cacheKey = `${this.CACHE_PREFIX}name:${normalizedName}`;
+    
+    // Check Redis cache first
+    const cached = await this.cacheManager.get<Ingredient>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const ingredient = await this.ingredientRepository.findOne({
@@ -252,7 +257,8 @@ export class HierarchicalIngredientService {
     });
 
     if (ingredient) {
-      this.ingredientCache.set(normalizedName, ingredient);
+      // Cache in Redis with TTL
+      await this.cacheManager.set(cacheKey, ingredient, this.CACHE_TTL * 1000);
     }
 
     return ingredient;
@@ -455,9 +461,12 @@ export class HierarchicalIngredientService {
   }
 
   private async getIngredientById(id: string): Promise<Ingredient | null> {
-    // Check cache
-    if (this.ingredientCache.has(id)) {
-      return this.ingredientCache.get(id)!;
+    const cacheKey = `${this.CACHE_PREFIX}ingredient:${id}`;
+    
+    // Check Redis cache first
+    const cached = await this.cacheManager.get<Ingredient>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const ingredient = await this.ingredientRepository.findOne({
@@ -466,7 +475,8 @@ export class HierarchicalIngredientService {
     });
 
     if (ingredient) {
-      this.ingredientCache.set(id, ingredient);
+      // Cache in Redis with TTL
+      await this.cacheManager.set(cacheKey, ingredient, this.CACHE_TTL * 1000);
     }
 
     return ingredient;
@@ -478,9 +488,12 @@ export class HierarchicalIngredientService {
   }
 
   private async getAncestors(ingredientId: string): Promise<Ingredient[]> {
-    const cacheKey = `ancestors_${ingredientId}`;
-    if (this.hierarchyCache.has(cacheKey)) {
-      return this.hierarchyCache.get(cacheKey)!;
+    const cacheKey = `${this.CACHE_PREFIX}ancestors:${ingredientId}`;
+    
+    // Check Redis cache first
+    const cached = await this.cacheManager.get<Ingredient[]>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const ancestors: Ingredient[] = [];
@@ -497,14 +510,18 @@ export class HierarchicalIngredientService {
       currentId = parent.id;
     }
 
-    this.hierarchyCache.set(cacheKey, ancestors);
+    // Cache in Redis with TTL
+    await this.cacheManager.set(cacheKey, ancestors, this.CACHE_TTL * 1000);
     return ancestors;
   }
 
   private async getDescendants(ingredientId: string): Promise<Ingredient[]> {
-    const cacheKey = `descendants_${ingredientId}`;
-    if (this.hierarchyCache.has(cacheKey)) {
-      return this.hierarchyCache.get(cacheKey)!;
+    const cacheKey = `${this.CACHE_PREFIX}descendants:${ingredientId}`;
+    
+    // Check Redis cache first
+    const cached = await this.cacheManager.get<Ingredient[]>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const allIngredients = await this.ingredientRepository.find({
@@ -523,7 +540,8 @@ export class HierarchicalIngredientService {
       queue.push(...children);
     }
 
-    this.hierarchyCache.set(cacheKey, descendants);
+    // Cache in Redis with TTL
+    await this.cacheManager.set(cacheKey, descendants, this.CACHE_TTL * 1000);
     return descendants;
   }
 
@@ -638,26 +656,33 @@ export class HierarchicalIngredientService {
   }
 
   // Cache management
-  clearCache(): void {
-    this.ingredientCache.clear();
-    this.hierarchyCache.clear();
-    this.synonymCache.clear();
-    this.logger.log('Ingredient hierarchy cache cleared');
+  async clearCache(): Promise<void> {
+    // Redis doesn't have a simple "clear by prefix" in cache-manager
+    // In production, you might want to use Redis SCAN command
+    // For now, we'll just log that cache should be cleared at Redis level
+    this.logger.log('Note: For Redis cache clearing, use Redis CLI or restart Redis service');
+    this.logger.log('In-memory cache methods are deprecated, using Redis with TTL');
   }
 
   async warmupCache(): Promise<void> {
-    this.logger.log('Warming up ingredient hierarchy cache...');
+    this.logger.log('Warming up ingredient hierarchy cache in Redis...');
     
     const allIngredients = await this.ingredientRepository.find({
       relations: ['parent'],
     });
 
-    // Cache all ingredients by ID and name
-    allIngredients.forEach(ingredient => {
-      this.ingredientCache.set(ingredient.id, ingredient);
-      this.ingredientCache.set(this.normalizeName(ingredient.name), ingredient);
+    // Cache all ingredients by ID and name in Redis
+    const cachePromises = allIngredients.map(async (ingredient) => {
+      const idCacheKey = `${this.CACHE_PREFIX}ingredient:${ingredient.id}`;
+      const nameCacheKey = `${this.CACHE_PREFIX}name:${this.normalizeName(ingredient.name)}`;
+      
+      await Promise.all([
+        this.cacheManager.set(idCacheKey, ingredient, this.CACHE_TTL * 1000),
+        this.cacheManager.set(nameCacheKey, ingredient, this.CACHE_TTL * 1000),
+      ]);
     });
 
-    this.logger.log(`Cached ${allIngredients.length} ingredients`);
+    await Promise.all(cachePromises);
+    this.logger.log(`Cached ${allIngredients.length} ingredients in Redis`);
   }
 }

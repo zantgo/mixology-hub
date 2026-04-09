@@ -19,9 +19,10 @@ Use cases are split into domain-specific files for easier navigation and mainten
 | [authentication.md](./authentication.md) | Authentication & Multi-Tenant | UC 9.1-9.11 | JWT auth, password hashing, rate limiting, GDPR deletion, user preferences, email verification |
 | [data-integrity.md](./data-integrity.md) | Data Integrity & Edge Cases | UC 10.1-10.3 | Decimal precision, unit conversion, synonyms |
 | [performance-scalability.md](./performance-scalability.md) | Performance & Scalability | UC 11.1-11.4 | Query optimization, caching, fallback strategies, Redis degradation |
-| [security-compliance.md](./security-compliance.md) | Security & Compliance | UC 12.1-12.4 | XSS prevention, SQL injection, rate limiting, CSRF protection |
-| [analytics-monitoring.md](./analytics-monitoring.md) | Analytics & Monitoring | UC 13.1-13.3 | Usage tracking, error monitoring, performance |
-| [development-operations.md](./development-operations.md) | Development & Operations | UC 14.1-14.4 | Database migrations, environment config, health checks, reconnection strategy |
+| [offline-sync.md](./offline-sync.md) | Offline Sync & Data Consistency | UC 12.1-12.10 | Offline operation queueing, item-level idempotency, conflict resolution |
+| [security-compliance.md](./security-compliance.md) | Security & Compliance | UC 13.1-13.4 | XSS prevention, SQL injection, rate limiting, CSRF protection |
+| [analytics-monitoring.md](./analytics-monitoring.md) | Analytics & Monitoring | UC 14.1-14.3 | Usage tracking, error monitoring, performance |
+| [development-operations.md](./development-operations.md) | Development & Operations | UC 15.1-15.4 | Database migrations, environment config, health checks, reconnection strategy |
 
 ## 🎯 Purpose
 

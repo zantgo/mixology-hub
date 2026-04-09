@@ -153,7 +153,7 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
  
  "source": "api",
  
- "is_public": true,
+  "isPublic": true,
  
  "ingredients": [
  
@@ -754,7 +754,7 @@ Updates the status of a reported content item.
 #### `POST /auth/login`
 - **Request Body:** `{ "email": "...", "password": "..." }`
 - **Response (200):** `{ "accessToken": "jwt..." }`
-- **Headers:** `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict`
+- **Headers:** `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh`
 
 #### `POST /auth/refresh`
 - **Headers:** Requires the `refreshToken` HttpOnly cookie.

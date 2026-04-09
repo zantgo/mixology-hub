@@ -31,7 +31,7 @@
 * **And** `59.14 ml` of Gin was just deducted, creating a preparation log entry.
 * **When** the user clicks "Undo" within a reasonable UI timeframe (triggering `POST /preparations/:log_id/undo`).
 * **Then** a transaction adds the exact required amounts back to the user's inventory.
-* **And** handles restoring a deleted row if the ingredient had previously reached `0`.
+* **And** if the ingredient row was manually deleted by the user after reaching zero (not automatically deleted), the system recreates the row with the restored quantity.
 * **And** marks the preparation log as undone.
 
 **UC 4.5: Batch Preparation Deduction**

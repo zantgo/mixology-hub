@@ -26,7 +26,7 @@
 * **Then** the system validates the password hash.
 * **And** generates a signed JWT containing the `user_id`.
 * **And** returns the Access Token in the JSON response payload (kept in Angular memory).
-* **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict` header.
+* **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh` header to prevent the token from being sent to unrelated endpoints.
 
 **UC 9.5: Token Expiration & Refresh**
 * **Given** a user's Access Token has expired.
@@ -190,7 +190,8 @@
 * **Given** a suspected system-wide breach or JWT secret compromise.
 * **When** an Admin triggers the emergency global logout via `POST /admin/security/global-revoke`.
 * **Then** the system truncates the `REFRESH_TOKENS` table.
-* **And** increments a global system-wide `token_version_salt` stored in Redis or a secure configuration store.
+* **And** increments a global system-wide `token_version_salt` stored in Redis.
+* **And** publishes a Redis Pub/Sub message to all backend instances with the new salt version.
 * **And** instantly invalidates every active user session across the platform.
 * **And** forces all users to re-authenticate on their next request.
 * **And** logs the emergency action with full admin audit trail including IP, timestamp, and reason.

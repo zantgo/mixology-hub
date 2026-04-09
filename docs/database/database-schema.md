@@ -61,19 +61,30 @@ USERS {
   string theme DEFAULT 'system'
   }
   
-  INGREDIENTS {
+   INGREDIENTS {
 
-uuid id PK
+ uuid id PK
 
-string name UK
+ string name
 
-string baseUnit
+ string normalized_name "lowercase, trimmed, for matching"
 
-decimal density DEFAULT 1.0 "Used for Mass <-> Volume conversions"
+ boolean is_global DEFAULT false "true = system ingredient, false = user custom"
 
-uuid created_by FK "nullable: true"
+ string baseUnit
 
-}
+ decimal(5,4) density DEFAULT 1.0 "Used for Mass <-> Volume conversions"
+
+ uuid created_by FK "nullable: true"
+
+ }
+ 
+ /* 
+  * Unique Constraints:
+  * - Global ingredients: UNIQUE(normalized_name) WHERE is_global = true
+  * - Custom ingredients: UNIQUE(normalized_name, created_by) WHERE is_global = false
+  * This prevents User B from being blocked by User A's private ingredient names
+  */
 
   
 
@@ -85,26 +96,28 @@ INGREDIENT_RELATIONS {
 
   
 
-COCKTAILS {
+ COCKTAILS {
 
-uuid id PK
+ uuid id PK
 
-string name
+ string name
 
-text instructions
+ text instructions
 
-boolean is_public
+ boolean is_public
 
- string source
+ boolean is_deleted DEFAULT false "soft delete flag"
 
- string external_id
+  string source
 
-  string image_url
-  decimal rating
-  string category "nullable: true"
-  string glassware "nullable: true"
-  uuid created_by FK "nullable: true"
-  }
+  string external_id
+
+   string image_url
+   decimal rating
+   string category "nullable: true"
+   string glassware "nullable: true"
+   uuid created_by FK "nullable: true"
+   }
 
   
 
@@ -116,11 +129,11 @@ uuid cocktail_id FK
 
 uuid ingredient_id FK
 
-string measure
+ string measure
 
-decimal amount
+ decimal(10,4) amount "precision for fraction scaling (e.g., 1/3 = 0.3333)"
 
-string unit
+ string unit
 
 }
 
@@ -142,17 +155,17 @@ string unit
 
   
 
-FAVORITES {
+ FAVORITES {
 
-uuid id PK
+ uuid id PK
 
-uuid user_id FK
+ uuid user_id FK
 
-uuid cocktail_id FK
+ uuid cocktail_id FK "nullable: true"
 
-string external_cocktail_id
+ string external_cocktail_id "nullable: true"
 
-}
+ }
 
   
 

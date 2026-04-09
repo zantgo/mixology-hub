@@ -16,16 +16,18 @@
 * **Given** a cocktail recipe contains "1/3 oz" of an ingredient.
 * **When** the `MeasureParserService` parses the measurement.
 * **Then** it correctly converts "1/3" to a decimal value.
-* **And** rounds the result to 2 decimal places (0.33) for `decimal(10,2)` database storage.
+* **And** stores the result with 4 decimal places (0.3333) in `decimal(10,4)` database storage for accurate scaling.
 * **And** preserves the unit "oz" for later unit conversion.
+* **Note:** With 4 decimal places, scaling 1/3 oz to 10,000 servings yields 3333.3333 oz (accurate), not 3300.00 oz (truncated).
 
 **UC 1.4: Depleting inventory to zero**
 * **Given** the user has exactly `50 ml` of "Vodka".
-* **When** the user manually updates the quantity to `0 ml` OR prepares a drink requiring `50 ml`.
+* **When** the user prepares a drink requiring `50 ml` (automatic depletion).
 * **Then** the mathematical deduction results in exactly `0`.
-* **And** the system maintains the row with `quantity = 0` (does NOT delete it).
+* **And** the system maintains the row with `quantity = 0` (does NOT delete it automatically).
 * **Architectural Decision:** Keeping the `0 ml` row allows the frontend to display "Out of Stock" state for the user's favorite ingredients, enabling seamless "Shopping List / Restock" views and preventing the need to recreate rows when users restock.
 * **And** the Makeable list instantly stops showing Vodka-based drinks.
+* **Note:** Users can still manually delete the row via UI (UC 1.6). If they do, and later undo a preparation that would restore that ingredient, the system must recreate the row (UC 4.4).
 
 **UC 1.5: Normalizing base units on insertion**
 * **Given** a user inputs an inventory addition of `1 Liter` of "Vodka".
