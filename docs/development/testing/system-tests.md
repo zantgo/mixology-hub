@@ -193,5 +193,65 @@ describe('CronService - Data Retention', () => {
     // Would be LessThan(expectedCutoff)
   });
 });
+
+**Example structure for makeability performance test:**
+```typescript
+describe('Makeability Performance', () => {
+  it('should calculate makeability for 100 cocktails with 500 ingredients in under 2 seconds', async () => {
+    // Setup large dataset
+    const mockCocktails = Array.from({ length: 100 }, (_, i) => ({
+      id: `cocktail-${i}`,
+      name: `Cocktail ${i}`,
+      ingredients: Array.from({ length: 5 }, (_, j) => ({
+        ingredient_id: `ingredient-${Math.floor(Math.random() * 500)}`,
+        quantity: 50,
+        unit: 'ml'
+      }))
+    }));
+
+    const mockInventory = Array.from({ length: 500 }, (_, i) => ({
+      ingredient_id: `ingredient-${i}`,
+      quantity: 1000,
+      unit: 'ml'
+    }));
+
+    const makeabilityService = new MakeableCocktailsService();
+    
+    // Time the operation
+    const startTime = Date.now();
+    const results = await makeabilityService.calculateMakeability(
+      mockCocktails,
+      mockInventory
+    );
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+
+    // Performance assertion
+    expect(duration).toBeLessThan(2000); // Under 2 seconds
+    
+    // Functional assertion
+    expect(results).toHaveLength(100);
+    expect(results.every(r => r.makeability !== undefined)).toBe(true);
+  });
+
+  it('should handle synonym lookups efficiently with caching', async () => {
+    const synonymService = new IngredientSynonymService();
+    
+    // Mock Redis cache hit
+    jest.spyOn(synonymService['redis'], 'get').mockResolvedValue(
+      JSON.stringify({ 'Curaçao': 'Orange Liqueur', 'Triple Sec': 'Orange Liqueur' })
+    );
+
+    const startTime = Date.now();
+    const synonyms = await synonymService.getSynonyms(['Curaçao', 'Triple Sec']);
+    const endTime = Date.now();
+
+    expect(endTime - startTime).toBeLessThan(100); // Under 100ms with cache
+    expect(synonyms).toEqual({
+      'Curaçao': 'Orange Liqueur',
+      'Triple Sec': 'Orange Liqueur'
+    });
+  });
+});
 ```
 ```

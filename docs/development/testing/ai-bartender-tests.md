@@ -112,7 +112,7 @@ describe('AI Service - Rate Limiting', () => {
 **Example TDD for AI Timeout Handling (UC 5.7):**
 ```typescript
 describe('AI Service - Timeout Handling', () => {
-  it('should abort request after 15 second timeout', async () => {
+  it('should abort request after 60 second timeout', async () => {
     const aiService = new AIService();
     
     // Mock HTTP client that hangs indefinitely
@@ -130,7 +130,7 @@ describe('AI Service - Timeout Handling', () => {
     // Request should timeout
     await expect(aiService.generateRecipe('Vodka'))
       .rejects
-      .toThrow('Gateway Timeout: AI provider did not respond within 15 seconds');
+      .toThrow('Gateway Timeout: AI provider did not respond within 60 seconds');
     
     expect(mockHttp.post).toHaveBeenCalled();
   });
@@ -974,6 +974,326 @@ describe('AI Service - Strict Inventory Generation', () => {
     expect(result).toBeDefined();
     expect(result.ingredients).toHaveLength(3);
     expect(result.ingredients[2].is_optional).toBe(true);
+  });
+});
+```
+
+**Example TDD for Sanitization of LLM Output (UC 12.8):**
+```typescript
+describe('AI Service - Output Sanitization', () => {
+  it('should strip HTML/JS injected into the LLM generated recipe strings', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    // Mock AI provider returns XSS payload in instructions
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Malicious Cocktail',
+        ingredients: [{ name: 'Vodka', measure: '2 oz' }],
+        instructions: 'Mix with ice and <img src="x" onerror="alert(\'XSS\')"> enjoy!'
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    // Mock sanitizer to strip HTML
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text.replace(/<[^>]*>/g, '')
+    );
+    
+    const result = await aiService.generateRecipe('vodka');
+    
+    // Should strip HTML tags from instructions
+    expect(result.instructions).toBe('Mix with ice and  enjoy!');
+    expect(sanitizer.sanitizeHtml).toHaveBeenCalled();
+  });
+
+  it('should sanitize all string fields in AI response', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: '<script>alert(1)</script>Malicious',
+        ingredients: [{ name: '<b>Vodka</b>', measure: '2 oz' }],
+        instructions: 'Step 1: <iframe src="evil.com"></iframe>',
+        glassware: '<div>Martini</div>',
+        category: 'Cocktail<script>'
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text.replace(/<[^>]*>/g, '')
+    );
+    
+    const result = await aiService.generateRecipe('test');
+    
+    // All fields should be sanitized
+    expect(result.name).toBe('Malicious');
+    expect(result.ingredients[0].name).toBe('Vodka');
+    expect(result.instructions).toBe('Step 1: ');
+    expect(result.glassware).toBe('Martini');
+    expect(result.category).toBe('Cocktail');
+  });
+
+  it('should escape special characters to prevent XSS', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Test & "Special" <Chars>',
+        instructions: 'Mix & serve'
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    jest.spyOn(sanitizer, 'escapeHtml').mockImplementation((text) => 
+      text.replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+    );
+    
+    const result = await aiService.generateRecipe('test');
+    
+    // Should escape HTML entities
+    expect(result.name).toBe('Test &amp; &quot;Special&quot; &lt;Chars&gt;');
+    expect(result.instructions).toBe('Mix &amp; serve');
+  });
+
+  it('should handle null/undefined fields gracefully', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Test',
+        ingredients: [],
+        instructions: null,
+        glassware: undefined
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text ? text.replace(/<[^>]*>/g, '') : ''
+    );
+    
+    const result = await aiService.generateRecipe('test');
+    
+    expect(result.instructions).toBe('');
+    expect(result.glassware).toBe('');
+  });
+
+  it('should sanitize before saving to database', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    const cocktailRepo = { save: jest.fn() };
+    
+    aiService.sanitizer = sanitizer;
+    aiService.cocktailRepo = cocktailRepo;
+    
+    const aiRecipe = {
+      name: 'XSS Cocktail',
+      ingredients: [{ name: 'Vodka', measure: '2 oz' }],
+      instructions: '<script>alert("hacked")</script>Mix'
+    };
+    
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text.replace(/<[^>]*>/g, '')
+    );
+    
+    await aiService.saveAsCocktail('user123', aiRecipe);
+    
+    // Should sanitize before saving
+    const savedCocktail = cocktailRepo.save.mock.calls[0][0];
+    expect(savedCocktail.instructions).toBe('Mix');
+    expect(savedCocktail.name).toBe('XSS Cocktail'); // No script tags
+  });
+
+  it('should log sanitization events for security auditing', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    const logger = { warn: jest.fn() };
+    
+    aiService.sanitizer = sanitizer;
+    aiService.logger = logger;
+    
+    const maliciousText = '<script>evil()</script>';
+    
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => {
+      const clean = text.replace(/<[^>]*>/g, '');
+      if (clean !== text) {
+        logger.warn('HTML sanitized', { original: text, cleaned: clean });
+      }
+      return clean;
+    });
+    
+    const result = sanitizer.sanitizeHtml(maliciousText);
+    
+    expect(result).toBe('');
+    expect(logger.warn).toHaveBeenCalledWith(
+      'HTML sanitized',
+      expect.objectContaining({
+        original: maliciousText,
+        cleaned: ''
+      })
+    );
+  });
+
+  it('should preserve legitimate formatting like line breaks', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Formatted Drink',
+        instructions: 'Step 1: Mix\nStep 2: Shake\nStep 3: Serve'
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    // Should preserve newlines but strip HTML
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text.replace(/<[^>]*>/g, '')
+    );
+    
+    const result = await aiService.generateRecipe('test');
+    
+    expect(result.instructions).toBe('Step 1: Mix\nStep 2: Shake\nStep 3: Serve');
+  });
+
+  it('should handle deeply nested objects in AI response', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: 'Complex',
+        ingredients: [
+          { name: '<b>Vodka</b>', measure: '2 oz', notes: '<i>premium</i>' },
+          { name: 'Juice', measure: '4 oz', garnish: '<span>Lime</span>' }
+        ],
+        variations: [
+          { name: '<strong>Spicy</strong>', instructions: 'Add <script>pepper</script>' }
+        ]
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    jest.spyOn(sanitizer, 'deepSanitize').mockImplementation((obj) => {
+      const sanitize = (val) => {
+        if (typeof val === 'string') return val.replace(/<[^>]*>/g, '');
+        if (Array.isArray(val)) return val.map(sanitize);
+        if (val && typeof val === 'object') {
+          const result = {};
+          for (const key in val) {
+            result[key] = sanitize(val[key]);
+          }
+          return result;
+        }
+        return val;
+      };
+      return sanitize(obj);
+    });
+    
+    const result = await aiService.generateRecipe('test');
+    
+    expect(result.ingredients[0].name).toBe('Vodka');
+    expect(result.ingredients[0].notes).toBe('premium');
+    expect(result.ingredients[1].garnish).toBe('Lime');
+    expect(result.variations[0].name).toBe('Spicy');
+    expect(result.variations[0].instructions).toBe('Add pepper');
+  });
+
+  it('should reject AI responses with excessive malicious content', async () => {
+    const aiService = new AIService();
+    const sanitizer = new SanitizerService();
+    
+    // AI returns heavily malicious response
+    const mockProvider = {
+      generateRecipe: jest.fn().mockResolvedValue({
+        name: '<script>'.repeat(100) + 'Evil',
+        instructions: '<iframe>'.repeat(50) + 'Content'
+      })
+    };
+    aiService.provider = mockProvider;
+    aiService.sanitizer = sanitizer;
+    
+    jest.spyOn(sanitizer, 'sanitizeHtml').mockImplementation((text) => 
+      text.replace(/<[^>]*>/g, '')
+    );
+    
+    // Should detect excessive malicious patterns
+    jest.spyOn(sanitizer, 'isExcessivelyMalicious').mockReturnValue(true);
+    
+    await expect(aiService.generateRecipe('test'))
+      .rejects
+      .toThrow('AI response contains excessive malicious content');
+  });
+
+  it('should work with DTO validation layer', async () => {
+    const aiService = new AIService();
+    
+    // CreateCocktailDto should have @IsSafeHtml() decorator
+    class CreateCocktailDto {
+      @IsSafeHtml()
+      name: string;
+      
+      @IsSafeHtml()
+      instructions: string;
+    }
+    
+    const dto = new CreateCocktailDto();
+    dto.name = '<script>alert(1)</script>Cocktail';
+    dto.instructions = 'Mix <b>well</b>';
+    
+    // DTO validation should sanitize
+    const errors = await validate(dto);
+    
+    // Assuming validator strips HTML
+    expect(errors.length).toBe(0);
+    // Or expect specific validation error for unsafe HTML
+  });
+});
+
+**Example TDD for AI Daily Generation Quota (UC 5.17):**
+```typescript
+describe('AI Service - Cost Control & Prompt Construction (UC 5.17 & 5.18)', () => {
+  it('should block users who exceed their 24-hour generation limit', async () => {
+    const aiService = new AIService();
+    
+    // Mock user has generated 20 recipes today
+    jest.spyOn(aiService.aiRecipeRepo, 'count').mockResolvedValue(20);
+    
+    await expect(aiService.generateRecipe('Vodka', { userId: 'user123' }))
+      .rejects
+      .toThrow('Daily AI generation limit reached (Max 20/day).');
+  });
+
+  it('should incorporate user stylistic modifiers into the system prompt securely', async () => {
+    const aiService = new AIService();
+    const mockProvider = { generateRecipe: jest.fn().mockResolvedValue({ name: 'Tiki Drink', ingredients: [] }) };
+    aiService.provider = mockProvider;
+    
+    const userInput = "Rum, Lime";
+    const styleModifier = "Make it a frozen tiki drink";
+    
+    await aiService.generateRecipe(userInput, { userId: 'user123', style: styleModifier });
+    
+    const sentPrompt = mockProvider.generateRecipe.mock.calls[0][0];
+    
+    expect(sentPrompt).toContain('Ingredients available: Rum, Lime');
+    expect(sentPrompt).toContain('Stylistic constraint: Make it a frozen tiki drink');
+    // Ensure core JSON instructions are still present
+    expect(sentPrompt).toContain('Respond EXCLUSIVELY with valid JSON');
   });
 });
 ```

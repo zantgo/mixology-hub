@@ -208,5 +208,64 @@ describe('Auth Service - Refresh Token Security', () => {
     expect(mockRotate).toHaveBeenCalledWith('user123', tokenFamily, oldRefreshToken);
   });
 });
+
+**Example TDD for IDOR Prevention in Cocktail Preparation:**
+```typescript
+describe('IDOR Prevention - Cocktail Preparation', () => {
+  it('should prevent User A from preparing cocktails using User B\'s preparation log', async () => {
+    // Setup: User A and User B have different preparation logs
+    const userA = { id: 'user-a', email: 'a@test.com' };
+    const userB = { id: 'user-b', email: 'b@test.com' };
+    
+    const preparationLogRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'log-123',
+        user_id: 'user-b', // This log belongs to User B
+        cocktail_id: 'cocktail-456',
+        created_at: new Date()
+      })
+    };
+
+    const preparationService = new PreparationService();
+    preparationService.preparationLogRepo = preparationLogRepo;
+
+    // User A attempts to undo User B's preparation
+    await expect(
+      preparationService.undoPreparation('log-123', userA.id)
+    ).rejects.toThrow('Unauthorized');
+
+    expect(preparationLogRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 'log-123' }
+    });
+  });
+
+  it('should allow users to undo their own preparations', async () => {
+    const user = { id: 'user-123', email: 'user@test.com' };
+    
+    const preparationLogRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'log-123',
+        user_id: 'user-123', // This log belongs to the same user
+        cocktail_id: 'cocktail-456',
+        created_at: new Date()
+      }),
+      save: jest.fn().mockResolvedValue({ id: 'log-123', undone: true })
+    };
+
+    const inventoryService = {
+      restoreFromPreparation: jest.fn().mockResolvedValue(undefined)
+    };
+
+    const preparationService = new PreparationService();
+    preparationService.preparationLogRepo = preparationLogRepo;
+    preparationService.inventoryService = inventoryService;
+
+    // User should be able to undo their own preparation
+    const result = await preparationService.undoPreparation('log-123', user.id);
+
+    expect(result).toHaveProperty('undone', true);
+    expect(inventoryService.restoreFromPreparation).toHaveBeenCalled();
+  });
+});
 ```
 ```

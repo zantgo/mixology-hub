@@ -72,11 +72,11 @@ export class SeederService {
     });
     
     if (!mockUser) {
-      await userRepository.save({
-        email: 'mock@test.com',
-        name: 'Mock User',
-        // ... other required fields
-      });
+       await userRepository.save({
+         email: 'mock@test.com',
+         displayName: 'Mock User',
+         // ... other required fields
+       });
     }
   }
 }

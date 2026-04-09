@@ -22,6 +22,8 @@ USERS ||--o{ FAVORITES : "saves"
 
 USERS ||--o{ AI_RECIPES : "generates"
 
+USERS ||--|| USER_PROFILES : "has_preferences"
+
 COCKTAILS ||--o{ COCKTAIL_INGREDIENTS : "contains"
 
 INGREDIENTS ||--o{ COCKTAIL_INGREDIENTS : "used_in"
@@ -30,23 +32,33 @@ INGREDIENTS ||--o{ USER_INVENTORY : "stocked_as"
 
 COCKTAILS ||--o{ FAVORITES : "is_favorited"
 
+USERS ||--o{ COCKTAIL_RATINGS : "rates"
+COCKTAILS ||--o{ COCKTAIL_RATINGS : "is_rated_by"
+USERS ||--o{ PREPARATION_LOGS : "performs"
+COCKTAILS ||--o{ PREPARATION_LOGS : "is_prepared_as"
+
   
 
 USERS {
-
-uuid id PK
-
-string email UK
-
-string password_hash
-
-timestamp created_at
-
+  uuid id PK
+  string email UK
+  string display_name
+  string password_hash
+  string role DEFAULT 'user'
+  boolean is_email_verified DEFAULT false
+  integer token_version DEFAULT 1
+  timestamp last_logout_timestamp "nullable: true"
+  timestamp created_at
 }
-
   
-
-INGREDIENTS {
+  USER_PROFILES {
+  uuid id PK
+  uuid user_id FK
+  string unit_system DEFAULT 'metric'
+  string theme DEFAULT 'system'
+  }
+  
+  INGREDIENTS {
 
 uuid id PK
 
@@ -74,11 +86,10 @@ boolean is_public
 
  string external_id
 
- string image_url
-
- uuid created_by FK
-
- }
+  string image_url
+  decimal rating
+  uuid created_by FK
+  }
 
   
 
@@ -140,8 +151,26 @@ jsonb generated_recipe
 
 uuid created_by FK
 
-timestamp created_at
+  timestamp created_at
 
+}
+
+COCKTAIL_RATINGS {
+  uuid id PK
+  uuid user_id FK
+  uuid cocktail_id FK
+  decimal score
+  timestamp created_at
+  timestamp updated_at
+}
+
+PREPARATION_LOGS {
+  uuid id PK
+  uuid user_id FK
+  uuid cocktail_id FK
+  integer servings
+  jsonb deducted_ingredients "Stores exact IDs, amounts, units deducted"
+  timestamp created_at "Used for the 15-minute undo window"
 }
 
 ```
@@ -163,6 +192,8 @@ Handles authentication and relationship anchoring.
 - **Primary Key:** `UUID` (Standardized across all tables for security and distributed generation).
 
 - **Unique Constraint:** `email`.
+
+- **`role`:** String field with default value `'user'`. Supports role-based access control (RBAC) for admin features. Possible values: `'user'`, `'admin'`.
 
   
 
@@ -215,6 +246,29 @@ A mapping table allowing users to save recipes.
 Logs the history of AI requests.
 
 - **`generated_recipe`:** Uses the PostgreSQL `JSONB` data type. This allows the backend to store the raw JSON output from the LLM provider efficiently, making it queryable and indexable if needed, before the user decides to convert it into a permanent `Cocktail` record.
+
+### 7. `user_profiles`
+
+Stores user preferences and settings.
+
+- **`unit_system`:** Defines the user's preferred measurement system (`metric` or `imperial`). Used by the frontend to display measurements in the user's preferred units.
+- **`theme`:** Stores the user's UI theme preference (`light`, `dark`, or `system`).
+- **One-to-One Relationship:** Each user has exactly one profile record, created automatically when a user registers.
+
+### 8. `cocktails.rating` Column
+
+- **`rating`:** Decimal field (`decimal(3,2)`) storing average user ratings for cocktails (0.00 to 5.00 scale).
+- **Nullable:** Can be `NULL` for cocktails without ratings.
+- **Precision:** `decimal(3,2)` allows values from 0.00 to 9.99, providing sufficient range for 5-star rating systems with decimal precision.
+
+### 9. `cocktail_ratings` Pivot Table
+
+- **Purpose:** Stores individual user ratings for cocktails to prevent double-voting and enable rating updates.
+- **Composite Unique Constraint:** `[user_id, cocktail_id]` ensures each user can rate a cocktail only once.
+- **`score`:** Decimal field (`decimal(3,2)`) storing individual rating scores (0.00 to 5.00).
+- **`updated_at`:** Timestamp tracking when a user updates their rating (enables UPSERT operations).
+- **Relationship:** Many-to-many relationship between `USERS` and `COCKTAILS` tables.
+- **Cached Average:** The `cocktails.rating` column is a cached average calculated from all `cocktail_ratings.score` values for that cocktail.
 
   
 

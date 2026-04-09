@@ -469,6 +469,394 @@ describe('Cocktail Preparation - Part-Based Deduction', () => {
   });
 });
 ```
+
+**Example TDD for Hard Delete Undo Edge Case (UC 4.10):**
+```typescript
+describe('Cocktail Preparation - Hard Delete Undo Edge Case', () => {
+  it('should recreate an inventory row if the ingredient was hard-deleted between preparation and undo', async () => {
+    const inventoryService = new UserInventoryService();
+    const preparationService = new CocktailPreparationService();
+    
+    // Mock preparation transaction
+    const preparationTx = {
+      id: 'tx-123',
+      userId: 'user123',
+      cocktailId: 'mojito-123',
+      servings: 1,
+      ingredients: [
+        { ingredientId: 'rum-123', amount: 2, unit: 'oz' },
+        { ingredientId: 'mint-456', amount: 10, unit: 'leaves' }
+      ],
+      createdAt: new Date(Date.now() - 5 * 60000) // 5 minutes ago
+    };
+    
+    // Mock that rum ingredient row was hard-deleted after preparation
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne')
+      .mockImplementation(async (options) => {
+        const ingredientId = options.where.ingredientId;
+        if (ingredientId === 'rum-123') {
+          return null; // Row was deleted
+        }
+        if (ingredientId === 'mint-456') {
+          return { id: 'inv-mint', userId: 'user123', ingredientId: 'mint-456', quantity: 50 };
+        }
+        return null;
+      });
+    
+    // Mock create for recreated row
+    const createSpy = jest.spyOn(inventoryService.inventoryRepo, 'create');
+    const saveSpy = jest.spyOn(inventoryService.inventoryRepo, 'save');
+    
+    // Mock findOne for transaction
+    jest.spyOn(preparationService.transactionRepo, 'findOne').mockResolvedValue(preparationTx);
+    
+    preparationService.inventoryService = inventoryService;
+    
+    // Attempt undo
+    await preparationService.undoPreparation('tx-123');
+    
+    // Should recreate the deleted rum row
+    expect(createSpy).toHaveBeenCalledWith({
+      userId: 'user123',
+      ingredientId: 'rum-123',
+      quantity: 2, // Restored amount
+      unit: 'oz',
+      baseUnit: 'ml' // Should infer from ingredient catalog
+    });
+    
+    // Should save the recreated row
+    expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ingredientId: 'rum-123',
+      userId: 'user123'
+    }));
+    
+    // Should also restore the existing mint row (increment)
+    expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ingredientId: 'mint-456',
+      quantity: 60 // 50 + 10
+    }));
+  });
+
+  it('should fetch ingredient details from catalog when recreating deleted row', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    // Mock ingredient catalog lookup
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'rum-123',
+      name: 'White Rum',
+      baseUnit: 'ml',
+      unitType: 'volume'
+    });
+    
+    inventoryService.ingredientService = ingredientService;
+    
+    // Mock preparation with deleted ingredient
+    const preparationTx = {
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'rum-123', amount: 2, unit: 'oz' }]
+    };
+    
+    // Mock deleted row
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue(null);
+    
+    const createSpy = jest.spyOn(inventoryService.inventoryRepo, 'create');
+    
+    await inventoryService.restoreInventory(preparationTx);
+    
+    // Should use catalog data for recreated row
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ingredientId: 'rum-123',
+      baseUnit: 'ml', // From catalog
+      unitType: 'volume' // From catalog
+    }));
+  });
+
+  it('should handle unit conversion when recreating deleted inventory row', async () => {
+    const inventoryService = new UserInventoryService();
+    const unitConverter = new UnitConverterService();
+    
+    // Mock preparation with different unit than base unit
+    const preparationTx = {
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'rum-123', amount: 2, unit: 'oz' }]
+    };
+    
+    // Mock ingredient with ml base unit
+    jest.spyOn(inventoryService.ingredientService, 'getIngredientById').mockResolvedValue({
+      id: 'rum-123',
+      baseUnit: 'ml'
+    });
+    
+    // Mock unit conversion
+    jest.spyOn(unitConverter, 'convert').mockReturnValue(59.147); // 2 oz = 59.147 ml
+    
+    inventoryService.unitConverter = unitConverter;
+    
+    // Mock deleted row
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue(null);
+    
+    const createSpy = jest.spyOn(inventoryService.inventoryRepo, 'create');
+    
+    await inventoryService.restoreInventory(preparationTx);
+    
+    // Should convert oz to ml for storage
+    expect(unitConverter.convert).toHaveBeenCalledWith(2, 'oz', 'ml');
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      quantity: 59.147, // Converted amount
+      unit: 'ml' // Base unit
+    }));
+  });
+
+  it('should handle batch preparation undo with multiple deleted ingredients', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    // Mock batch preparation (4 servings)
+    const preparationTx = {
+      userId: 'user123',
+      servings: 4,
+      ingredients: [
+        { ingredientId: 'rum-123', amount: 2, unit: 'oz' }, // 8 oz total
+        { ingredientId: 'lime-456', amount: 1, unit: 'piece' } // 4 pieces total
+      ]
+    };
+    
+    // Both ingredients were deleted
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue(null);
+    
+    const createSpy = jest.spyOn(inventoryService.inventoryRepo, 'create');
+    
+    await inventoryService.restoreInventory(preparationTx);
+    
+    // Should recreate both rows with scaled amounts
+    expect(createSpy).toHaveBeenCalledTimes(2);
+    
+    // Rum: 2 oz * 4 servings = 8 oz total
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ingredientId: 'rum-123',
+      quantity: 8 // Scaled amount
+    }));
+    
+    // Lime: 1 piece * 4 servings = 4 pieces total
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({
+      ingredientId: 'lime-456',
+      quantity: 4 // Scaled amount
+    }));
+  });
+
+  it('should log recreation events for audit trail', async () => {
+    const inventoryService = new UserInventoryService();
+    const logger = { info: jest.fn() };
+    inventoryService.logger = logger;
+    
+    const preparationTx = {
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'deleted-123', amount: 1, unit: 'oz' }]
+    };
+    
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue(null);
+    jest.spyOn(inventoryService.inventoryRepo, 'create').mockReturnValue({} as any);
+    jest.spyOn(inventoryService.inventoryRepo, 'save').mockResolvedValue({} as any);
+    
+    await inventoryService.restoreInventory(preparationTx);
+    
+    // Should log recreation event
+    expect(logger.info).toHaveBeenCalledWith(
+      'Recreated deleted inventory row during undo',
+      expect.objectContaining({
+        userId: 'user123',
+        ingredientId: 'deleted-123',
+        amount: 1,
+        unit: 'oz'
+      })
+    );
+  });
+
+  it('should handle race condition where row is recreated by another process', async () => {
+    const inventoryService = new UserInventoryService();
+    
+    const preparationTx = {
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'rum-123', amount: 2, unit: 'oz' }]
+    };
+    
+    // First check: row doesn't exist
+    // Second check (after race): row now exists
+    let checkCount = 0;
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockImplementation(async () => {
+      checkCount++;
+      if (checkCount === 1) return null; // First check
+      return { id: 'existing-row', quantity: 5 }; // Second check (race condition)
+    });
+    
+    // Mock upsert behavior
+    const saveSpy = jest.spyOn(inventoryService.inventoryRepo, 'save').mockResolvedValue({} as any);
+    
+    await inventoryService.restoreInventory(preparationTx);
+    
+    // Should handle gracefully - either update existing or skip
+    expect(saveSpy).toHaveBeenCalled();
+  });
+
+  it('should validate foreign key constraints when recreating rows', async () => {
+    const inventoryService = new UserInventoryService();
+    const ingredientService = new IngredientService();
+    
+    const preparationTx = {
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'nonexistent-999', amount: 1, unit: 'oz' }]
+    };
+    
+    // Ingredient doesn't exist in catalog (FK violation)
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue(null);
+    
+    inventoryService.ingredientService = ingredientService;
+    jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue(null);
+    
+    await expect(inventoryService.restoreInventory(preparationTx))
+      .rejects
+      .toThrow('Ingredient nonexistent-999 not found in catalog');
+  });
+
+  it('should work within the undo transaction boundary', async () => {
+    const preparationService = new CocktailPreparationService();
+    const inventoryService = new UserInventoryService();
+    
+    // Mock transaction
+    const mockTransaction = jest.fn().mockImplementation(async (callback) => {
+      const entityManager = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockReturnValue({}),
+        save: jest.fn().mockResolvedValue({})
+      };
+      return await callback(entityManager);
+    });
+    
+    jest.spyOn(preparationService.transactionRepo.manager, 'transaction').mockImplementation(mockTransaction);
+    
+    preparationService.inventoryService = inventoryService;
+    
+    // Mock preparation transaction
+    jest.spyOn(preparationService.transactionRepo, 'findOne').mockResolvedValue({
+      id: 'tx-123',
+      userId: 'user123',
+      ingredients: [{ ingredientId: 'rum-123', amount: 2, unit: 'oz' }]
+    });
+    
+    await preparationService.undoPreparation('tx-123');
+    
+    // Should execute within transaction
+    expect(mockTransaction).toHaveBeenCalled();
+  });
+});
+
+**Example TDD for External API Cocktail Preparation (UC 4.11):**
+```typescript
+describe('Cocktail Preparation - External API Recipes (UC 4.11)', () => {
+  it('should dynamically map and deduct inventory for external cocktails', async () => {
+    const prepService = new CocktailPreparationService();
+    const aggregator = new CocktailAggregatorService();
+    const inventoryService = new UserInventoryService();
+
+    // 1. Mock external API fetch
+    jest.spyOn(aggregator, 'getExternalCocktailDetails').mockResolvedValue({
+      id: '11000',
+      ingredients: [{ name: 'Light Rum', measure: '2 oz', ingredientId: null }] // Not yet mapped
+    });
+
+    // 2. Mock dynamic mapping string -> UUID
+    jest.spyOn(prepService.ingredientService, 'resolveBaseIngredient')
+      .mockResolvedValue({ id: 'uuid-light-rum' });
+
+    // 3. Mock inventory deduction
+    const deductSpy = jest.spyOn(inventoryService, 'deductInventory').mockResolvedValue(true);
+
+    prepService.aggregator = aggregator;
+    prepService.inventoryService = inventoryService;
+
+    await prepService.prepareCocktail('11000', 1, 'user123');
+
+    // Verify stock was deducted using the mapped UUID, not the external ID
+    expect(deductSpy).toHaveBeenCalledWith('user123', 'uuid-light-rum', expect.any(Number));
+  });
+
+  it('should deduct optional garnishes linearly if they exist in inventory', async () => {
+    // Test implementation for UC 4.12
+  });
+});
+
+**Example TDD for External API Failure Edge Case:**
+```typescript
+describe('Cocktail Preparation - External API Resiliency', () => {
+  it('should fail gracefully if external API drops during on-the-fly preparation', async () => {
+    const prepService = new CocktailPreparationService();
+    const aggregator = new CocktailAggregatorService();
+    const inventoryService = new UserInventoryService();
+
+    // Mock TheCocktailDB timing out
+    jest.spyOn(aggregator, 'getExternalCocktailDetails')
+      .mockRejectedValue(new Error('External API Timeout'));
+      
+    const deductSpy = jest.spyOn(inventoryService, 'deductInventory');
+
+    prepService.aggregator = aggregator;
+    prepService.inventoryService = inventoryService;
+
+    await expect(prepService.prepareCocktail('11000', 1, 'user123'))
+      .rejects
+      .toThrow('Failed to fetch external recipe details for preparation.');
+
+    // Crucial: Ensure NO inventory was deducted
+    expect(deductSpy).not.toHaveBeenCalled();
+  });
+});
+
+**Example TDD for Synonym Greedy Deduction (UC 4.13):**
+```typescript
+describe('Cocktail Preparation - Synonym Greedy Deduction', () => {
+  it('should split deduction across multiple synonym rows if a single row is insufficient', async () => {
+    const prepService = new CocktailPreparationService();
+    const inventoryService = new UserInventoryService();
+    
+    // Setup: Cocktail needs 3oz generic 'Whiskey'
+    jest.spyOn(prepService, 'getCocktailRequirements').mockResolvedValue([
+      { ingredientId: 'whiskey-generic', amount: 3, unit: 'oz', name: 'Whiskey' }
+    ]);
+    
+    // User has 2oz 'Bourbon' and 2oz 'Rye' (both synonyms of 'Whiskey')
+    jest.spyOn(inventoryService, 'getSynonymInventory').mockResolvedValue([
+      { ingredientId: 'bourbon-123', name: 'Bourbon', quantity: 2, unit: 'oz', baseIngredientId: 'whiskey-generic' },
+      { ingredientId: 'rye-456', name: 'Rye', quantity: 2, unit: 'oz', baseIngredientId: 'whiskey-generic' }
+    ]);
+    
+    const deductSpy = jest.spyOn(inventoryService, 'deductInventory').mockResolvedValue(true);
+    const logSpy = jest.spyOn(prepService, 'logPreparation').mockResolvedValue({} as any);
+    
+    prepService.inventoryService = inventoryService;
+    
+    await prepService.prepareCocktail('cocktail-123', 1, 'user123');
+    
+    // Expect: Deduct 2oz from Bourbon, 1oz from Rye (or vice versa - greedy algorithm)
+    expect(deductSpy).toHaveBeenCalledTimes(2);
+    
+    // Verify first deduction (largest stock first)
+    expect(deductSpy).toHaveBeenCalledWith('user123', 'bourbon-123', 2);
+    
+    // Verify second deduction (remaining amount)
+    expect(deductSpy).toHaveBeenCalledWith('user123', 'rye-456', 1);
+    
+    // Transaction Log saves both deductions accurately
+    expect(logSpy).toHaveBeenCalledWith(
+      'user123',
+      'cocktail-123',
+      1,
+      expect.arrayContaining([
+        expect.objectContaining({ ingredientId: 'bourbon-123', amount: 2 }),
+        expect.objectContaining({ ingredientId: 'rye-456', amount: 1 })
+      ])
+    );
+  });
+});
 ```
 ```
 ```

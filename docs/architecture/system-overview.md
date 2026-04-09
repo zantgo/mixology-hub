@@ -159,3 +159,13 @@ The AI module is designed around interfaces, not concrete implementations. By re
 Inventory management and unit conversion (e.g., ounces to milliliters) are handled **strictly on the backend**.
 
 - **Why?** Trusting the client (frontend) to calculate inventory deductions can lead to race conditions or manipulated data. The backend `UnitConverterService` standardizes all incoming measurements to a base unit (e.g., `ml`) before executing mathematical validations against the user's current stock.
+
+### 4. Role-Based Access Control (RBAC) System
+
+The system implements a comprehensive RBAC system with two primary roles: `user` and `admin`.
+
+- **Database Schema:** The `users` table includes a `role` column with default value `'user'`.
+- **Authorization Guards:** NestJS `RolesGuard` protects admin-only endpoints by verifying JWT payload roles.
+- **Admin Privileges:** Includes global ingredient promotion, duplicate ingredient merging, and system-wide data management.
+- **User Isolation:** Standard users can only access and modify their own data (inventory, cocktails, favorites).
+- **Audit Logging:** All admin actions are logged for security and compliance purposes.

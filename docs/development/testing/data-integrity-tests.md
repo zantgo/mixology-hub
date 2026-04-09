@@ -379,5 +379,115 @@ describe('IngredientService - Concurrent Creation', () => {
   });
 });
 ```
+
+**Example TDD for Private Ingredient Visibility (UC 10.8):**
+```typescript
+describe('Cocktail Service - Private Ingredient Visibility', () => {
+  it('should allow User B to view a private ingredient IF it is attached to a public cocktail', async () => {
+    const cocktailService = new CocktailService();
+    const ingredientService = new IngredientService();
+    
+    // Setup: User A makes cocktail public containing private ingredient X
+    const privateIngredient = {
+      id: 'private-ing-123',
+      name: 'User A Secret Bitters',
+      is_global: false,
+      created_by: 'userA'
+    };
+    
+    const publicCocktail = {
+      id: 'cocktail-456',
+      name: 'Secret Recipe',
+      is_public: true,
+      created_by: 'userA',
+      ingredients: [
+        { ingredientId: 'private-ing-123', name: 'User A Secret Bitters', measure: '2 dashes' }
+      ]
+    };
+    
+    // Mock ingredient service to return private ingredient when accessed via cocktail context
+    jest.spyOn(ingredientService, 'getIngredientById').mockImplementation(async (id, context) => {
+      if (id === 'private-ing-123' && context?.cocktailId === 'cocktail-456') {
+        return privateIngredient; // Allow read-only access in this context
+      }
+      return null;
+    });
+    
+    cocktailService.ingredientService = ingredientService;
+    jest.spyOn(cocktailService.cocktailRepo, 'findOne').mockResolvedValue(publicCocktail);
+    
+    // Action: User B fetches cocktail details
+    const result = await cocktailService.getCocktailById('cocktail-456', 'userB');
+    
+    // Expect: Ingredient X is included in the payload without throwing a 403
+    expect(result.ingredients).toHaveLength(1);
+    expect(result.ingredients[0].ingredientId).toBe('private-ing-123');
+    expect(result.ingredients[0].name).toBe('User A Secret Bitters');
+    expect(result.ingredients[0].is_private).toBe(true); // Should be marked as private
+    expect(result.ingredients[0].can_be_added).toBe(true); // But can be added to inventory
+  });
+
+  it('should NOT expose private ingredient in global search catalog', async () => {
+    const ingredientService = new IngredientService();
+    
+    const privateIngredient = {
+      id: 'private-ing-123',
+      name: 'User A Secret Bitters',
+      is_global: false,
+      created_by: 'userA'
+    };
+    
+    const globalIngredient = {
+      id: 'global-ing-456',
+      name: 'Vodka',
+      is_global: true
+    };
+    
+    // Mock repository to only return global ingredients in general search
+    jest.spyOn(ingredientService.ingredientRepo, 'find').mockImplementation(async (options) => {
+      if (options?.where?.is_global === true || options?.where?.is_global === undefined) {
+        return [globalIngredient]; // Only global ingredients in catalog
+      }
+      return [];
+    });
+    
+    const result = await ingredientService.searchIngredients('bitters');
+    
+    // Should NOT include private ingredient in search results
+    expect(result).toHaveLength(0);
+    expect(result.find(i => i.id === 'private-ing-123')).toBeUndefined();
+  });
+
+  it('should allow User B to add private ingredient to inventory from recipe page', async () => {
+    const ingredientService = new IngredientService();
+    const inventoryService = new UserInventoryService();
+    
+    const privateIngredient = {
+      id: 'private-ing-123',
+      name: 'User A Secret Bitters',
+      is_global: false,
+      created_by: 'userA'
+    };
+    
+    // Mock: Allow access to private ingredient when requested via specific cocktail
+    jest.spyOn(ingredientService, 'getIngredientById').mockResolvedValue(privateIngredient);
+    
+    // Mock inventory addition
+    const addSpy = jest.spyOn(inventoryService, 'addToInventory').mockResolvedValue(true);
+    
+    // User B tries to add the private ingredient from the cocktail page
+    await inventoryService.addToInventory('userB', {
+      ingredientId: 'private-ing-123',
+      quantity: 50,
+      unit: 'ml'
+    }, { sourceCocktailId: 'cocktail-456' });
+    
+    // Should succeed even though ingredient is private
+    expect(addSpy).toHaveBeenCalledWith('userB', expect.objectContaining({
+      ingredientId: 'private-ing-123'
+    }));
+  });
+});
+```
 ```
 ```

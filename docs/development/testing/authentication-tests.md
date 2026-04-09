@@ -1182,6 +1182,43 @@ describe('RolesGuard - RBAC', () => {
     expect(result).toBe(true);
   });
 });
+
+**Example TDD for GDPR Data Export & Account Deletion (UC 9.9 & 9.20):**
+```typescript
+describe('User Service - GDPR & Account Deletion', () => {
+  it('should anonymize public cocktails when user deletes account', async () => {
+    const userService = new UserService();
+    // Mock user has 1 public and 1 private cocktail
+    jest.spyOn(userService.cocktailRepo, 'update').mockResolvedValue({} as any);
+    jest.spyOn(userService.cocktailRepo, 'delete').mockResolvedValue({} as any);
+    
+    await userService.deleteAccount('user123');
+    
+    // Public cocktails should have created_by set to NULL (anonymized)
+    expect(userService.cocktailRepo.update).toHaveBeenCalledWith(
+      { created_by: 'user123', is_public: true },
+      { created_by: null }
+    );
+    // Private cocktails should be hard deleted
+    expect(userService.cocktailRepo.delete).toHaveBeenCalledWith(
+      { created_by: 'user123', is_public: false }
+    );
+  });
+
+  it('should aggregate all user data into standardized JSON for GDPR export', async () => {
+    const userService = new UserService();
+    jest.spyOn(userService.inventoryRepo, 'find').mockResolvedValue([{ ingredient: 'Vodka', quantity: 500 }]);
+    jest.spyOn(userService.favoritesRepo, 'find').mockResolvedValue([{ cocktailId: '123' }]);
+    
+    const exportData = await userService.exportUserData('user123');
+    
+    expect(exportData).toHaveProperty('profile');
+    expect(exportData).toHaveProperty('inventory');
+    expect(exportData).toHaveProperty('favorites');
+    expect(exportData).toHaveProperty('custom_cocktails');
+    expect(exportData.export_date).toBeDefined();
+  });
+});
 ```
 ```
 ```

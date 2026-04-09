@@ -1250,5 +1250,296 @@ describe('CocktailAggregatorService - External Ingredient Resolution', () => {
   });
 });
 ```
+
+**Example TDD for Hierarchical Ingredient Exclusion (UC 2.26):**
+```typescript
+describe('CocktailAggregatorService - Hierarchical Exclusions', () => {
+  it('should exclude cocktails containing child ingredients of an excluded parent category', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // Mock hierarchy: "Whiskey" is parent of "Bourbon" and "Rye"
+    jest.spyOn(ingredientService, 'getIngredientHierarchy').mockImplementation((ingredientName) => {
+      if (ingredientName === 'Whiskey') {
+        return Promise.resolve({
+          id: 'uuid-whiskey',
+          name: 'Whiskey',
+          children: [
+            { id: 'uuid-bourbon', name: 'Bourbon' },
+            { id: 'uuid-rye', name: 'Rye' }
+          ]
+        });
+      }
+      return Promise.resolve(null);
+    });
+    
+    aggregator.ingredientService = ingredientService;
+    
+    const mockCocktails = [
+      { 
+        id: '1', 
+        name: 'Bourbon Old Fashioned', 
+        ingredients: [{ name: 'Bourbon', ingredientId: 'uuid-bourbon' }] 
+      },
+      { 
+        id: '2', 
+        name: 'Rye Manhattan', 
+        ingredients: [{ name: 'Rye', ingredientId: 'uuid-rye' }] 
+      },
+      { 
+        id: '3', 
+        name: 'Vodka Martini', 
+        ingredients: [{ name: 'Vodka', ingredientId: 'uuid-vodka' }] 
+      }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Exclude "Whiskey" - should exclude both Bourbon and Rye cocktails
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_exclude: ['Whiskey']
+    });
+    
+    // Should exclude cocktails containing child ingredients
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Vodka Martini');
+  });
+
+  it('should handle multiple hierarchical exclusions', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // Mock multiple hierarchies
+    jest.spyOn(ingredientService, 'getIngredientHierarchy').mockImplementation((ingredientName) => {
+      const hierarchies = {
+        'Orange Liqueur': {
+          id: 'uuid-orange-liqueur',
+          name: 'Orange Liqueur',
+          children: [
+            { id: 'uuid-triple-sec', name: 'Triple Sec' },
+            { id: 'uuid-cointreau', name: 'Cointreau' }
+          ]
+        },
+        'Whiskey': {
+          id: 'uuid-whiskey',
+          name: 'Whiskey',
+          children: [
+            { id: 'uuid-bourbon', name: 'Bourbon' }
+          ]
+        }
+      };
+      return Promise.resolve(hierarchies[ingredientName] || null);
+    });
+    
+    aggregator.ingredientService = ingredientService;
+    
+    const mockCocktails = [
+      { id: '1', name: 'Margarita', ingredients: [{ name: 'Triple Sec' }] },
+      { id: '2', name: 'Sidecar', ingredients: [{ name: 'Cointreau' }] },
+      { id: '3', name: 'Old Fashioned', ingredients: [{ name: 'Bourbon' }] },
+      { id: '4', name: 'Gin & Tonic', ingredients: [{ name: 'Gin' }] }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Exclude both Orange Liqueur and Whiskey
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_exclude: ['Orange Liqueur', 'Whiskey']
+    });
+    
+    // Should exclude all except Gin & Tonic
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0].name).toBe('Gin & Tonic');
+  });
+
+  it('should cache hierarchy resolutions for performance', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    const cacheService = new RedisCacheService();
+    
+    const hierarchySpy = jest.spyOn(ingredientService, 'getIngredientHierarchy')
+      .mockResolvedValue({
+        id: 'uuid-rum',
+        name: 'Rum',
+        children: [
+          { id: 'uuid-light-rum', name: 'Light Rum' },
+          { id: 'uuid-dark-rum', name: 'Dark Rum' }
+        ]
+      });
+    
+    const cacheSetSpy = jest.spyOn(cacheService, 'set').mockResolvedValue(true);
+    const cacheGetSpy = jest.spyOn(cacheService, 'get').mockResolvedValue(null);
+    
+    aggregator.ingredientService = ingredientService;
+    aggregator.cacheService = cacheService;
+    
+    // First call should hit database and cache
+    await aggregator.resolveExclusionHierarchy('Rum');
+    expect(hierarchySpy).toHaveBeenCalledTimes(1);
+    expect(cacheSetSpy).toHaveBeenCalledWith('hierarchy:Rum', expect.any(String), { ttl: 3600 });
+    
+    // Reset spy
+    hierarchySpy.mockClear();
+    
+    // Second call should use cache
+    cacheGetSpy.mockResolvedValue(JSON.stringify({
+      id: 'uuid-rum',
+      name: 'Rum',
+      children: ['uuid-light-rum', 'uuid-dark-rum']
+    }));
+    
+    await aggregator.resolveExclusionHierarchy('Rum');
+    expect(hierarchySpy).not.toHaveBeenCalled(); // Should not call database
+  });
+
+  it('should handle circular references in ingredient hierarchy', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    // Mock circular reference: A -> B -> A
+    jest.spyOn(ingredientService, 'getIngredientHierarchy').mockImplementation(async (ingredientName) => {
+      if (ingredientName === 'A') {
+        return {
+          id: 'uuid-a',
+          name: 'A',
+          children: [{ id: 'uuid-b', name: 'B' }]
+        };
+      }
+      if (ingredientName === 'B') {
+        return {
+          id: 'uuid-b',
+          name: 'B',
+          children: [{ id: 'uuid-a', name: 'A' }] // Circular!
+        };
+      }
+      return null;
+    });
+    
+    aggregator.ingredientService = ingredientService;
+    
+    // Should detect and break circular reference
+    const result = await aggregator.resolveExclusionHierarchy('A');
+    
+    expect(result).toBeDefined();
+    expect(result.id).toBe('uuid-a');
+    // Implementation should track visited nodes to prevent infinite recursion
+  });
+
+  it('should combine hierarchical exclusion with strict inclusion filters', async () => {
+    const aggregator = new CocktailAggregatorService();
+    const ingredientService = new IngredientService();
+    
+    jest.spyOn(ingredientService, 'getIngredientHierarchy').mockResolvedValue({
+      id: 'uuid-citrus',
+      name: 'Citrus',
+      children: [
+        { id: 'uuid-lemon', name: 'Lemon' },
+        { id: 'uuid-lime', name: 'Lime' }
+      ]
+    });
+    
+    aggregator.ingredientService = ingredientService;
+    
+    const mockCocktails = [
+      { id: '1', name: 'Lemon Drop', ingredients: [{ name: 'Lemon' }, { name: 'Vodka' }] },
+      { id: '2', name: 'Margarita', ingredients: [{ name: 'Lime' }, { name: 'Tequila' }] },
+      { id: '3', name: 'Cosmopolitan', ingredients: [{ name: 'Lime' }, { name: 'Vodka' }] }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    // Exclude Citrus, include Vodka
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      ingredients_exclude: ['Citrus'],
+      ingredients_include: ['Vodka']
+    });
+    
+    // Should exclude all (Citrus exclusion removes all cocktails)
+    expect(result.data).toHaveLength(0);
+  });
+
+  it('should correctly sort unified search results by database rating', async () => {
+    const aggregator = new CocktailAggregatorService();
+    
+    const mockCocktails = [
+      { id: '1', name: 'Cocktail A', rating: 4.5, source: 'local' },
+      { id: '2', name: 'Cocktail B', rating: 4.2, source: 'local' },
+      { id: '3', name: 'Cocktail C', rating: 4.8, source: 'local' }
+    ];
+    
+    jest.spyOn(aggregator, 'searchLocal').mockResolvedValue({
+      data: mockCocktails,
+      hasMore: false
+    });
+    
+    const result = await aggregator.searchUnified('', {
+      limit: 10,
+      page: 1,
+      sort: 'rating'
+    });
+    
+    // Should be sorted by rating descending
+    expect(result.data[0].rating).toBe(4.8); // Cocktail C
+    expect(result.data[1].rating).toBe(4.5); // Cocktail A
+    expect(result.data[2].rating).toBe(4.2); // Cocktail B
+  });
+});
+
+describe('CocktailService - Ratings Concurrency', () => {
+  it('should accurately calculate average rating under concurrent load', async () => {
+    const cocktailService = new CocktailService();
+    
+    // Mock cocktail currently has 1 rating of 3.0 (Avg: 3.0)
+    // Simulate 3 concurrent users rating it: 5.0, 4.0, and 5.0. 
+    // New total should be (3+5+4+5)/4 = 4.25
+    
+    const request1 = cocktailService.rateCocktail('cocktail123', 'userA', 5.0);
+    const request2 = cocktailService.rateCocktail('cocktail123', 'userB', 4.0);
+    const request3 = cocktailService.rateCocktail('cocktail123', 'userC', 5.0);
+    
+    await Promise.all([request1, request2, request3]);
+    
+    // Verify that the final database state reflects exactly 4.25
+    // This ensures the transactional row-locking (SELECT FOR UPDATE) worked
+    const cocktail = await cocktailService.findById('cocktail123');
+    expect(cocktail.average_rating).toBe(4.25);
+  });
+});
+
+**Example TDD for Private Cocktail Guards (UC 2.34):**
+```typescript
+describe('CocktailService - Private Cocktail Guards', () => {
+  it('should block non-authors from directly fetching a private cocktail by UUID', async () => {
+    const cocktailService = new CocktailService();
+    
+    // Mock database returning a private cocktail owned by userA
+    jest.spyOn(cocktailService.cocktailRepo, 'findOne').mockResolvedValue({
+      id: 'private-uuid-123',
+      name: 'Secret Drink',
+      is_public: false,
+      created_by: 'userA'
+    });
+    
+    // userB attempts to fetch it
+    await expect(cocktailService.getCocktailById('private-uuid-123', 'userB'))
+      .rejects
+      .toThrow('Forbidden: You do not have permission to view this recipe');
+  });
+});
 ```
 ```

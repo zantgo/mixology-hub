@@ -438,6 +438,63 @@ Standard CRUD endpoints utilizing REST conventions:
 
 - `DELETE /favorites/:id` - Remove a saved drink.
 
+### 5. User Preferences & Authored Cocktails
+
+#### `GET /users/me/cocktails` (Fetch Authored Custom Cocktails)
+Fetches a paginated list of cocktails authored by the authenticated user.
+
+- **Query Parameters:** `limit`, `cursor`
+- **Response (200 OK):**
+```json
+{
+  "data": [
+    {
+      "id": "uuid-of-cocktail",
+      "name": "Secret Margarita",
+      "instructions": "1. Rim glass with salt...",
+      "imageUrl": "https://example.com/margarita.jpg",
+      "isPublic": true,
+      "source": "local",
+      "createdBy": "user-uuid",
+      "createdAt": "2026-04-08T10:30:00.000Z"
+    }
+  ],
+  "nextCursor": "2026-04-08T10:30:00.000Z_abc123",
+  "hasMore": false,
+  "limit": 10
+}
+```
+
+#### `GET /users/me/preferences` (Get User Preferences)
+Fetches the authenticated user's preferences (unit system, theme).
+
+- **Response (200 OK):**
+```json
+{
+  "unitSystem": "metric",
+  "theme": "system"
+}
+```
+
+#### `PATCH /users/me/preferences` (Update User Preferences)
+Updates the authenticated user's preferences.
+
+- **Request Body:**
+```json
+{
+  "unitSystem": "imperial",
+  "theme": "dark"
+}
+```
+
+- **Validation:**
+  - `unitSystem`: Optional, must be either "metric" or "imperial"
+  - `theme`: Optional, must be either "light", "dark", or "system"
+
+- **Response (200 OK):** Updated preferences object
+- **Error (400 Bad Request):** Invalid input data
+- **Error (401 Unauthorized):** User not authenticated
+
 ---
 
 ## 📄 Pagination Implementation Guide

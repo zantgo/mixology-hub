@@ -25,13 +25,15 @@
 * **When** `POST /auth/login` is called.
 * **Then** the system validates the password hash.
 * **And** generates a signed JWT containing the `user_id`.
-* **And** returns the token (or sets it in an HTTP-Only cookie).
+* **And** returns the Access Token in the JSON response payload (kept in Angular memory).
+* **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict` header.
 
 **UC 9.5: Token Expiration & Refresh**
-* **Given** a user's JWT has expired.
+* **Given** a user's Access Token has expired.
 * **When** the user attempts an action.
 * **Then** the server rejects it with `401 Unauthorized`.
-* **And** the Angular HTTP Interceptor automatically attempts to hit the `/auth/refresh` endpoint using a stored Refresh Token to maintain a seamless UX.
+* **And** the Angular HTTP Interceptor automatically attempts to hit the `/auth/refresh` endpoint using the HttpOnly Refresh Token cookie to maintain a seamless UX.
+* **And** returns a new Access Token in the JSON response payload.
 
 **UC 9.6: User Logout & Session Invalidation**
 * **Given** an authenticated user is finished using the app.
@@ -122,3 +124,21 @@
 * **And** blocks the request with a `403 Forbidden` if the role is missing or equals `user`.
 * **And** allows the request to proceed only if the role equals `admin`.
 * **And** logs admin actions for audit trail purposes.
+
+**UC 9.19: Auto-creation of User Profile**
+* **Given** a new user registers successfully.
+* **When** the database transaction creates the `users` row.
+* **Then** it automatically inserts a linked 1-to-1 row in `user_profiles`.
+* **And** applies the default system values (`unit_system: 'metric'`, `theme: 'system'`).
+
+**UC 9.20: GDPR Data Export (Right to Access)**
+* **Given** an authenticated user.
+* **When** they request a data export via `GET /users/me/export`.
+* **Then** the system aggregates their Profile, Inventory, Favorites, and Custom Cocktails.
+* **And** returns a standardized JSON file containing all their personal data.
+
+**UC 9.21: Recalculating Ratings on GDPR Account Deletion**
+* **Given** a user has rated several public cocktails.
+* **When** they trigger the `DELETE /users/me` endpoint.
+* **Then** their individual rows in the `cocktail_ratings` pivot table are permanently deleted.
+* **And** an asynchronous background job is triggered to recalculate and update the cached `rating` average on the `COCKTAILS` table for all affected drinks.

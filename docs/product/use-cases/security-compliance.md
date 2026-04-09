@@ -45,3 +45,16 @@
 * **And** ensures only whitelisted origins (e.g., `localhost:4200`, `mixologyhub.com`) return the `Access-Control-Allow-Origin` headers.
 * **And** validates Origin headers against environment-configured whitelist.
 * **And** includes appropriate CORS headers (`Access-Control-Allow-Methods`, `Access-Control-Allow-Headers`) for legitimate preflight requests.
+
+**UC 12.8: Sanitization of LLM Output**
+* **Given** the LLM generates a recipe where the `instructions` field contains `<img src="x" onerror="alert('XSS')">`.
+* **When** the backend parses the JSON and saves it via `save-as-cocktail`.
+* **Then** the DTO validation/sanitization layer aggressively strips all HTML tags from the LLM strings before database insertion.
+* **And** escapes special characters to prevent XSS attacks when the recipe is rendered on the frontend.
+* **And** logs sanitization events for security auditing when malicious patterns are detected.
+
+**UC 12.9: Rate Limiting Public Search to Prevent Scraping**
+* **Given** an unauthenticated IP address querying `GET /cocktails`.
+* **When** they make 100 requests in 10 seconds.
+* **Then** the `ThrottlerGuard` flags the anomalous pagination/search behavior.
+* **And** returns a `429 Too Many Requests` to prevent malicious scraping of the local ingredient and cocktail database.

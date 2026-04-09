@@ -24,3 +24,10 @@
 * **Then** the system logs the Redis connection error.
 * **And** gracefully bypasses the cache, calling the external APIs and database directly.
 * **And** returns results to the user without throwing a `500 Internal Server Error`.
+
+**UC 11.5: Redis Memory Limit & Eviction**
+* **Given** the Redis cache reaches its maximum memory limit.
+* **When** the Aggregator attempts to cache a new search result.
+* **Then** Redis uses the `allkeys-lru` (Least Recently Used) eviction policy.
+* **And** silently evicts the oldest cached searches to make room without throwing an Out Of Memory (OOM) error to the NestJS application.
+* **And** monitors cache hit/miss ratios to optimize memory allocation for frequently accessed data.

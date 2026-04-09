@@ -46,3 +46,10 @@
 * **Then** it enforces a strict maximum length (e.g., 2048 characters) for URLs.
 * **And** rejects the payload with a `400 Bad Request` before hitting the database.
 * **And** prevents database column overflow and potential DoS attacks through oversized payloads.
+
+**UC 10.8: Exposing Private Ingredients via Public Cocktails**
+* **Given** User A creates a custom ingredient (`is_global: false`) and uses it in a custom cocktail.
+* **When** User A sets the cocktail to `is_public: true`.
+* **Then** the custom ingredient remains `is_global: false` (not in the global search catalog).
+* **But** the system grants "Read-Only context visibility" to User B when viewing that specific recipe.
+* **And** allows User B to add that specific ingredient to their inventory directly from the recipe page so they can prepare it.

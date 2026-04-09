@@ -40,7 +40,7 @@
 
 **UC 5.7: AI Provider Timeout Handling**
 * **Given** the LLM provider experiences heavy load and hangs without returning data.
-* **When** 15 seconds have elapsed.
+* **When** 60 seconds have elapsed.
 * **Then** the `AIService` explicitly aborts the HTTP request.
 * **And** returns a `504 Gateway Timeout` to the frontend instead of keeping the user's connection hanging indefinitely.
 
@@ -100,3 +100,42 @@
 * **And** guarantees a brand-new, distinct recipe is returned rather than a cached or identical response.
 * **And** prevents HTTP caching by adding a random seed or timestamp to the request parameters.
 * **And** maintains a generation history to avoid returning previously rejected recipes to the same user.
+
+**UC 5.16: Saving an expired transient AI recipe**
+* **Given** the user generated an AI recipe but left their browser open for 25 hours.
+* **And** the backend cron job purged the transient recipe.
+* **When** the user clicks "Save Recipe" (`POST /ai/:id/save-as-cocktail`).
+* **Then** the API returns a `404 Not Found` or `410 Gone`.
+* **And** the UI displays a message: "This AI recipe has expired. Please generate a new one." rather than throwing a generic 500 error.
+* **And** logs the expiration event for debugging user behavior patterns.
+
+**UC 5.17: AI Daily Generation Quota**
+* **Given** an authenticated user.
+* **When** they attempt to generate their 21st AI recipe within a 24-hour UTC window.
+* **Then** the backend rejects the request.
+* **And** returns a `429 Too Many Requests` or `402 Payment Required` stating: "Daily AI generation limit reached. Please try again tomorrow."
+
+**UC 5.18: AI Recipe Stylistic Modifiers**
+* **Given** a user inputs ingredients "Rum, Lime" AND a stylistic modifier "Make it a frozen tiki drink".
+* **When** the backend constructs the prompt.
+* **Then** the prompt builder cleanly separates the hard ingredient constraints from the stylistic constraints.
+* **And** the AI returns a recipe reflecting both the ingredients and the frozen tiki style.
+
+**UC 5.19: AI Cocktail Default Image Fallback**
+* **Given** the AI generates a new transient recipe.
+* **When** the user saves it via `save-as-cocktail`.
+* **Then** the system assigns a specific "AI Generated" default placeholder to the `image_url` field.
+* **And** the frontend visually distinguishes it from standard user-created cocktails.
+
+**UC 5.20: Fetching AI Daily Quota Status**
+* **Given** an authenticated user who has generated 15 recipes today.
+* **When** the frontend initializes the AI Bartender view and calls `GET /ai/quota`.
+* **Then** the backend queries the `ai_generated_recipes` table for the last 24 hours.
+* **And** returns `{ "used": 15, "limit": 20, "remaining": 5, "resets_at": "ISO_DATE" }`.
+* **And** the frontend actively disables the "Generate" button if `remaining === 0`.
+
+**UC 5.21: AI Generation respecting User Unit Preferences**
+* **Given** a user has their profile `unit_system` set to `metric`.
+* **When** they trigger `POST /ai/generate`.
+* **Then** the backend injects the user's unit preference into the system prompt (e.g., "Use metric measurements like ml and grams").
+* **And** the AI directly outputs clean, localized measurements, preventing messy decimal conversions in the UI.

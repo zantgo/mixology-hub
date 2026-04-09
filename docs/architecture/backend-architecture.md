@@ -296,3 +296,54 @@ External API calls are expensive and subject to rate-limiting. We utilize **Redi
 ### 🚦 Rate Limiting (Production Consideration)
 
 In a production environment, public endpoints—especially the AI generation endpoint (`POST /ai`)—will be protected by a `ThrottlerModule` (NestJS rate limiter). This prevents abuse, controls costs associated with third-party LLM APIs, and ensures fair usage across users. The roadmap (Phase 1) includes configuring per-user and global request limits.
+
+### 👑 Role-Based Access Control (RBAC)
+
+The system implements a comprehensive RBAC system with the following components:
+
+#### 1. Database Schema
+- **`users.role` column:** Stores user role (`'user'` or `'admin'`) with default value `'user'`
+- **Admin-only tables:** Certain operations require admin privileges (e.g., global ingredient management)
+
+#### 2. Authorization Guards
+```typescript
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+  
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.get<string[]>('roles', context.getHandler());
+    if (!requiredRoles) return true;
+    
+    const request = context.switchToHttp().getRequest();
+    const user = request.user; // JWT payload
+    
+    return requiredRoles.includes(user.role);
+  }
+}
+```
+
+#### 3. Role Decorators
+```typescript
+// Controller usage
+@Controller('admin/ingredients')
+@UseGuards(RolesGuard)
+export class AdminIngredientsController {
+  @Post('merge')
+  @Roles('admin') // Only admins can access
+  async mergeIngredients(@Body() dto: MergeIngredientsDto) {
+    // Admin-only logic
+  }
+}
+```
+
+#### 4. Admin Privileges
+- **Global ingredient promotion:** Convert user-created ingredients to global availability
+- **Duplicate ingredient merging:** Merge duplicate ingredients across the system
+- **System-wide data management:** Access to all user data for support purposes
+- **Audit logging:** All admin actions are logged with timestamp and user ID
+
+#### 5. User Isolation
+- Standard users can only access and modify their own data (inventory, cocktails, favorites)
+- Multi-tenant isolation via `user_id` foreign keys in all user-specific tables
+- JWT tokens contain user ID and role for authorization decisions

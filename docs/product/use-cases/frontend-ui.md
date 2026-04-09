@@ -77,3 +77,23 @@
 * **Then** an Angular `CanDeactivate` route guard intercepts the navigation.
 * **And** prompts the user with a confirmation dialog ("You have unsaved changes. Leave?").
 * **And** allows navigation if confirmed, or blocks it if cancelled.
+
+**UC 7.13: Dynamic CSS Theme Toggling**
+* **Given** the user updates their preference to `theme: 'dark'`.
+* **When** the `UserStore` signal updates.
+* **Then** the frontend globally applies a `dark-theme` CSS class to the document root.
+* **And** overrides OS-level `prefers-color-scheme` settings.
+
+**UC 7.14: Image Upload UX vs. URL Paste**
+* **Given** a user is creating a custom cocktail or ingredient.
+* **When** they interact with the image field.
+* **Then** the UI clearly indicates this is a "Paste Image URL" field (not a binary file upload).
+* **And** the UI attempts to preview the image URL on `blur` or `debounce`.
+* **And** shows a clear error if the pasted link is a broken image or blocked by CORS.
+
+**UC 7.15: Search State Preservation Across Navigation**
+* **Given** a user searches for "Martini" with filters (ABV: 20-30%, Glass: Martini Glass).
+* **When** they navigate to view a cocktail detail page.
+* **Then** the frontend stores the search state (query, filters, pagination) in a service or URL query params.
+* **And** when they navigate back to the search results, the exact same state is restored.
+* **And** the search results are reloaded from cache or re-queried if cache expired.

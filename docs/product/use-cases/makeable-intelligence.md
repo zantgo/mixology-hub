@@ -74,3 +74,16 @@
 * **Then** it accurately sums the *total* required rum (`2 oz`).
 * **And** correctly flags the cocktail as "Almost Makeable" (missing 0.5 oz), rather than double-counting the 1.5 oz for both requirements.
 * **And** prevents inventory over-allocation across overlapping synonym hierarchies.
+
+**UC 3.15: Handling 0-Volume / Rinse Ingredients**
+* **Given** a "Sazerac" recipe requires an "Absinthe Rinse" (amount: `0` or `null`, unit: `rinse`).
+* **When** the makeability engine checks the user's inventory.
+* **Then** the system requires the user to have Absinthe in their inventory (quantity > 0).
+* **And** when "Prepared", the system does **not** deduct any volume for the Absinthe, but leaves the inventory untouched while deducting the primary spirits.
+* **And** marks rinse ingredients as "qualitative" rather than "quantitative" for inventory tracking purposes.
+
+**UC 3.16: Fractional Servings / Scaling Down**
+* **Given** a cocktail requires `2 oz` of Whiskey, but the user only has `1 oz`.
+* **When** the user requests makeability with `servings=0.5`.
+* **Then** the math engine divides the requirements (`1 oz` Whiskey).
+* **And** flags the cocktail as `Makeable` for a half-portion.

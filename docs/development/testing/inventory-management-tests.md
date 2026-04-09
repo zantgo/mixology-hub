@@ -887,6 +887,33 @@ describe('IngredientService - Immutability', () => {
     );
   });
 });
+
+describe('AdminIngredientService - Merge Ingredients', () => {
+  it('should merge ingredient A into B and sum quantities if user has both', async () => {
+    const adminService = new AdminIngredientService();
+    
+    // User123 has 100ml of "Fresh Lime" (A) and 200ml of "Lime" (B)
+    jest.spyOn(adminService.inventoryRepo, 'find').mockResolvedValue([
+      { userId: 'user123', ingredientId: 'A', quantity: 100 },
+      { userId: 'user123', ingredientId: 'B', quantity: 200 }
+    ]);
+    
+    const saveSpy = jest.spyOn(adminService.inventoryRepo, 'save');
+    const deleteSpy = jest.spyOn(adminService.ingredientRepo, 'delete');
+    
+    await adminService.mergeIngredients('A', 'B');
+    
+    // Should result in a single row for User123 with 300ml of B
+    expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'user123',
+      ingredientId: 'B',
+      quantity: 300
+    }));
+    
+    // Should delete ingredient A
+    expect(deleteSpy).toHaveBeenCalledWith('A');
+  });
+});
 ```
 ```
 ```

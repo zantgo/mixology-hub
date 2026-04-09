@@ -60,3 +60,10 @@
 * **Then** the cocktail remains in User B's database relation.
 * **And** User B's UI displays a tombstone: "This recipe was made private by the author" (similar to soft-delete behavior).
 * **And** prevents unauthorized access to private recipe details while maintaining the favorite relationship.
+
+**UC 6.10: Default Ordering of Favorites**
+* **Given** a user has a mix of recently added and older favorites.
+* **When** they request `GET /favorites` without sorting parameters.
+* **Then** the backend inherently sorts the results by `created_at DESC` (most recently favorited first).
+* **And** provides optional sorting parameters (`sort_by=name`, `sort_order=ASC`) for custom ordering.
+* **And** maintains consistent pagination ordering across multiple requests.

@@ -124,3 +124,48 @@
 * **Then** the system rejects the update with a `409 Conflict`.
 * **And** prevents historical unit-conversion math from breaking.
 * **And** provides a clear error message: "Cannot change base unit because ingredient is used in X recipes and Y inventory entries."
+
+**UC 1.20: Admin Hard-Deletion of a Global Ingredient**
+* **Given** an Admin deletes a global ingredient "Bad Vodka".
+* **When** the DELETE request is executed.
+* **Then** the database safely cascades the deletion to remove it from all `user_inventory` rows.
+* **And** sets the `ingredient_id` to `NULL` (or softly tombstones it) in `cocktail_ingredients` so existing custom recipes do not completely break, but flag the missing ingredient.
+
+**UC 1.21: Case-Insensitive Updates on Existing Custom Ingredients**
+* **Given** a user has "My syrup" in inventory.
+* **When** they attempt to add an ingredient typed as "MY SYRUP".
+* **Then** the system leverages the `normalized_name` logic.
+* **And** updates the quantity of the existing row rather than creating a duplicate row or throwing a 400 error.
+
+**UC 1.22: Maximum Quantity Threshold per Row**
+* **Given** a user attempts to add `999999` to an inventory item.
+* **When** the system evaluates the request.
+* **Then** it enforces a logical upper bound (e.g., `100,000 ml`) to prevent UI layout breaking, DB overflow, and integer-wrapping attacks.
+
+**UC 1.23: Admin Merging Duplicate Ingredients**
+* **Given** the database has "Fresh Lime" (ID: A) and "Lime" (ID: B).
+* **When** an Admin triggers a merge of A into B via `POST /admin/ingredients/merge`.
+* **Then** a transaction updates all `user_inventory` rows containing A to point to B.
+* **And** updates all `cocktail_ingredients` rows containing A to point to B.
+* **And** safely handles collisions (if a user already had both A and B in their inventory, it sums the quantities).
+* **And** safely deletes ingredient A.
+
+**UC 1.24: Admin Taxonomy & Synonym CRUD**
+* **Given** the math engine relies on synonyms for makeability.
+* **When** an Admin submits a `POST /admin/ingredients/synonyms` payload mapping "Curaçao" to the base ingredient "Orange Liqueur".
+* **Then** the relationship is saved in the database.
+* **And** the makeability engine instantly allows users with "Curaçao" to make "Orange Liqueur" based drinks without requiring a server restart.
+
+**UC 1.25: Bulk Delete Inventory Items**
+* **Given** a user wants to clear out expired ingredients after a party.
+* **When** they select multiple inventory items and clicks "Delete Selected" (triggering `DELETE /user-inventory/bulk` with array of ingredient IDs).
+* **Then** a single database transaction deletes all selected inventory rows.
+* **And** returns success count and any failures (e.g., ingredients used in recent preparations).
+* **And** maintains referential integrity with preparation logs.
+
+**UC 1.26: Bulk Add Inventory Items**
+* **Given** a user returns from grocery shopping with multiple new ingredients.
+* **When** they upload a CSV or use a multi-add form (triggering `POST /user-inventory/bulk` with array of ingredient objects).
+* **Then** a single database transaction inserts/updates all inventory items.
+* **And** handles duplicates by summing quantities for existing ingredients.
+* **And** validates all items before any are committed (all-or-nothing).
