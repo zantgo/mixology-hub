@@ -50,9 +50,4 @@
  * **And** retains logs marked as `undone = true` for 90 days for audit purposes.
  * **And** minimizes database bloat while preserving audit trail for disputed transactions.
 
-**UC 15.8: Automated cleanup of old sync operations**
- * **Given** the `SYNC_OPERATIONS` table contains operations older than 90 days.
- * **When** the nightly cron job executes.
- * **Then** the system permanently deletes operations where `created_at` is older than 90 days and `status = 'synced'`.
- * **And** retains failed operations (`status = 'failed'`) for 180 days for debugging purposes.
- * **And** prevents unbounded growth of the sync operations table for active mobile users.
+**Note:** UC 15.8 has been removed as the `SYNC_OPERATIONS` table no longer exists (Online-Only Mandate).

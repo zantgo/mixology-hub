@@ -129,10 +129,12 @@ When users create custom ingredients, the global catalog can get messy.
 
 # ⚡ 5. Critical UX Micro-Interactions & Edge Cases
 
-1.  **Offline Mode (UC 7.21)**:
-    *   *Trigger*: Browser loses network.
-    *   *UI*: A subtle grey banner drops down from the top: *"You are offline. You can still view your bar and prepare drinks."*
-    *   *Interaction*: If the user clicks "Prepare", the UI optimistically updates. A badge appears next to the drink saying *"Sync pending..."*.
+1.  **Network Error Handling (Online-Only Mandate)**:
+    *   *Trigger*: Browser loses network connection.
+    *   *UI*: A red error banner drops down from the top: *"Network connection lost. Please check your internet connection."*
+    *   *Behavior*: All API calls will fail with standard HTTP timeouts. The UI will display network error toasts with idempotent retry options for critical operations.
+    *   **Senior Architectural Decision**: Total Eradication of Offline State Artifacts
+    *   **Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with idempotent retries) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
 2.  **Fractional Input Handling**:
     *   If a user types "1/3 oz", the UI displays "1/3 oz" (retained in `original_measure`), even though the backend converts it to `0.33` for math.
 3.  **Image Fallbacks (UC 7.9)**:

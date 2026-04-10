@@ -212,6 +212,8 @@
  * **And** returns the updated average rating and rating count in the response for local cocktails, or the user's personal rating for external cocktails.
  * **Senior Architectural Decision: Shadow Rating Aggregation for External APIs**
    * **Explicit Trade-off:** We cannot fork external cocktails per-user strictly for ratings without fragmenting the community score. We explicitly dictate that when a user rates an external cocktail, the system DOES NOT fork the cocktail into the `COCKTAILS` table. Instead, it creates a "Shadow Record" in a new `EXTERNAL_COCKTAIL_RATINGS` table. We trade unified table architecture for the ability to accurately aggregate and display community scores for public API drinks without polluting our local database with thousands of identical clones.
+ * **Senior Architectural Decision: Personal-Only Ratings for External Cocktails**
+   * **Explicit Trade-off:** Because we refuse to pollute our local database by forking external cocktails merely for rating purposes (UC 2.30), there is no table available to cache O(1) running averages for public API drinks. We explicitly dictate that the system will not attempt to dynamically aggregate and display community averages for External API cocktails during Unified Search. External cocktails will only display the current user's personal shadow rating (if one exists). We trade community-driven discovery of external drinks for strict database performance and catalog purity.
 
 **UC 2.31: Updating a Rating with Atomic Recalculation**
 * **Given** a user has previously rated a cocktail 4 stars.

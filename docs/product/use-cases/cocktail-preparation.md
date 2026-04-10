@@ -95,7 +95,8 @@
 * **And** the user has Vodka but has never added Olives to their inventory (no row exists).
 * **When** the user attempts to prepare the cocktail.
 * **Then** the transaction fails validation for the missing Olives.
-* **And** if the user had 0 Olives, the transaction still succeeds, deducting only the Vodka.
+* **Senior Architectural Decision: Strict Zero-Quantity Rejection**
+* **Explicit Trade-off**: The Preparation Engine must enforce strict mathematical reality. If a recipe requires > 0 of any non-optional ingredient, possessing exactly 0 quantity must trigger an immediate transaction rollback with 400 Insufficient Stock, exactly as if the user had never added the ingredient to their inventory. We trade the flexibility of "close enough" preparations for absolute inventory ledger accuracy. (Users must utilize the `?force=true` parameter—UC 4.18—if they wish to bypass this).
 
 **UC 4.16: Deducting from fragmented synonym inventory**
 * **Given** a cocktail requires `2 oz` of "Orange Liqueur".
@@ -123,9 +124,9 @@
 **UC 4.19: Idempotency of the Undo Action with Idempotency-Key**
  * **Given** a preparation log (`log_id: 123`) has already been successfully undone (`undone = true`).
  * **When** a second concurrent or subsequent `POST /preparations/123/undo` request arrives with the same `Idempotency-Key` header.
- * **Then** the backend checks the Redis idempotency cache using the unified format defined in ADR 0012: `idempotency:v2:{userId}:preparation:undo:{UUID}`.
+ * **Then** the backend checks the Redis idempotency cache using the unified format defined in ADR 0012: `idempotency:v2:{userId}:preparation:undo:{source}:{UUID}` (where source is `client` or `system`).
  * **And** returns the cached `200 OK` response (consistent with UC 4.21 pattern) without adding the inventory back a second time.
- * **Architectural Alignment:** The Redis caching layer strictly utilizes the unified format defined in ADR 0012 (`idempotency:v2:{userId}:{operation}:{uuid}`) rather than raw HTTP paths, ensuring consistency between online clicks and offline sync batch processing.
+ * **Architectural Alignment:** The Redis caching layer strictly utilizes the unified format defined in ADR 0012 (`idempotency:v2:{userId}:{operation}:{source}:{uuid}`) rather than raw HTTP paths, ensuring namespace safety across different origin vectors.
  * **And** prevents the user from artificially inflating their inventory through retries or double-clicks.
 
 **UC 4.20: Preparation Undo vs. Mutated Recipes**
@@ -138,11 +139,11 @@
 
 **UC 4.21: Unified Idempotency System for State-Mutating Operations**
  * **Given** a client sends any state-mutating request (POST, PUT, PATCH, DELETE) with an idempotency identifier.
- * **When** a duplicate request arrives (network retry, double-click, offline sync).
+ * **When** a duplicate request arrives (network retry or double-click).
  * **Then** the Unified Idempotency Service checks:
     * **Primary**: Redis cache for performance (fast path)
     * **Fallback**: PostgreSQL `unified_idempotency` table as source of truth
-    * **Format**: `idempotency:v2:{userId}:{operation}:{uuid}` as defined in ADR 0012
+    * **Format**: `idempotency:v2:{userId}:{operation}:{source}:{uuid}` (where source is `client` or `system`) as defined in ADR 0012
  * **And** returns the cached response without re-executing the operation.
  * **And** prevents double-deduction/inconsistent state while maintaining exactly-once semantics.
  * **Architecture**: PostgreSQL UNIQUE constraint guarantees no duplicates; Redis cache provides performance; automatic cache warming on startup.

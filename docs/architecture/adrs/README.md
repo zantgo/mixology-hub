@@ -43,8 +43,8 @@ Each ADR follows this structure:
 **Summary**: Hybrid fail-safe strategy for Redis degradation: in-memory fallback for rate limiting, fail-closed for AI quotas, fail-open for idempotency and sessions.
 
 ### [ADR 0006: Last Write Wins vs. Delta-Only Sync for Offline Operations](./0006-last-write-wins-vs-delta-only-sync.md)
-**Status**: Accepted  
-**Summary**: Decision to implement delta-only sync for offline inventory operations to prevent overwrite conflicts, with absolute updates requiring online state.
+**Status**: Deprecated  
+**Summary**: **DEPRECATED** - Offline functionality removed as part of Online-Only Mandate. This ADR documented delta-only sync for offline inventory operations.
 
 ### [ADR 0007: SSRF Prevention vs. Image Link Rot Validation Trade-off](./0007-ssrf-prevention-vs-image-link-rot-validation.md)
 **Status**: Superseded by ADR 0011  
@@ -59,8 +59,8 @@ Each ADR follows this structure:
 **Summary**: Decision to accept double-deduction risk during Redis outages with user undo recovery, rather than implementing complex database fallback.
 
 ### [ADR 0010: Offline Logout Impeding JWT Revocation Gap](./0010-offline-logout-jwt-revocation-gap.md)
-**Status**: Accepted  
-**Summary**: Decision to accept security gap where offline logout doesn't revoke server-side tokens, mitigated by short token expiry and user warnings.
+**Status**: Deprecated  
+**Summary**: **DEPRECATED** - Offline functionality removed as part of Online-Only Mandate. This ADR documented security gap where offline logout didn't revoke server-side tokens.
 
 ### [ADR 0011: Client IP Leakage via External Images Despite SSRF Prevention](./0011-client-ip-leakage-external-images.md)
 **Status**: Accepted  

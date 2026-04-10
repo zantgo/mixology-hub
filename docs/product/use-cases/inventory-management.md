@@ -170,8 +170,7 @@
 * **And** safely deletes ingredient A.
 * **Senior Architectural Decision: Strict Base-Unit Isolation on Ingredient Merges**
   * **Explicit Trade-off:** We explicitly forbid Administrators from merging two ingredients that have differing `baseUnit` types (e.g., merging a Volume into a Count). To protect the mathematical integrity of historical `user_inventory` and `cocktail_ingredients` data, the Admin UI will throw a `409 Conflict: Incompatible Base Units`. We trade administrative convenience (forcing admins to manually delete the erroneous ingredient rather than merging it) for the guarantee that the `UnitConverterService` math engine will never crash on corrupted cross-unit sums.
-* **Senior Architectural Decision: Offline Sync Droppage on Admin Merges**
-  * **Explicit Trade-off:** When an Administrator merges two ingredients, the obsolete ingredient ID is hard-deleted to maintain catalog purity. We explicitly accept that if any user has a pending offline sync queue containing delta deductions targeting the deleted ingredient ID, those specific operations will fail upon reconnection and be marked as "Failed" in their sync history. We trade absolute offline data preservation for backend relational simplicity, avoiding the massive complexity of maintaining a "tombstone redirect" table for merged UUIDs.
+  * **Note:** With the removal of offline sync functionality, there are no pending operations to fail when ingredients are merged.
 
 **UC 1.24: Admin Taxonomy & Synonym CRUD**
 * **Given** the math engine relies on synonyms for makeability.
@@ -220,7 +219,7 @@
 * **And** provides the detected cycle path for debugging: `Triple Sec → Cointreau → Triple Sec`.
 
 **UC 1.30: Handling Out-of-Bounds Expiration Dates (Future-Proofing)**
-* **Given** a user inputs a manual restock via offline sync or raw API.
+ * **Given** a user inputs a manual restock via raw API.
 * **When** they pass an absurd timestamp for an ingredient (e.g., year 9999 or year 1970).
 * **Then** the system rejects it to prevent PostgreSQL timestamp overflow/underflow errors.
 * **And** validates all timestamps are within reasonable bounds (e.g., 2000-01-01 to 2100-12-31).

@@ -43,7 +43,7 @@ announceCritical(message: string) {
 | Ingredient added | "Vodka added to inventory. Current quantity: 750 milliliters" | polite |
 | Cocktail prepared | "Margarita prepared. Stock deducted from inventory. [UNDO]" | polite |
 | AI generation complete | "AI recipe generated: Tropical Sunrise" | polite |
-| Error occurred | "Error: Network connection lost. Working offline." | assertive |
+| Error occurred | "Error: Network connection lost." | assertive |
 | Form validation error | "Error: Quantity must be a positive number" | assertive |
 | Search results loaded | "15 cocktails found" | polite |
 | Inventory low | "Warning: Vodka running low. 100 milliliters remaining" | polite |

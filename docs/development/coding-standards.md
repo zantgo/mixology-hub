@@ -151,20 +151,18 @@ We follow the **Conventional Commits** specification to ensure a clean, searchab
 ### Frontend Requirements
 - **Same Library, Same Precision:** The Angular frontend MUST use the same `decimal.js` library for all inventory-related calculations to maintain consistency with backend math.
 
-- **Explicit Architectural Trade-off (Bundle Size & DRY Violation):** Shipping a heavy math library like `decimal.js` (approx ~30kb minified/gzipped) to the client solely to calculate optimistic UI inventory updates is a heavy payload trade-off. Additionally, we must duplicate the entire `UnitConverterService` logic (conversion factors, precision handling, unit validation) across both Node.js backend and Angular frontend. This violates DRY (Don't Repeat Yourself) but is necessary because:
+ - **Explicit Architectural Trade-off (Bundle Size & DRY Violation):** Shipping a heavy math library like `decimal.js` (approx ~30kb minified/gzipped) to the client solely to calculate optimistic UI inventory updates is a heavy payload trade-off. Additionally, we must duplicate the entire `UnitConverterService` logic (conversion factors, precision handling, unit validation) across both Node.js backend and Angular frontend. This violates DRY (Don't Repeat Yourself) but is necessary because:
 
-  1. **Offline Optimistic UI**: When users prepare cocktails offline, Angular must immediately show updated inventory by performing the same unit conversions as the backend.
-  2. **Mathematical Parity**: Both client and server must use identical conversion logic to prevent UI/server state desync.
-  3. **Maintenance Burden**: Any changes to unit conversion logic must be synchronized across both codebases.
+   1. **Mathematical Parity**: Both client and server must use identical conversion logic to prevent UI/server state desync.
+   2. **Maintenance Burden**: Any changes to unit conversion logic must be synchronized across both codebases.
 
-  We explicitly accept this duplication and bundle size increase to guarantee perfect mathematical parity between the Angular UI and PostgreSQL, prioritizing data integrity and offline functionality over minimal bundle size and DRY purity.
+  We explicitly accept this duplication and bundle size increase to guarantee perfect mathematical parity between the Angular UI and PostgreSQL, prioritizing data integrity over minimal bundle size and DRY purity.
 
 ### Decimal String Serialization Trade-off
 **Senior Architectural Decision: Decimal String Serialization over HTTP**
 **Explicit Trade-off:** To prevent IEEE 754 floating-point corruption over the network, we retract the decision to serialize quantities as native JSON numbers. All inventory quantities and recipe amounts MUST be serialized as strings (e.g., `"quantity": "500.3333"`) in JSON payloads. The Angular frontend will instantiate its `decimal.js` objects directly from these strings. We trade a slight increase in payload byte size for absolute mathematical parity across the stack.
 
-**Senior Architectural Decision: IndexedDB Decimal Serialization Boundary**
-**Explicit Trade-off:** Because the IndexedDB structured cloning algorithm strips prototype chains and risks IEEE 754 floating-point corruption, all fractional measurements MUST be explicitly serialized to Strings before being stashed in the IndexedDB offline queue (UC 12.1), and subsequently rehydrated into new decimal.js objects upon retrieval. We explicitly accept the processing overhead of serializing/deserializing payloads on every offline click to guarantee mathematical parity survives the browser's local storage engine.
+**Note:** IndexedDB serialization is no longer required as offline functionality has been removed.
 
 **Implementation:**
 ```typescript

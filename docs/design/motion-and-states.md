@@ -222,14 +222,11 @@ Used during: Unified Search, AI Generation, API calls
 </div>
 ```
 
-### Offline Banner
+### Network Error Banner
 ```html
-<div class="offline-banner" role="alert" aria-live="assertive">
+<div class="network-error-banner" role="alert" aria-live="assertive">
   <app-icon name="wifi-off"></app-icon>
-  <span>You are offline. You can still view your bar and prepare drinks.</span>
-  <div class="offline-indicator">
-    <div class="pulse"></div>
-  </div>
+  <span>Network connection lost. Please check your internet connection.</span>
 </div>
 ```
 

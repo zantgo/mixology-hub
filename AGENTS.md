@@ -40,6 +40,7 @@ make test-e2e        # Backend E2E tests (Supertest)
 - **Frontend**: Angular 18+ with Signals, Standalone Components, Zoneless Change Detection
 - **Database**: PostgreSQL with automatic seeding (mock user: `mock@test.com`)
 - **Unit Conversion**: Mathematical base-unit conversions in `UnitConverterService`
+- **Online-Only Mandate**: Application requires persistent internet connection; all offline sync functionality has been removed
 
 ## Environment Configuration
 - **Required**: `.env` file in root directory (copy from `.env.example`)

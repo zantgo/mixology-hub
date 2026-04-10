@@ -1,5 +1,7 @@
 # Frontend Architecture & Design Patterns
 
+> **ONLINE-ONLY MANDATE:** This application requires a persistent internet connection to function. All offline and sync functionality has been removed to simplify architecture and eliminate complex state reconciliation.
+
   
 
 The MixologyHub frontend is built with **Angular 18+**, leveraging the framework's most modern features to deliver a highly reactive, performant, and maintainable User Interface.
@@ -163,3 +165,8 @@ We utilize **Angular Reactive Forms** with `FormArray` to handle this.
 
 **Senior Architectural Decision: HTML Input Precision Boundary**
 **Explicit Trade-off:** Standard HTML `<input type="number">` elements inherently cast inputs to IEEE 754 floats. To strictly maintain `decimal.js` precision from end-to-end, all fractional ingredient inputs in Angular Reactive Forms MUST use `<input type="text" inputmode="decimal">`. We accept the minor UX trade-off of losing the native browser "spinner" arrows in exchange for preventing silent float corruption before the data reaches our math engine.
+
+## 🔄 Network Error Handling
+
+**Senior Architectural Decision: Optimistic Rollback & Idempotent Auto-Retry**
+**Explicit Trade-off:** With the removal of offline queuing, the frontend must handle network failures in real-time. We explicitly mandate the use of RxJS `retry({ count: 2, delay: 1000 })` for all state-mutating requests, relying on the backend's Idempotency Key system to prevent duplicate processing. If the request fails after 2 retries, the Angular Signal state MUST be mathematically rolled back to its previous value, and the user presented with a hard error toast: "Network error: Operation failed. Please try again." We trade offline usability for strict client-server state consistency.

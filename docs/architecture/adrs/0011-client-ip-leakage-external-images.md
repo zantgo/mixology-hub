@@ -222,8 +222,8 @@ export class ImageService {
 **Explicit Trade-off:** To prevent "double-proxying" data corruption when users edit existing cocktails (UC 2.8), the database `image_url` column MUST ALWAYS hold the raw, unproxied external URL. We explicitly dictate that the backend proxy-rewrite logic must only occur on a virtual `proxyImageUrl` field injected during DTO serialization. The original `image_url` field will remain untouched in the payload so that Angular Reactive Forms populate with the raw URL, not the proxy route. We trade a slightly larger JSON payload (sending two URL fields) for absolute data mutation safety.
 
 ### Architectural Trade-off: Unauthenticated Image Proxy Access
-**Senior Architectural Decision: Unauthenticated Image Proxy Access**
-**Explicit Trade-off:** Because standard HTML `<img>` tags cannot send `Authorization` headers, and our JWTs are stored in `localStorage` (UC 9.4), the `GET /images/proxy` endpoint must be completely public and unauthenticated. We explicitly accept that we cannot track proxy usage by `user_id`. We trade granular user-level proxy analytics and rate-limiting for the performance of native browser image rendering. Abuse prevention will rely entirely on the pre-signed HMAC `hash` query parameter and IP-based rate limiting.
+**Senior Architectural Decision: Unauthenticated Image Proxy via In-Memory Auth Limitation**
+**Explicit Trade-off:** We acknowledge that our JWT Access Tokens are strictly stored in volatile browser memory (not localStorage or cookies) to prevent XSS (UC 9.4). Because standard HTML `<img src="...">` tags cannot access memory-bound variables to attach Authorization headers, the `GET /api/images/proxy` endpoint must remain completely public and unauthenticated. We explicitly trade granular, user-authenticated proxy rate-limiting for XSS protection, relying entirely on pre-signed HMAC URL hashes and IP-based rate limiting to prevent proxy abuse.
 
 ## Mitigation Strategies
 

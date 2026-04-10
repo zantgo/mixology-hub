@@ -25,19 +25,16 @@
  * **When** `POST /auth/login` is called.
  * **Then** the system validates the password hash.
  * **And** generates a signed JWT containing the `user_id`.
- * **And** returns the Access Token in the JSON response payload (stored in localStorage for cross-tab sync - see Senior Arch Decision below).
- * **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh` header to prevent the token from being sent to unrelated endpoints.
- * **Senior Architectural Decision: LocalStorage for Access Tokens**
-   * **Explicit Trade-off:** To support cross-tab state synchronization (UC 7.25) and offline operation queueing (UC 12.1), we explicitly abandon the "in-memory only" access token pattern. Access Tokens will be persisted in localStorage. We accept the XSS exposure risk, mitigating it via short 15-minute token lifespans and strict CSP headers, prioritizing multi-tab/offline UX over maximal token security.
+  * **And** returns the Access Token in the JSON response payload (stored in memory for security - see Senior Arch Decision below).
+  * **Senior Architectural Decision: In-Memory Access Tokens (XSS Mitigation)**
+    * **Explicit Trade-off:** With the removal of offline queuing requirements, we no longer need persistent access to JWTs during network loss. We explicitly mandate moving the JWT Access Token out of localStorage and into strict browser memory (Angular Service closure). The Refresh Token will remain in a secure HttpOnly cookie. If a user opens a new browser tab, the application will silently hit the `/auth/refresh` endpoint to pull a fresh in-memory Access Token. We trade the slight latency of a silent background refresh on new-tab initialization for the absolute elimination of XSS token theft vulnerabilities.
 
 **UC 9.5: Token Expiration & Refresh**
 * **Given** a user's Access Token has expired.
 * **When** the user attempts an action.
 * **Then** the server rejects it with `401 Unauthorized`.
 * **And** the Angular HTTP Interceptor automatically attempts to hit the `/auth/refresh` endpoint using the HttpOnly Refresh Token cookie to maintain a seamless UX.
-* **And** returns a new Access Token in the JSON response payload.
-* **Senior Architectural Decision: Stale JWT Acceptance for Offline Queuing**
-  * **Explicit Trade-off:** We explicitly accept a deviation from standard JWT lifecycle enforcement during offline mode. To support extended offline usage (e.g., 10-day camping trips), the frontend Angular application will ignore the `exp` (expiration) claim of the Access Token only when `navigator.onLine === false`. It will continue to use the cryptographically verified `user_id` from the stale JWT payload to partition local IndexedDB storage and queue operations. We trade strict local session timeouts for uninterrupted offline UX. When the device reconnects, the Sync Service will pause the queue, execute the HttpOnly refresh token rotation, and append the new valid Access Token to the pending offline payload batch before transmitting to the server.
+  * **And** returns a new Access Token in the JSON response payload.
 
 **UC 9.6: Refresh Token Rotation & Reuse Detection**
 * **Given** a user presents a valid refresh token cookie.

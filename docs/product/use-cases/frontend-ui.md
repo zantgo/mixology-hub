@@ -1,5 +1,7 @@
 # 💻 Domain 7: Frontend UI & Reactivity (Angular)
 
+> **ONLINE-ONLY MANDATE:** This application requires a persistent internet connection to function. All offline and sync functionality has been removed to simplify architecture and eliminate complex state reconciliation.
+
 **UC 7.1: Real-time UI updates via Signals**
 * **Given** the user views their inventory and the "Makeable Cocktails" list.
 * **When** the user clicks "Prepare" on a makeable cocktail.
@@ -137,35 +139,12 @@
 * **And** prevents the user from submitting a request that is guaranteed to fail validation.
 * **And** displays a tooltip explaining the conversion constraint when incompatible units are attempted.
 
-**UC 7.21: Two-Phase Offline Preparation with Inventory-Aware Logging**
-* **Given** a user prepares a cocktail while offline (optimistic UI deducts inventory locally).
-* **And** the physical database no longer has sufficient stock (depleted by a roommate/another session).
-* **When** the app comes back online and the background sync processes the queue.
-* **Then** the backend executes a **two-phase preparation**:
-  * **Phase 1: Always create preparation log** - Record the preparation attempt with `inventory_status: 'pending'`
-  * **Phase 2: Attempt inventory deduction** - If successful, update log with `inventory_status: 'deducted'`; if fails, update with `inventory_status: 'failed_insufficient'`
-* **And** the preparation log is **never dropped** - it always exists for analytics, undo history, and user experience consistency.
-* **And** the Angular Sync Service:
-  * Shows toast: "Cocktail prepared! (Inventory adjustment failed: insufficient stock)"
-  * Updates UI to show preparation in history with warning icon
-  * Forces hard refresh of inventory from server
-  * Allows user to manually adjust inventory or retry deduction
-* **And** the undo system works for all preparations regardless of inventory status.
-
-**UC 7.22: Secure Image Proxy Rendering (IP Privacy)**
+**UC 7.21: Secure Image Proxy Rendering (IP Privacy)**
 * **Given** the frontend needs to render a cocktail image sourced from an external API (e.g., TheCocktailDB).
 * **When** the browser makes the GET request for the image asset.
 * **Then** the Angular `<img [src]="sanitizedUrl">` tag points STRICTLY to the backend proxy (`/api/images/proxy?url=...&hash=...`).
 * **And** the frontend explicitly never makes direct outbound requests to the external host, guaranteeing zero client IP leakage (per ADR 0011).
 * **And** utilizes the `SecureImageComponent` to seamlessly fallback to `cocktail-placeholder.jpg` if the proxy returns a 4xx/5xx error.
-
-**UC 7.23: Bulk Offline Queue Sync**
- * **Given** a user prepared 3 drinks while entirely offline.
- * **When** the device regains network connectivity.
- * **Then** the Angular Sync Service batches all 3 preparations into a single `POST /sync/operations` request (consistent with UC 12.2).
- * **And** the backend processes each operation independently in separate transactions, returning an array of success/failure statuses for each item.
- * **And** prevents network instability from sending 10 queued items sequentially when the app comes back online.
- * **Note:** Operations are processed independently to maintain item-level idempotency (UC 12.2).
 
 **UC 7.24: Asynchronous AI Loading State Recovery**
 * **Given** a user requests an AI recipe and navigates to the "Inventory" page while waiting.
@@ -182,27 +161,14 @@
  * **And** instantly updates the Angular Signal in Tab B to reflect the new inventory state without requiring a manual refresh.
  * **And** displays a subtle notification in Tab B: "Inventory updated from another tab".
  * **Implementation:** Uses a shared service that publishes state changes to `BroadcastChannel` and subscribes to receive updates from other tabs.
- * **Senior Architectural Decision: Access Token Storage vs. XSS Risk**
-   * **Explicit Trade-off:** To enable cross-tab synchronization via `localStorage`, we must store the JWT access token in `localStorage` rather than HttpOnly cookies. This exposes the token to XSS attacks where malicious JavaScript could steal it. We accept this risk because:
-     1. **Cross-Tab Sync Requirement:** HttpOnly cookies cannot be read by JavaScript, preventing BroadcastChannel synchronization
-     2. **Offline Functionality:** Access tokens in localStorage enable offline queue persistence
-     3. **Mitigation:** Strict Content Security Policy (CSP), input sanitization, and regular security audits
-     4. **Short Token Lifetime:** 15-minute access token expiration limits exposure window
+ * **Senior Architectural Decision: In-Memory Access Tokens (XSS Mitigation)**
+   * **Explicit Trade-off:** With the removal of offline queuing requirements, we no longer need persistent access to JWTs during network loss. We explicitly mandate moving the JWT Access Token out of localStorage and into strict browser memory (Angular Service closure). The Refresh Token will remain in a secure HttpOnly cookie. If a user opens a new browser tab, the application will silently hit the `/auth/refresh` endpoint to pull a fresh in-memory Access Token. We trade the slight latency of a silent background refresh on new-tab initialization for the absolute elimination of XSS token theft vulnerabilities.
 
-**UC 7.26: Sync Payload Bounding for Offline Queue**
- * **Given** a user is offline for an extended period and queues preparations.
- * **When** the offline queue in IndexedDB reaches 50 pending operations.
- * **Then** the UI disables further state-mutating actions to prevent generating a massive JSON payload that would cause `413 Payload Too Large` or transaction timeouts when the background sync finally flushes to the server.
- * **And** shows a warning: "Offline queue full. Please sync before adding more actions."
- * **And** provides a "Clear Oldest" button to manually prune the queue.
- * **Senior Architectural Correction: IndexedDB as Primary Offline Store**
-   * **Explicit Decision:** The offline queue MUST be stored in IndexedDB, not localStorage. IndexedDB is asynchronous, can hold gigabytes of data, and is designed for structured storage. localStorage should only be used for the Access Token and lightweight User Preferences.
-   * **Rationale:** The 50-action limit is not to protect browser storage quotas (IndexedDB can handle much more), but to protect the backend from payload massive synchronization spikes when the device reconnects.
-
-**UC 7.27: State Reconciliation after Intermittent Network Drop**
+**UC 7.26: Network Error Handling with Optimistic Rollback**
  * **Given** a user clicks "Prepare Drink" and the UI optimistically deducts 50ml of Vodka.
  * **And** the network drops *while* the request is in-flight to the server.
  * **When** the frontend times out, it rolls back the UI to the previous state (Vodka +50ml).
  * **But** the backend successfully received and processed the request before the client disconnected.
- * **Then** when the `NetworkService` detects connection restored (`window.addEventListener('online')`), it must fire a silent `GET /inventory/hash` (or background refresh).
- * **And** forcibly sync the frontend Signal state with the Server state to resolve the optimistic UI desync, preventing the user from seeing ghost inventory.
+ * **Then** when the request eventually fails, the frontend uses RxJS `retry({ count: 2, delay: 1000 })` to attempt automatic retry.
+ * **And** if retries fail, shows error toast: "Network error: Preparation failed. Please try again."
+ * **And** maintains strict client-server state consistency through idempotent retry mechanism.

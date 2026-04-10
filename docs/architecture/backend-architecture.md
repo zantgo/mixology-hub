@@ -1,5 +1,7 @@
 # Backend Architecture & Design Patterns
 
+> **ONLINE-ONLY MANDATE:** This application requires a persistent internet connection to function. All offline and sync functionality has been removed to simplify architecture and eliminate complex state reconciliation.
+
   
 
 The MixologyHub backend is built with **NestJS**, a progressive Node.js framework that heavily enforces structure, dependency injection, and strict typing via TypeScript.

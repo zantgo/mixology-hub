@@ -379,162 +379,20 @@ describe('Frontend - Pagination State Restoration', () => {
 });
 ```
 
-describe('Frontend - Network Loss (Offline State)', () => {
-  it('should disable prepare buttons and show "Offline" indicator if window.navigator is offline', () => {
-    // Mock window.navigator.onLine = false
-    Object.defineProperty(window.navigator, 'onLine', {
-      value: false,
-      writable: true
-    });
-    
-    const fixture = TestBed.createComponent(CocktailDetailComponent);
-    const component = fixture.componentInstance;
-    
-    // Mock cocktail data
-    component.cocktail = {
-      id: 'mojito-123',
-      name: 'Mojito',
-      ingredients: [{ name: 'Rum', amount: 2, unit: 'oz' }]
-    };
-    
-    fixture.detectChanges();
-    
-    // Ensure "Prepare" button has [disabled]="true"
-    const prepareButton = fixture.nativeElement.querySelector('.prepare-button');
-    expect(prepareButton.disabled).toBe(true);
-    expect(prepareButton.getAttribute('aria-disabled')).toBe('true');
-    
-    // Ensure offline toast/banner is visible
-    const offlineIndicator = fixture.nativeElement.querySelector('.offline-indicator');
-    expect(offlineIndicator).toBeTruthy();
-    expect(offlineIndicator.textContent).toContain('Offline');
-    
-    // Ensure button has appropriate styling
-    expect(prepareButton.classList.contains('disabled')).toBe(true);
-  });
-
-  it('should re-enable prepare buttons when network connection is restored', () => {
-    // Start offline
-    Object.defineProperty(window.navigator, 'onLine', {
-      value: false,
-      writable: true
-    });
-    
-    const fixture = TestBed.createComponent(CocktailDetailComponent);
-    const component = fixture.componentInstance;
-    component.cocktail = { id: 'test', name: 'Test' };
-    fixture.detectChanges();
-    
-    // Button should be disabled
-    let prepareButton = fixture.nativeElement.querySelector('.prepare-button');
-    expect(prepareButton.disabled).toBe(true);
-    
-    // Simulate network restoration
-    Object.defineProperty(window.navigator, 'onLine', {
-      value: true,
-      writable: true
-    });
-    
-    // Trigger online event
-    window.dispatchEvent(new Event('online'));
-    fixture.detectChanges();
-    
-    // Button should be enabled
-    prepareButton = fixture.nativeElement.querySelector('.prepare-button');
-    expect(prepareButton.disabled).toBe(false);
-    
-    // Offline indicator should be hidden
-    const offlineIndicator = fixture.nativeElement.querySelector('.offline-indicator');
-    expect(offlineIndicator).toBeFalsy();
-  });
-
-  it('should prevent optimistic updates when offline', () => {
-    const inventoryStore = TestBed.inject(InventoryStore);
-    const networkService = TestBed.inject(NetworkService);
-    
-    // Mock offline state
-    jest.spyOn(networkService, 'isOnline').mockReturnValue(false);
-    
-    // Attempt preparation
-    inventoryStore.prepareDrink('vodka-123', 50);
-    
-    // Should not trigger optimistic update
-    const inventorySignal = inventoryStore.inventory();
-    expect(inventorySignal.find(i => i.id === 'vodka-123')?.quantity).not.toBe(450); // Should remain unchanged
-    
-    // Should show offline error toast
+describe('Frontend - Network Error Handling', () => {
+  it('should show network error toast when preparation fails', fakeAsync(() => {
+    const preparationService = TestBed.inject(PreparationService);
     const toastService = TestBed.inject(ToastService);
+    
     const toastSpy = jest.spyOn(toastService, 'showError');
-    expect(toastSpy).toHaveBeenCalledWith('Cannot prepare drink while offline');
-  });
-
-  it('should queue preparation requests when offline and sync when back online', () => {
-    const preparationService = TestBed.inject(PreparationService);
-    const networkService = TestBed.inject(NetworkService);
     
-    // Start offline
-    jest.spyOn(networkService, 'isOnline').mockReturnValue(false);
-    
-    // Queue multiple preparations
-    preparationService.prepareCocktail('cocktail-1', 1);
-    preparationService.prepareCocktail('cocktail-2', 2);
-    
-    // Verify queued
-    const queue = preparationService.getPendingPreparations();
-    expect(queue).toHaveLength(2);
-    
-    // Go online
-    jest.spyOn(networkService, 'isOnline').mockReturnValue(true);
-    
-    // Mock sync
-    const syncSpy = jest.spyOn(preparationService, 'syncPendingPreparations').mockResolvedValue(true);
-    
-    // Trigger online event
-    window.dispatchEvent(new Event('online'));
-    
-    // Should attempt to sync
-    expect(syncSpy).toHaveBeenCalled();
-  });
-
-  it('should show connection status in app header', () => {
-    const fixture = TestBed.createComponent(AppHeaderComponent);
-    const component = fixture.componentInstance;
-    
-    // Test offline
-    Object.defineProperty(window.navigator, 'onLine', { value: false, writable: true });
-    fixture.detectChanges();
-    
-    let statusIndicator = fixture.nativeElement.querySelector('.connection-status');
-    expect(statusIndicator).toBeTruthy();
-    expect(statusIndicator.classList.contains('offline')).toBe(true);
-    expect(statusIndicator.textContent).toContain('Offline');
-    
-    // Test online
-    Object.defineProperty(window.navigator, 'onLine', { value: true, writable: true });
-    window.dispatchEvent(new Event('online'));
-    fixture.detectChanges();
-    
-    statusIndicator = fixture.nativeElement.querySelector('.connection-status');
-    expect(statusIndicator.classList.contains('online')).toBe(true);
-    expect(statusIndicator.textContent).toContain('Online');
-  });
-
-  it('should handle intermittent connectivity during preparation', fakeAsync(() => {
-    const preparationService = TestBed.inject(PreparationService);
-    const networkService = TestBed.inject(NetworkService);
-    
-    // Start online
-    jest.spyOn(networkService, 'isOnline').mockReturnValue(true);
+    // Mock HTTP request that will fail
+    const httpMock = TestBed.inject(HttpTestingController);
     
     // Start preparation
     const preparationPromise = preparationService.prepareCocktail('cocktail-123', 1);
     
-    // Go offline mid-request
-    tick(100); // Simulate some network delay
-    jest.spyOn(networkService, 'isOnline').mockReturnValue(false);
-    
-    // Mock HTTP request that will fail
-    const httpMock = TestBed.inject(HttpTestingController);
+    // Mock network error
     const req = httpMock.expectOne('/api/cocktails/cocktail-123/prepare');
     req.error(new ErrorEvent('Network error'));
     
@@ -542,10 +400,45 @@ describe('Frontend - Network Loss (Offline State)', () => {
     await expect(preparationPromise).rejects.toThrow('Network error');
     
     // Should show appropriate error
-    const toastService = TestBed.inject(ToastService);
-    const toastSpy = jest.spyOn(toastService, 'showError');
-    expect(toastSpy).toHaveBeenCalledWith('Preparation failed due to network loss');
+    expect(toastSpy).toHaveBeenCalledWith('Network error: Preparation failed. Please try again.');
   }));
+
+  it('should automatically retry failed requests with exponential backoff', fakeAsync(() => {
+    const preparationService = TestBed.inject(PreparationService);
+    const httpMock = TestBed.inject(HttpTestingController);
+    
+    let attemptCount = 0;
+    
+    // Start preparation
+    const preparationPromise = preparationService.prepareCocktail('cocktail-123', 1);
+    
+    // First attempt fails
+    const req1 = httpMock.expectOne('/api/cocktails/cocktail-123/prepare');
+    req1.error(new ErrorEvent('Network error'));
+    
+    // Should retry after 1 second
+    tick(1000);
+    
+    // Second attempt succeeds
+    const req2 = httpMock.expectOne('/api/cocktails/cocktail-123/prepare');
+    req2.flush({ success: true });
+    
+    // Should complete successfully
+    await expect(preparationPromise).resolves.toBeTruthy();
+  }));
+
+  it('should show connection status in app header', () => {
+    const fixture = TestBed.createComponent(AppHeaderComponent);
+    const component = fixture.componentInstance;
+    
+    // Test online status indicator
+    fixture.detectChanges();
+    
+    const statusIndicator = fixture.nativeElement.querySelector('.connection-status');
+    expect(statusIndicator).toBeTruthy();
+    expect(statusIndicator.classList.contains('online')).toBe(true);
+    expect(statusIndicator.textContent).toContain('Online');
+  });
 });
 ```
 
@@ -715,53 +608,28 @@ test.describe('Cross-Tab State Synchronization', () => {
     await context2.close();
   });
 
-  test('should handle offline queue sync between tabs', async ({ browser }) => {
-    const context1 = await browser.newContext();
-    const context2 = await browser.newContext();
-    
-    const page1 = await context1.newPage();
-    const page2 = await context2.newPage();
-    
-    // Setup both pages
-    await page1.goto('http://localhost:4200/login');
-    await page1.fill('[data-testid="email"]', 'test@example.com');
-    await page1.fill('[data-testid="password"]', 'password123');
-    await page1.click('[data-testid="login-button"]');
-    
-    await page2.goto('http://localhost:4200/login');
-    await page2.fill('[data-testid="email"]', 'test@example.com');
-    await page2.fill('[data-testid="password"]', 'password123');
-    await page2.click('[data-testid="login-button"]');
-    
-    // Go offline on page 1
-    await page1.context().setOffline(true);
-    
-    // Prepare drink while offline (adds to queue)
-    await page1.click('[data-testid="cocktail-mojito"]');
-    await page1.click('[data-testid="prepare-button"]');
-    
-    // Verify offline queue shows 1 item
-    const queueCount1 = await page1.textContent('[data-testid="offline-queue-count"]');
-    expect(queueCount1).toBe('1');
-    
-    // Page 2 should show original inventory (no sync while offline)
-    const quantityPage2 = await page2.textContent('[data-testid="vodka-quantity"]');
-    
-    // Go online on page 1
-    await page1.context().setOffline(false);
-    
-    // Wait for sync to complete
-    await page1.waitForSelector('[data-testid="sync-complete"]', { timeout: 5000 });
-    
-    // Wait for cross-tab sync
-    await page2.waitForTimeout(2000);
-    
-    // Page 2 should now show updated inventory
-    const updatedQuantityPage2 = await page2.textContent('[data-testid="vodka-quantity"]');
-    expect(updatedQuantityPage2).not.toBe(quantityPage2);
-    
-    await context1.close();
-    await context2.close();
+  test('should handle network errors gracefully', async ({ page }) => {
+    await page.goto('http://localhost:4200/login');
+    await page.fill('[data-testid="email"]', 'test@example.com');
+    await page.fill('[data-testid="password"]', 'password123');
+    await page.click('[data-testid="login-button"]');
+
+    // Navigate to inventory
+    await page.goto('http://localhost:4200/inventory');
+
+    // Mock network failure for preparation
+    await page.route('/api/cocktails/*/prepare', route => {
+      route.abort('failed');
+    });
+
+    // Attempt preparation
+    await page.click('[data-testid="cocktail-mojito"]');
+    await page.click('[data-testid="prepare-button"]');
+
+    // Should show error toast
+    const errorToast = await page.waitForSelector('[data-testid="error-toast"]');
+    expect(errorToast).toBeTruthy();
+    expect(await errorToast.textContent()).toContain('Network error');
   });
 });
 ```

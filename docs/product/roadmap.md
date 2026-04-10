@@ -54,7 +54,6 @@ This document outlines the strategic direction and planned features for Mixology
 
 ### 2.3 Mobile Application
 - **React Native App**: Cross-platform mobile application
-- **Offline Mode**: Access saved recipes without internet
 - **Camera Integration**: Photo-based ingredient recognition
 - **Push Notifications**: Recipe reminders, inventory alerts
 - **Mobile-Optimized UI**: Touch-friendly interface for bartending

@@ -40,6 +40,8 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
 
 > **🔐 Note on Authentication (MVP State):** To simplify the local developer experience and code review process, Auth is currently bypassed. A `SeederService` automatically provisions a mock user (`mock@test.com`) on boot to satisfy all Foreign Key database constraints. Full JWT/OAuth2 implementation is slated for the next roadmap phase.
 
+> **🌐 Online-Only Mandate:** The application requires a persistent internet connection to function. All offline sync functionality has been removed to simplify architecture and eliminate synchronization complexities.
+
   
 ## 🏗️ High-Level Architecture
 

@@ -5,7 +5,7 @@ import { AddInventoryDto } from './dto/add-inventory.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CheckMakeabilityDto } from './dto/check-makeability.dto';
 import { DepleteInventoryDto } from './dto/deplete-inventory.dto';
-import { BulkSyncDto } from './dto/bulk-sync.dto';
+// BulkSyncDto removed as part of Online-Only Mandate
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('User Inventory')
@@ -51,14 +51,7 @@ export class UserInventoryController {
     return this.inventoryService.depleteInventory(req.user.id, dto);
   }
 
-  @Post('offline/sync')
-  @ApiOperation({ 
-    summary: 'Bulk sync offline inventory operations with partial success handling',
-    description: 'Process multiple offline inventory depletion operations. Returns 207 Multi-Status with individual operation results.'
-  })
-  bulkSync(@Request() req, @Body() dto: BulkSyncDto) {
-    return this.inventoryService.bulkSync(req.user.id, dto);
-  }
+  // Offline sync endpoint removed as part of Online-Only Mandate
 
   @Put(':id')
   @ApiOperation({ summary: 'Update inventory item quantity' })

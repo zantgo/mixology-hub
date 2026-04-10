@@ -20,7 +20,7 @@ Test examples are split into domain-specific files corresponding to the use case
 | [performance-tests.md](./performance-tests.md) | Performance | UC 11.1-11.4 | Query optimization, cache invalidation, Redis degradation |
 | [security-tests.md](./security-tests.md) | Security | UC 13.1-13.4 | XSS prevention, input sanitization, CSRF protection |
 | [system-tests.md](./system-tests.md) | System & Operations | UC 15.1-15.4 | Database migrations, health checks, reconnection strategy |
-| [architectural-fixes-tests.md](./architectural-fixes-tests.md) | Architectural Fixes | UC 12.1-12.10, UC 2.6, UC 2.30, UC 3.12 | Database schema, sync idempotency, pagination, rating, token salt |
+| [architectural-fixes-tests.md](./architectural-fixes-tests.md) | Architectural Fixes | UC 2.6, UC 2.30, UC 3.12 | Database schema, pagination, rating, token salt |
 | [tdd-examples.md](./tdd-examples.md) | TDD Patterns | General | Basic TDD workflow examples |
 | [e2e-tests.md](./e2e-tests.md) | E2E Tests | Cross-domain | Playwright tests for critical user journeys |
 

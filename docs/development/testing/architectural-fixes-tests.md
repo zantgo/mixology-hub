@@ -118,84 +118,44 @@ describe('CocktailIngredient Precision', () => {
 });
 ```
 
-### 2. Sync Service Tests (Item-Level Idempotency)
+### 2. Network Error Handling Tests (Online-Only Mandate)
 
-#### 2.1 Sync Operation Processing
+**Senior Architectural Decision**: Total Eradication of Offline State Artifacts
+**Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with idempotent retries) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
+
+#### 2.1 Network Error Handling
 ```typescript
-describe('SyncService', () => {
-  let syncService: SyncService;
-  let user: User;
-
-  beforeEach(async () => {
-    syncService = module.get<SyncService>(SyncService);
-    user = await createTestUser();
-  });
-
-  it('should process operations with item-level idempotency', async () => {
-    const operationDto: SyncOperationDto = {
-      clientOperationId: 'test-op-1',
-      operationType: SyncOperationType.INVENTORY_UPDATE,
-      payload: { ingredientId: '123', amountChange: "100", unit: 'ml' }, // Enforcing string boundaries for Decimal.js
-      deviceTimestamp: new Date(),
-    };
-
-    // First attempt
-    const result1 = await syncService.processSyncOperations(user, [operationDto]);
-    expect(result1[0].status).toBe(SyncOperationStatus.SYNCED);
-
-    // Duplicate attempt with same clientOperationId
-    const result2 = await syncService.processSyncOperations(user, [operationDto]);
-    expect(result2[0].status).toBe(SyncOperationStatus.SYNCED);
-    expect(result2[0].id).toBe(result1[0].id); // Same record
-  });
-
-  it('should handle partial success in batch operations', async () => {
-    const operations: SyncOperationDto[] = [
-      {
-        clientOperationId: 'op-1',
-        operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'valid-id', amountChange: "100", unit: 'ml' }, // String serialization
-        deviceTimestamp: new Date(),
-      },
-      {
-        clientOperationId: 'op-2',
-        operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'invalid-id', amountChange: "-100", unit: 'ml' }, // Will fail, string serialization
-        deviceTimestamp: new Date(),
-      },
-      {
-        clientOperationId: 'op-3',
-        operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'valid-id-2', amountChange: "50", unit: 'ml' }, // String serialization
-        deviceTimestamp: new Date(),
-      },
-    ];
-
-    const results = await syncService.processSyncOperations(user, operations);
+describe('Network Error Handling', () => {
+  it('should return standard HTTP timeout errors when network is lost', async () => {
+    // Simulate network failure
+    jest.spyOn(httpService, 'post').mockRejectedValue(new Error('Network Error'));
     
-    expect(results[0].status).toBe(SyncOperationStatus.SYNCED);
-    expect(results[1].status).toBe(SyncOperationStatus.FAILED);
-    expect(results[2].status).toBe(SyncOperationStatus.SYNCED);
+    const response = await prepareCocktail(userId, cocktailId);
+    expect(response.status).toBe(500);
+    expect(response.error).toBe('Network Error');
   });
 
-  it('should retry failed operations', async () => {
-    const operationDto: SyncOperationDto = {
-      clientOperationId: 'failed-op',
-      operationType: SyncOperationType.INVENTORY_UPDATE,
-      payload: { ingredientId: 'will-fail', amountChange: "100", unit: 'ml' }, // String serialization
-      deviceTimestamp: new Date(),
-    };
+  it('should support idempotent retry for critical operations', async () => {
+    const idempotencyKey = `idempotency:v2:${userId}:cocktail:prepare:${uuidv4()}`;
+    
+    // First attempt fails with network error
+    jest.spyOn(httpService, 'post').mockRejectedValueOnce(new Error('Network Error'));
+    
+    try {
+      await prepareCocktail(userId, cocktailId, idempotencyKey);
+    } catch (error) {
+      expect(error.message).toBe('Network Error');
+    }
 
-    // First attempt fails
-    const result1 = await syncService.processSyncOperations(user, [operationDto]);
-    expect(result1[0].status).toBe(SyncOperationStatus.FAILED);
+    // Retry with same idempotency key should succeed
+    jest.spyOn(httpService, 'post').mockResolvedValueOnce({ status: 200 });
+    const retryResponse = await prepareCocktail(userId, cocktailId, idempotencyKey);
+    expect(retryResponse.status).toBe(200);
+  });
 
-    // Retry
-    const retryResult = await syncService.retryFailedOperation(
-      user,
-      result1[0].id
-    );
-    expect(retryResult.status).toBe(SyncOperationStatus.SYNCED);
+  it('should not have enableOfflineMode in user preferences', async () => {
+    const preferences = await getUserPreferences(userId);
+    expect(preferences).not.toHaveProperty('enableOfflineMode');
   });
 });
 ```
@@ -403,50 +363,45 @@ describe('CocktailAggregatorService Pagination', () => {
 
 ### 6. Integration Tests
 
-#### 6.1 End-to-End Sync Flow
+#### 6.1 End-to-End Network Resilience Tests
 ```typescript
-describe('End-to-End Sync Flow', () => {
-  it('should complete full offline sync cycle with delta updates', async () => {
-    // 1. User offline: queue delta operations
-    const offlineOperations: SyncOperationDto[] = [
-      {
-        clientOperationId: 'offline-1',
-        operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'vodka', amountChange: "-50", unit: 'ml' }, // String serialization enforced to prevent IEEE 754 corruption
-        deviceTimestamp: new Date('2024-01-01T10:00:00Z'),
-      },
-      {
-        clientOperationId: 'offline-2',
-        operationType: SyncOperationType.COCKTAIL_RATING,
-        payload: { cocktailId: 'mojito', score: 5 },
-        deviceTimestamp: new Date('2024-01-01T10:05:00Z'),
-      },
-    ];
-
-    // 2. Setup initial inventory
+describe('End-to-End Network Resilience', () => {
+  it('should handle network failures gracefully with idempotent retries', async () => {
     const user = await createTestUser();
-    await inventoryService.updateUserInventory(user.id, {
-      ingredientId: 'vodka',
-      quantity: 550,
-      unit: 'ml'
+    const idempotencyKey = `idempotency:v2:${user.id}:cocktail:prepare:${uuidv4()}`;
+    
+    // Simulate intermittent network failure
+    let attemptCount = 0;
+    jest.spyOn(httpService, 'post').mockImplementation(() => {
+      attemptCount++;
+      if (attemptCount === 1) {
+        return Promise.reject(new Error('Network Error'));
+      }
+      return Promise.resolve({ status: 200, data: { success: true } });
     });
+
+    // First attempt fails
+    try {
+      await prepareCocktail(user.id, 'mojito', idempotencyKey);
+    } catch (error) {
+      expect(error.message).toBe('Network Error');
+    }
+
+    // Retry with same idempotency key succeeds
+    const result = await prepareCocktail(user.id, 'mojito', idempotencyKey);
+    expect(result.status).toBe(200);
+    expect(result.data.success).toBe(true);
+  });
+
+  it('should not implement any offline sync functionality', async () => {
+    // Verify no sync endpoints exist
+    const endpoints = await getApiEndpoints();
+    expect(endpoints).not.toContain('/sync');
+    expect(endpoints).not.toContain('/offline');
     
-    // 3. User comes online: sync delta operations
-    const syncResults = await syncService.processSyncOperations(user, offlineOperations);
-    
-    // 4. Verify all operations processed
-    expect(syncResults).toHaveLength(2);
-    expect(syncResults[0].status).toBe(SyncOperationStatus.SYNCED);
-    expect(syncResults[1].status).toBe(SyncOperationStatus.SYNCED);
-    
-    // 5. Verify delta was applied correctly (550 - 50 = 500)
-    const inventory = await inventoryService.getUserInventory(user.id);
-    expect(inventory).toContainEqual(
-      expect.objectContaining({ ingredientId: 'vodka', quantity: 500 })
-    );
-    
-    const rating = await ratingService.getUserRating(user.id, 'mojito');
-    expect(rating).toBe(5);
+    // Verify no sync-related database tables
+    const tables = await getDatabaseTables();
+    expect(tables).not.toContain('sync_operations');
   });
 });
 ```
@@ -464,8 +419,8 @@ npm test -- architectural-fixes
 # Database schema tests
 npm test -- --testPathPattern="ingredient.*entity"
 
-# Sync service tests  
-npm test -- --testPathPattern="sync.*service"
+# Network error handling tests  
+npm test -- --testPathPattern="network.*error"
 
 # Redis tests
 npm test -- --testPathPattern="redis.*pubsub"
@@ -487,7 +442,7 @@ npm run test:cov -- --testPathPattern="architectural"
 | Component | Target Coverage | Critical Paths |
 |-----------|----------------|----------------|
 | Database Entities | 95% | Normalization, constraints, soft delete |
-| Sync Service | 90% | Idempotency, batch processing, retry logic |
+| Network Error Handling | 85% | HTTP timeout handling, idempotent retries, error UI |
 | Redis Pub/Sub | 85% | Token salt updates, cache invalidation |
 | Rating Service | 90% | Auto-forking, validation, error handling |
 | Pagination Logic | 85% | Caching, cursor-based pagination, cache invalidation |

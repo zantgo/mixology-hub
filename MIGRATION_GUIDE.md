@@ -10,7 +10,7 @@ The migration includes the following changes:
 2. **Add `is_deleted` to cocktails table** - Soft delete support
 3. **Update `cocktail_ingredients.amount` precision** - From `decimal(10,2)` to `decimal(10,4)` for fractional accuracy
 4. **Create partial unique indexes for ingredients** - Prevent naming conflicts between users
-5. **Create `sync_operations` table** - For offline sync idempotency
+ 5. **Create `unified_idempotency` table** - For unified idempotency system
 6. **Make `favorites.cocktail_id` nullable** - For polymorphic favorites
 
 ## 🚀 Migration Methods
@@ -41,7 +41,7 @@ When starting the application with Docker Compose, TypeORM will synchronize most
 
 1. Partial unique indexes
 2. Column precision changes
-3. Table creation for sync_operations
+3. Table creation for unified_idempotency
 
 ## 🔧 Database Connection Details
 
@@ -101,10 +101,10 @@ AND indexname LIKE 'idx_ingredients_%';
 
 ### 4. Check New Table
 ```sql
--- Check sync_operations table exists
+-- Check unified_idempotency table exists
 SELECT table_name 
 FROM information_schema.tables 
-WHERE table_name = 'sync_operations';
+WHERE table_name = 'unified_idempotency';
 ```
 
 ## 🐛 Troubleshooting
@@ -157,11 +157,7 @@ npx typeorm migration:revert -d typeorm.config.ts
 -- Drop indexes
 DROP INDEX IF EXISTS idx_ingredients_global_unique;
 DROP INDEX IF EXISTS idx_ingredients_custom_unique;
-DROP INDEX IF EXISTS idx_sync_operations_user_status;
-DROP INDEX IF EXISTS idx_sync_operations_client_id;
-
--- Drop sync_operations table
-DROP TABLE IF EXISTS sync_operations;
+-- Note: sync_operations table was removed as part of Online-Only Mandate
 
 -- Revert cocktail_ingredients.amount precision
 ALTER TABLE cocktail_ingredients 
@@ -200,7 +196,7 @@ The migration is successful when:
 
 1. All new columns exist with correct data types
 2. Partial unique indexes are created
-3. `sync_operations` table exists with correct constraints
+3. `unified_idempotency` table exists with correct constraints
 4. `cocktail_ingredients.amount` has precision 10,4
 5. Application starts without database errors
 6. New features (soft delete, multi-tenant ingredients) work correctly

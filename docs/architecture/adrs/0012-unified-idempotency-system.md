@@ -12,11 +12,11 @@ The system has two independent idempotency systems that don't coordinate, creati
    - No persistence across restarts
    - Used for: `POST /cocktails/:id/prepare`, `POST /preparations/:id/undo`
 
-2. **PostgreSQL-Based Idempotency** (UC 12.3): For offline sync using `client_operation_id` in `SYNC_OPERATIONS`
-   - Consistent (UNIQUE constraint)
-   - Always available (database)
-   - Persistent
-   - Used for: `POST /sync/operations`
+ 2. **PostgreSQL-Based Idempotency**: For consistent idempotency with database persistence
+    - Consistent (UNIQUE constraint)
+    - Always available (database)
+    - Persistent
+    - Used for: All state-mutating operations
 
 **The Clash Problem**:
 - Same operation could be protected by both systems or neither
@@ -25,15 +25,14 @@ The system has two independent idempotency systems that don't coordinate, creati
 - Complex debugging when duplicates occur
 
 **Example Failure Scenario**:
-1. User prepares cocktail offline → `client_operation_id: "offline-123"` (PostgreSQL protected)
-2. User comes online, double-clicks prepare → `Idempotency-Key: "online-456"` (Redis protected)
-3. Redis goes down → duplicate preparation allowed
-4. Result: Double deduction despite having idempotency systems
+1. User double-clicks prepare → `Idempotency-Key: "online-456"` (Redis protected)
+2. Redis goes down → duplicate preparation allowed
+3. Result: Double deduction despite having idempotency systems
 
 ## Decision
 Implement a **unified hybrid idempotency system** with PostgreSQL as the source of truth:
 
-1. **Single Idempotency Key Format**: `{source}:{uuid}` where source = `client` (frontend), `sync` (offline), `system` (backend)
+1. **Single Idempotency Key Format**: `{source}:{uuid}` where source = `client` (frontend), `system` (backend)
 2. **Primary Check**: Redis cache for performance (fast path)
 3. **Fallback Check**: PostgreSQL UNIQUE constraint for consistency (slow path)
 4. **Write-Through**: Always write to PostgreSQL after Redis cache
@@ -204,7 +203,7 @@ export class UnifiedIdempotencyService {
 CREATE TABLE unified_idempotency (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  operation VARCHAR(255) NOT NULL, -- e.g., 'cocktail:prepare', 'preparation:undo', 'sync:batch'
+  operation VARCHAR(255) NOT NULL, -- e.g., 'cocktail:prepare', 'preparation:undo'
   idempotency_key VARCHAR(255) NOT NULL,
   payload_hash VARCHAR(64), -- SHA256 hash of request payload for validation
   status VARCHAR(50) NOT NULL DEFAULT 'processing', -- 'processing', 'completed', 'failed'
@@ -221,20 +220,8 @@ CREATE TABLE unified_idempotency (
   INDEX idx_unified_idempotency_created (created_at)
 );
 
--- Migration: Copy existing SYNC_OPERATIONS client_operation_id records
-INSERT INTO unified_idempotency (user_id, operation, idempotency_key, status, created_at)
-SELECT 
-  user_id,
-  'sync:' || operation_type,
-  client_operation_id,
-  CASE status 
-    WHEN 'synced' THEN 'completed'
-    WHEN 'failed' THEN 'failed'
-    ELSE 'processing'
-  END,
-  created_at
-FROM sync_operations
-ON CONFLICT (user_id, operation, idempotency_key) DO NOTHING;
+-- Note: SYNC_OPERATIONS table has been removed as part of Online-Only Mandate
+-- No migration of sync data is needed
 ```
 
 #### 3. Global Idempotency Interceptor
@@ -312,22 +299,19 @@ export class GlobalIdempotencyInterceptor implements NestInterceptor {
     );
   }
   
-  private getIdempotencyKey(request: Request): string | null {
+  private getIdempotencyKey(request: Request, userId: string): string | null {
     // 1. Check header (online operations)
     const headerKey = request.headers['idempotency-key'];
     if (headerKey) {
-      return `client:${headerKey}`;
+      // Parse or construct 5-part format: idempotency:v2:{userId}:{operation}:{source}:{uuid}
+      const operation = this.getOperationIdentifier(request);
+      return `idempotency:v2:${userId}:${operation}:client:${headerKey}`;
     }
     
-    // 2. Check body (sync operations)
-    const body = request.body;
-    if (body?.client_operation_id) {
-      return `sync:${body.client_operation_id}`;
-    }
-    
-    // 3. Generate for critical operations
+    // 2. Generate for critical operations
     if (this.isCriticalOperation(request)) {
-      return `system:${uuidv4()}`;
+      const operation = this.getOperationIdentifier(request);
+      return `idempotency:v2:${userId}:${operation}:system:${uuidv4()}`;
     }
     
     return null;
@@ -399,7 +383,7 @@ export class RequestHasherService {
 - **Consistency**: No more clashing idempotency systems
 - **Debuggability**: All idempotency records in one table
 - **Persistence**: Survives Redis restarts/outages
-- **Unified API**: Same interface for online/offline operations
+ - **Unified API**: Consistent interface for all operations
 
 ### Negative
 - **Database Load**: Additional queries on PostgreSQL
@@ -407,7 +391,7 @@ export class RequestHasherService {
 - **Latency**: Added database round-trip on cache miss
 - **Migration**: Need to migrate existing idempotency data
 - **Storage**: PostgreSQL table grows with all operations
-- **Long-Term Storage Requirement**: Must retain idempotency records for 90+ days to prevent double deductions from long-delayed offline syncs (UC 12.12)
+  - **Long-Term Storage Requirement**: Must retain idempotency records for 24 hours to prevent duplicate operations from network retries
   - **Stuck Processing Locks Risk**: If NestJS crashes during state-mutating requests, idempotency records remain stuck in 'processing' status
     - **Senior Architectural Decision: Idempotency Lock Expiration**
     - **Explicit Trade-off:** To prevent "stuck locks" caused by server crashes during state-mutating requests, idempotency records stuck in processing status for more than 5 minutes will be treated as failed and allowed to be overwritten by the user. We trade the theoretical risk of a slow 5-minute transaction resolving twice for the guarantee that users are not locked out of their actions by temporary pod failures.
@@ -419,9 +403,8 @@ export class RequestHasherService {
       3. Custom transaction managers that couple business logic to infrastructure
     - **Mitigation:** Changed from `tap()` to `mergeMap()` to update idempotency BEFORE returning response, reducing but not eliminating the race window.
 
-  - **Interceptor vs. Batch Array Clash**: The GlobalIdempotencyInterceptor checks `request.body.client_operation_id` but cannot traverse nested arrays in batch payloads (UC 7.23)
-    - **Senior Architectural Decision: Interceptor Delegation for Batch Payloads**
-    - **Explicit Trade-off:** The GlobalIdempotencyInterceptor operates at the HTTP request level and cannot inherently traverse nested arrays of operations (like the `/offline/sync` bulk payload). We explicitly mandate that the Global Interceptor will ONLY protect top-level requests using the `Idempotency-Key` HTTP header. For batch endpoints containing arrays of operations, the Interceptor will defer item-level idempotency to the Domain Service layer (e.g., SyncService). We trade the purity of a single global interceptor for the necessity of granular, item-level idempotency within batch arrays.
+  - **Senior Architectural Decision: Standardized Idempotency Key Namespace**
+  - **Explicit Trade-off:** To resolve namespace collisions between user-generated HTTP headers and system-generated fallback keys, the definitive Redis/PostgreSQL idempotency format will strictly be `idempotency:v2:{userId}:{operation}:{source}:{uuid}` (where source is `client` or `system`). We accept the slightly longer string allocation in Redis/Postgres memory to guarantee namespace safety across different origin vectors. All API specs must be updated to reflect this 5-part structure.
 
 ## Mitigation Strategies
 
@@ -458,26 +441,22 @@ export class ReadReplicaIdempotencyService extends UnifiedIdempotencyService {
 }
 ```
 
-### 2. Automatic Cleanup with Offline Sync Protection
+### 2. Automatic Cleanup
 ```sql
 -- Automated cleanup of old idempotency records
--- CRITICAL: Retention period must be > maximum allowed offline queue age (90 days)
--- to prevent double deductions for long-delayed offline syncs
+-- Retention period: 24 hours for completed operations, 7 days for failed operations
 CREATE OR REPLACE FUNCTION cleanup_old_idempotency()
 RETURNS void AS $$
 BEGIN
-  -- Delete completed records older than 120 days (not 90 days)
-  -- Senior Architectural Decision: Idempotency Retention Buffer
-  -- To prevent race conditions at the boundary limit of the offline queue, 
-  -- idempotency retention must outlive max offline queue age by 30 days
+  -- Delete completed records older than 24 hours
   DELETE FROM unified_idempotency 
   WHERE status = 'completed' 
-    AND completed_at < NOW() - INTERVAL '120 days';
+    AND completed_at < NOW() - INTERVAL '24 hours';
     
-  -- Delete failed records older than 120 days
+  -- Delete failed records older than 7 days
   DELETE FROM unified_idempotency 
   WHERE status = 'failed' 
-    AND created_at < NOW() - INTERVAL '120 days';
+    AND created_at < NOW() - INTERVAL '7 days';
     
   -- Delete processing records older than 5 minutes (stuck operations)
   -- Senior Architectural Decision: Idempotency Lock Expiration
@@ -559,7 +538,6 @@ export class IdempotencyCacheWarmer {
 
 ## Related Decisions
 - ADR 0009: Idempotency "Fail-Open" Double Deduction Risk
-- UC 12.3: Handling Duplicate Operations (Idempotency)
 - UC 4.21: Idempotency Keys for State-Mutating Operations
 - ADR 0005: Rate Limiter Failure State Strategy
 

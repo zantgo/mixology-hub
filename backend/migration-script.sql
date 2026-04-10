@@ -31,27 +31,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_ingredients_custom_unique
 ON ingredients (normalized_name, created_by) 
 WHERE is_global = false;
 
--- 5. Create sync_operations table for offline sync idempotency
-CREATE TABLE IF NOT EXISTS sync_operations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  client_operation_id uuid NOT NULL,
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  operation_type varchar(50) NOT NULL,
-  payload jsonb NOT NULL,
-  status varchar(20) NOT NULL DEFAULT 'pending',
-  error_message text,
-  device_timestamp timestamp NOT NULL,
-  server_timestamp timestamp,
-  created_at timestamp DEFAULT NOW(),
-  updated_at timestamp DEFAULT NOW(),
-  UNIQUE(client_operation_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_sync_operations_user_status 
-ON sync_operations(user_id, status);
-
-CREATE INDEX IF NOT EXISTS idx_sync_operations_client_id 
-ON sync_operations(client_operation_id);
+-- 5. sync_operations table removed as part of Online-Only Mandate
+-- Offline sync functionality is no longer supported
 
 -- 6. Make favorites.cocktail_id nullable for polymorphic favorites
 ALTER TABLE favorites 

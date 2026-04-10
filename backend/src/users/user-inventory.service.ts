@@ -10,7 +10,7 @@ import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CheckMakeabilityDto } from './dto/check-makeability.dto';
 import { DepleteInventoryDto } from './dto/deplete-inventory.dto';
-import { BulkSyncDto, BulkSyncResult, BulkSyncResultItem } from './dto/bulk-sync.dto';
+// BulkSyncDto removed as part of Online-Only Mandate
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 
 export interface MakeabilityResult {
@@ -415,41 +415,5 @@ export class UserInventoryService {
     };
   }
 
-  async bulkSync(userId: string, dto: BulkSyncDto): Promise<BulkSyncResult> {
-    const results: BulkSyncResultItem[] = [];
-    
-    // Process each operation independently
-    for (const operation of dto.operations) {
-      try {
-        // Use a separate transaction for each operation
-        const result = await this.depleteInventory(userId, {
-          ingredients: operation.ingredients,
-        });
-        
-        results.push({
-          clientOperationId: operation.clientOperationId,
-          success: true,
-          depletedItems: result.depletedItems,
-        });
-      } catch (error) {
-        results.push({
-          clientOperationId: operation.clientOperationId,
-          success: false,
-          error: error.message || 'Unknown error',
-        });
-      }
-    }
-
-    const successful = results.filter(r => r.success).length;
-    const failed = results.filter(r => !r.success).length;
-
-    return {
-      results,
-      summary: {
-        total: results.length,
-        successful,
-        failed,
-      },
-    };
-  }
+  // bulkSync method removed as part of Online-Only Mandate
 }

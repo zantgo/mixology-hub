@@ -261,6 +261,9 @@ export class GdprRatingRecalculationService {
   - **Senior Architectural Decision: Bifurcated GDPR Rating Recalculation**
   - **Explicit Trade-off:** Because external API cocktails use a shadow table for ratings to prevent local database pollution (UC 2.30), the GdprRatingRecalculationService cannot blindly run UPDATE cocktails for all user ratings. We explicitly mandate that the GDPR rating worker must bifurcate its logic: it must inspect the cocktail ID format (UUID vs String/Integer) and route the recalculation to either the local cocktails table or the EXTERNAL_COCKTAIL_RATINGS table. We accept the slight performance penalty of this conditional routing to ensure the GDPR batch processor does not crash when attempting to recalculate external public ratings.
 
+  - **Senior Architectural Decision: Personal-Only Ratings for External Cocktails**
+  - **Explicit Trade-off:** Because we refuse to pollute our local database by forking external cocktails merely for rating purposes (UC 2.30), there is no table available to cache O(1) running averages for public API drinks. We explicitly dictate that the system will not attempt to dynamically aggregate and display community averages for External API cocktails during Unified Search. External cocktails will only display the current user's personal shadow rating (if one exists). We trade community-driven discovery of external drinks for strict database performance and catalog purity.
+
 ## Migration Strategy
 
 ### Phase 1: Dual Implementation
