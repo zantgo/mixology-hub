@@ -67,3 +67,10 @@
 * **Then** the backend inherently sorts the results by `created_at DESC` (most recently favorited first).
 * **And** provides optional sorting parameters (`sort_by=name`, `sort_order=ASC`) for custom ordering.
 * **And** maintains consistent pagination ordering across multiple requests.
+
+**UC 6.11: Automatic Favorite Pointer Migration on Fork**
+* **Given** a user has favorited an external cocktail (ID 11000).
+* **When** the user edits that cocktail, triggering an auto-fork to a new local cocktail (ID local-123).
+* **Then** the backend transaction that creates the fork must automatically search the `FAVORITES` table for a row where `user_id = current_user` and `external_cocktail_id = '11000'`.
+* **And** atomically update that row to `cocktail_id = 'local-123'` and `external_cocktail_id = null`.
+* **Result**: The user's Favorites list seamlessly transitions to displaying their personalized version without requiring them to re-favorite it.

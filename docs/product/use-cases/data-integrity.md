@@ -58,8 +58,10 @@
 * **Given** User A is preparing a cocktail (transaction started).
 * **And** User B concurrently submits an edit to that exact cocktail's ingredients.
 * **When** both transactions attempt to commit.
-* **Then** the database utilizes `READ COMMITTED` isolation level (PostgreSQL default).
+* **Then** the preparation transaction uses `REPEATABLE READ` isolation level to prevent phantom reads during inventory validation.
+* **And** the edit transaction uses `READ COMMITTED` isolation level (PostgreSQL default) for non-inventory operations.
 * **And** the preparation transaction strictly uses the ingredient snapshot from the moment the transaction began.
 * **And** the edit transaction succeeds independently, updating the cocktail for future preparations.
 * **And** prevents data corruption by ensuring each transaction operates on a consistent snapshot.
+* **Architectural Decision:** Inventory deduction transactions require stricter isolation (`REPEATABLE READ` or `SERIALIZABLE`) to prevent race conditions, while non-inventory operations can use the default `READ COMMITTED`.
 * **Implementation:** Uses PostgreSQL's MVCC (Multi-Version Concurrency Control) to maintain consistency without explicit locking.

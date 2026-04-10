@@ -4,19 +4,19 @@
 ```typescript
 // Test recurring decimals and database precision
 describe('MeasureParserService - recurring decimals', () => {
-  it('should parse "1/3 oz" and round to 2 decimal places', () => {
+  it('should parse "1/3 oz" and round to 4 decimal places', () => {
     const parser = new MeasureParserService();
     const result = parser.parseMeasure('1/3 oz');
-    // 1/3 = 0.333333... → rounded to 0.33 for decimal(10,2)
-    expect(result.amount).toBeCloseTo(0.33, 2);
+    // 1/3 = 0.333333... → rounded to 0.3333 for decimal(10,4)
+    expect(result.amount).toBeCloseTo(0.3333, 4);
     expect(result.unit).toBe('oz');
   });
 
-  it('should parse "2/3 oz" and round to 2 decimal places', () => {
+  it('should parse "2/3 oz" and round to 4 decimal places', () => {
     const parser = new MeasureParserService();
     const result = parser.parseMeasure('2/3 oz');
-    // 2/3 = 0.666666... → rounded to 0.67 for decimal(10,2)
-    expect(result.amount).toBeCloseTo(0.67, 2);
+    // 2/3 = 0.666666... → rounded to 0.6667 for decimal(10,4)
+    expect(result.amount).toBeCloseTo(0.6667, 4);
     expect(result.unit).toBe('oz');
   });
 
@@ -1119,20 +1119,20 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
       ]
     };
     
-    // User attempts to prepare with partSize = 1000000 (1 million ml per part)
-    const partSize = 1000000; // 1000 liters per part - absurdly large
+    // User attempts to prepare with totalVolumeMl = 1000000 (1 million ml total)
+    const totalVolumeMl = 1000000; // 1000 liters total - absurdly large
     
-    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, partSize))
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, totalVolumeMl))
       .rejects
-      .toThrow('Part size exceeds maximum allowed volume (10000 ml per part)');
+      .toThrow('Total volume exceeds maximum allowed (10000 ml)');
   });
 
-  it('should enforce maximum part size boundary', async () => {
+  it('should enforce maximum total volume boundary', async () => {
     const preparationService = new CocktailPreparationService();
     
     // Test at the boundary
-    const maxPartSize = 10000; // 10 liters per part (maximum allowed)
-    const boundaryPartSize = 10001; // Just over boundary
+    const maxTotalVolumeMl = 10000; // 10 liters total (maximum allowed)
+    const boundaryTotalVolumeMl = 10001; // Just over boundary
     
     const mockCocktail = {
       id: 'test-cocktail',
@@ -1163,41 +1163,16 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
       ]
     };
     
-    const partSize = 10000; // Maximum allowed per part
+    const totalVolumeMl = 10000; // Maximum allowed total volume
     
-    // Total would be 1000 * 10000 = 10,000,000 ml (10,000 liters!)
-    // Should be rejected even though partSize is within limit
-    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, partSize))
+    // Total would be 1000 * (10000 / 1000) = 10,000 ml per ingredient (10 liters!)
+    // Should be rejected even though totalVolumeMl is within limit
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, totalVolumeMl))
       .rejects
       .toThrow('Total volume exceeds safe limits');
   });
 
-  it('should calculate total volume safely for part-based recipes', () => {
-    const preparationService = new CocktailPreparationService();
-    
-    const cocktail = {
-      ingredients: [
-        { amount: 2, unit: 'part' }, // 2 parts vodka
-        { amount: 1, unit: 'part' }, // 1 part lime
-        { amount: 0.5, unit: 'part' } // 0.5 part simple syrup
-      ]
-    };
-    
-    const partSize = 50; // 50 ml per part
-    const servings = 2; // Double batch
-    
-    const totalVolume = preparationService.calculateTotalVolume(cocktail, partSize, servings);
-    
-    // (2 + 1 + 0.5) parts = 3.5 parts per serving
-    // 3.5 parts * 50 ml/part * 2 servings = 350 ml total
-    const expected = 3.5 * 50 * 2;
-    
-    expect(totalVolume).toBe(expected);
-    
-    // Should use safe multiplication to prevent overflow
-    expect(() => preparationService.calculateTotalVolume(cocktail, 1000000, 1000000))
-      .toThrow('Total volume calculation would overflow');
-  });
+
 
   it('should validate part size before any inventory operations', async () => {
     const preparationService = new CocktailPreparationService();
@@ -1220,14 +1195,14 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const preparationService = new CocktailPreparationService();
     
     const testCases = [
-      { partSize: 1000000, expectedMessage: 'Part size (1000.0 L) exceeds maximum allowed (10.0 L)' },
-      { partSize: 50000, expectedMessage: 'Part size (50.0 L) exceeds maximum allowed (10.0 L)' },
-      { partSize: 15000, expectedMessage: 'Part size (15.0 L) exceeds maximum allowed (10.0 L)' }
+      { totalVolumeMl: 1000000, expectedMessage: 'Total volume (1000.0 L) exceeds maximum allowed (10.0 L)' },
+      { totalVolumeMl: 50000, expectedMessage: 'Total volume (50.0 L) exceeds maximum allowed (10.0 L)' },
+      { totalVolumeMl: 15000, expectedMessage: 'Total volume (15.0 L) exceeds maximum allowed (10.0 L)' }
     ];
     
     for (const testCase of testCases) {
       try {
-        await preparationService.prepareCocktail('user123', 'cocktail-id', 1, testCase.partSize);
+        await preparationService.prepareCocktail('user123', 'cocktail-id', 1, testCase.totalVolumeMl);
       } catch (error) {
         expect(error.message).toContain(testCase.expectedMessage);
         expect(error.statusCode).toBe(400);
@@ -1238,14 +1213,14 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
   it('should allow reasonable part sizes for normal use', async () => {
     const preparationService = new CocktailPreparationService();
     
-    const reasonableSizes = [30, 50, 100, 500, 1000]; // 30ml to 1L per part
+    const reasonableVolumes = [30, 50, 100, 500, 1000]; // 30ml to 1L total volume
     
-    for (const partSize of reasonableSizes) {
-      jest.spyOn(preparationService, 'validatePartSize').mockReturnValue(true);
+    for (const totalVolumeMl of reasonableVolumes) {
+      jest.spyOn(preparationService, 'validateTotalVolume').mockReturnValue(true);
       jest.spyOn(preparationService, 'checkInventoryAvailability').mockResolvedValue(true);
       jest.spyOn(preparationService, 'deductInventory').mockResolvedValue();
       
-      await expect(preparationService.prepareCocktail('user123', 'cocktail-id', 1, partSize))
+      await expect(preparationService.prepareCocktail('user123', 'cocktail-id', 1, totalVolumeMl))
         .resolves.not.toThrow();
     }
   });
@@ -1257,7 +1232,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const invalidRequest = {
       cocktailId: 'part-based-cocktail',
       servings: 1,
-      partSize: 999999 // Absurdly large
+      totalVolumeMl: 999999 // Absurdly large
     };
     
     const mockResponse = {
@@ -1271,7 +1246,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     expect(mockResponse.status).toHaveBeenCalledWith(400);
     expect(mockResponse.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        error: 'Part size exceeds maximum allowed volume'
+        error: 'Total volume exceeds maximum allowed'
       })
     );
   });
@@ -1283,7 +1258,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const attackAttempt = {
       userId: 'attacker-123',
       cocktailId: 'test-cocktail',
-      partSize: 1000000,
+      totalVolumeMl: 1000000,
       timestamp: new Date().toISOString()
     };
     
@@ -1292,7 +1267,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
         attackAttempt.userId,
         attackAttempt.cocktailId,
         1,
-        attackAttempt.partSize
+         attackAttempt.totalVolumeMl
       );
     } catch (error) {
       // Should log the attempt
@@ -1300,7 +1275,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
         'Boundary violation attempt detected',
         expect.objectContaining({
           userId: attackAttempt.userId,
-          partSize: attackAttempt.partSize,
+          totalVolumeMl: attackAttempt.totalVolumeMl,
           maxAllowed: 10000,
           ipAddress: expect.any(String)
         })
@@ -1312,14 +1287,14 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
 **Example TDD for Decimal.js Serialization to JSON:**
 ```typescript
 describe('Decimal.js Serialization', () => {
-  it('should serialize decimal.js objects to standard Numbers in JSON responses', () => {
+  it('should serialize decimal.js objects to Strings in JSON responses to prevent IEEE 754 precision loss', () => {
     const inventoryService = new UserInventoryService();
     
     // Mock inventory with decimal.js values
     const decimalInventory = {
       id: 'inv-123',
       ingredientId: 'vodka-456',
-      quantity: new Decimal(500.75), // decimal.js object
+      quantity: new Decimal('500.75'), // decimal.js object with string constructor
       unit: 'ml'
     };
     
@@ -1336,9 +1311,9 @@ describe('Decimal.js Serialization', () => {
     const jsonResponse = JSON.stringify(response);
     const parsedResponse = JSON.parse(jsonResponse);
     
-    // Should be standard Number, not decimal.js internal object
-    expect(typeof parsedResponse.quantity).toBe('number');
-    expect(parsedResponse.quantity).toBe(500.75);
+    // Should be String, not Number, to prevent IEEE 754 precision loss
+    expect(typeof parsedResponse.quantity).toBe('string');
+    expect(parsedResponse.quantity).toBe('500.75');
     
     // Should NOT contain decimal.js internal structure
     expect(parsedResponse.quantity).not.toHaveProperty('d');
@@ -1346,7 +1321,7 @@ describe('Decimal.js Serialization', () => {
     expect(parsedResponse.quantity).not.toHaveProperty('s');
   });
 
-  it('should handle decimal.js in nested objects for API responses', () => {
+  it('should handle decimal.js in nested objects for API responses with String serialization', () => {
     const cocktailService = new CocktailService();
     
     // Mock cocktail with decimal.js in nested ingredients
@@ -1356,13 +1331,13 @@ describe('Decimal.js Serialization', () => {
       ingredients: [
         {
           ingredientId: 'vodka-456',
-          amount: new Decimal(2.5), // decimal.js
+          amount: new Decimal('2.5'), // decimal.js with string constructor
           unit: 'oz',
           measure: '2.5 oz'
         },
         {
           ingredientId: 'lime-789',
-          amount: new Decimal(1), // decimal.js
+          amount: new Decimal('1'), // decimal.js with string constructor
           unit: 'oz',
           measure: '1 oz'
         }
@@ -1378,23 +1353,23 @@ describe('Decimal.js Serialization', () => {
     const jsonString = JSON.stringify(response);
     const parsed = JSON.parse(jsonString);
     
-    // All decimal.js values should be converted to Numbers
+    // All decimal.js values should be converted to Strings to prevent IEEE 754 precision loss
     parsed.ingredients.forEach(ingredient => {
-      expect(typeof ingredient.amount).toBe('number');
+      expect(typeof ingredient.amount).toBe('string');
       expect(ingredient.amount).not.toHaveProperty('d');
       expect(ingredient.amount).not.toHaveProperty('e');
       expect(ingredient.amount).not.toHaveProperty('s');
     });
     
-    expect(parsed.ingredients[0].amount).toBe(2.5);
-    expect(parsed.ingredients[1].amount).toBe(1);
+    expect(parsed.ingredients[0].amount).toBe('2.5');
+    expect(parsed.ingredients[1].amount).toBe('1');
   });
 
-  it('should use class-transformer to automatically convert decimal.js', () => {
-    // DTO with @Transform decorator
+  it('should use class-transformer to automatically convert decimal.js to Strings', () => {
+    // DTO with @Transform decorator for String serialization
     class InventoryItemDto {
-      @Transform(({ value }) => value instanceof Decimal ? value.toNumber() : value)
-      quantity: number;
+      @Transform(({ value }) => value instanceof Decimal ? value.toString() : value)
+      quantity: string;
       
       ingredientId: string;
       unit: string;
@@ -1402,7 +1377,7 @@ describe('Decimal.js Serialization', () => {
     
     // Entity with decimal.js
     const inventoryEntity = {
-      quantity: new Decimal(750.50),
+      quantity: new Decimal('750.50'), // Use string constructor
       ingredientId: 'gin-123',
       unit: 'ml'
     };
@@ -1410,16 +1385,16 @@ describe('Decimal.js Serialization', () => {
     // Transform using class-transformer
     const dto = plainToInstance(InventoryItemDto, inventoryEntity);
     
-    // Should be plain number
-    expect(typeof dto.quantity).toBe('number');
-    expect(dto.quantity).toBe(750.5);
+    // Should be string to prevent IEEE 754 precision loss
+    expect(typeof dto.quantity).toBe('string');
+    expect(dto.quantity).toBe('750.50');
     
     // Serialize to JSON
     const json = JSON.stringify(dto);
     const parsed = JSON.parse(json);
     
-    expect(typeof parsed.quantity).toBe('number');
-    expect(parsed.quantity).toBe(750.5);
+    expect(typeof parsed.quantity).toBe('string');
+    expect(parsed.quantity).toBe('750.50');
   });
 
   it('should handle edge cases: null, undefined, and zero decimal.js values', () => {

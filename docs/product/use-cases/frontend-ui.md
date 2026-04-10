@@ -37,10 +37,10 @@
 * **And** redirects the user to the `/login` page.
 
 **UC 7.7: Infinite Scrolling / Load More Data**
-* **Given** the user has loaded Page 1 of the Unified Search results.
-* **When** the user scrolls to the bottom of the list (or clicks "Load More").
-* **Then** the Angular UI triggers the API for `page=2`.
-* **And** the Signals/RxJS streams append the new results to the *existing* array without flashing or resetting the UI.
+ * **Given** the user has loaded the first page of the Unified Search results.
+ * **When** the user scrolls to the bottom of the list (or clicks "Load More").
+ * **Then** the Angular UI triggers the API with the `cursor` parameter from the previous response.
+ * **And** the Signals/RxJS streams append the new results to the *existing* array without flashing or resetting the UI.
 
 **UC 7.8: User-Preferred Measurement System (Localization)**
 * **Given** the user's settings are configured to "Imperial" (oz).
@@ -120,13 +120,15 @@
 * **And** allows selecting which ingredient becomes the canonical version.
 * **And** shows a preview of affected cocktails and user inventories before committing the merge.
 
-**UC 7.19: Refresh Token Race Condition (SPA)**
-* **Given** multiple concurrent HTTP requests fail with 401 Unauthorized.
-* **When** the Angular HTTP Interceptor catches them.
-* **Then** it intercepts and queues all subsequent requests using an RxJS `BehaviorSubject<boolean>` (isRefreshing lock).
-* **And** makes exactly ONE call to `/auth/refresh`.
-* **And** upon success, releases the queue and replays all pending requests with the new Access Token.
-* **And** prevents triggering token reuse detection (UC 9.15) by avoiding multiple simultaneous refresh requests.
+**UC 7.19: Refresh Token Race Condition with Cross-Tab Sync**
+ * **Given** multiple concurrent HTTP requests fail with 401 Unauthorized across browser tabs.
+ * **When** the Angular HTTP Interceptor catches them.
+ * **Then** it intercepts and queues all subsequent requests using an RxJS `BehaviorSubject<boolean>` (isRefreshing lock).
+ * **And** uses `BroadcastChannel` API to synchronize refresh state across tabs, ensuring only one tab makes the refresh call.
+ * **And** makes exactly ONE call to `/auth/refresh` across all tabs.
+ * **And** upon success, broadcasts the new access token to all tabs via `BroadcastChannel`.
+ * **And** releases the queue and replays all pending requests with the new Access Token.
+ * **And** works with backend grace period (UC 9.15) to prevent token family revocation from race conditions.
 
 **UC 7.20: Density Conversion Boundary UI**
 * **Given** a user selects an ingredient defined by Mass (g).
@@ -135,28 +137,35 @@
 * **And** prevents the user from submitting a request that is guaranteed to fail validation.
 * **And** displays a tooltip explaining the conversion constraint when incompatible units are attempted.
 
-**UC 7.21: Offline Queue Conflict Resolution**
-* **Given** a user prepares a cocktail while offline (optimistic UI deducts inventory).
+**UC 7.21: Two-Phase Offline Preparation with Inventory-Aware Logging**
+* **Given** a user prepares a cocktail while offline (optimistic UI deducts inventory locally).
 * **And** the physical database no longer has sufficient stock (depleted by a roommate/another session).
 * **When** the app comes back online and the background sync processes the queue.
-* **Then** the backend returns a `400 Bad Request` for that specific queued action.
-* **And** the Angular Sync Service catches the 400 error, drops the item from the queue, and forces a hard refresh of the user's inventory signal from the server.
-* **And** displays a toast: "Sync failed: Inventory was changed on another device."
-* **And** prevents the queue from getting stuck on conflicting operations.
+* **Then** the backend executes a **two-phase preparation**:
+  * **Phase 1: Always create preparation log** - Record the preparation attempt with `inventory_status: 'pending'`
+  * **Phase 2: Attempt inventory deduction** - If successful, update log with `inventory_status: 'deducted'`; if fails, update with `inventory_status: 'failed_insufficient'`
+* **And** the preparation log is **never dropped** - it always exists for analytics, undo history, and user experience consistency.
+* **And** the Angular Sync Service:
+  * Shows toast: "Cocktail prepared! (Inventory adjustment failed: insufficient stock)"
+  * Updates UI to show preparation in history with warning icon
+  * Forces hard refresh of inventory from server
+  * Allows user to manually adjust inventory or retry deduction
+* **And** the undo system works for all preparations regardless of inventory status.
 
-**UC 7.22: External Image Hotlinking Privacy (Referrer-Policy)**
-* **Given** the frontend renders cocktail images sourced directly from external APIs (e.g., TheCocktailDB).
+**UC 7.22: Secure Image Proxy Rendering (IP Privacy)**
+* **Given** the frontend needs to render a cocktail image sourced from an external API (e.g., TheCocktailDB).
 * **When** the browser makes the GET request for the image asset.
-* **Then** the Angular `<img [src]="imageUrl">` tag includes `referrerpolicy="no-referrer"`.
-* **And** prevents the external API from tracking the MixologyHub application domain or user metrics via referer headers.
-* **And** reduces the risk of hotlinking blocks by external image providers.
+* **Then** the Angular `<img [src]="sanitizedUrl">` tag points STRICTLY to the backend proxy (`/api/images/proxy?url=...&hash=...`).
+* **And** the frontend explicitly never makes direct outbound requests to the external host, guaranteeing zero client IP leakage (per ADR 0011).
+* **And** utilizes the `SecureImageComponent` to seamlessly fallback to `cocktail-placeholder.jpg` if the proxy returns a 4xx/5xx error.
 
 **UC 7.23: Bulk Offline Queue Sync**
-* **Given** a user prepared 3 drinks while entirely offline.
-* **When** the device regains network connectivity.
-* **Then** the Angular Sync Service batches all 3 preparations into a single `POST /sync/preparations` request.
-* **And** the backend processes them in a single database transaction, returning an array of success/failure statuses for each item.
-* **And** prevents network instability from sending 10 queued items sequentially when the app comes back online.
+ * **Given** a user prepared 3 drinks while entirely offline.
+ * **When** the device regains network connectivity.
+ * **Then** the Angular Sync Service batches all 3 preparations into a single `POST /sync/operations` request (consistent with UC 12.2).
+ * **And** the backend processes each operation independently in separate transactions, returning an array of success/failure statuses for each item.
+ * **And** prevents network instability from sending 10 queued items sequentially when the app comes back online.
+ * **Note:** Operations are processed independently to maintain item-level idempotency (UC 12.2).
 
 **UC 7.24: Asynchronous AI Loading State Recovery**
 * **Given** a user requests an AI recipe and navigates to the "Inventory" page while waiting.
@@ -167,17 +176,33 @@
 * **And** the recipe remains available for 1 hour or until the user generates a new one.
 
 **UC 7.25: Cross-Tab State Synchronization**
-* **Given** a user has MixologyHub open in Tab A and Tab B.
-* **When** the user clicks "Prepare Drink" in Tab A, deducting 50ml of Vodka.
-* **Then** the Angular application uses `BroadcastChannel API` or listens to `window.addEventListener('storage')` for `localStorage` changes.
-* **And** instantly updates the Angular Signal in Tab B to reflect the new inventory state without requiring a manual refresh.
-* **And** displays a subtle notification in Tab B: "Inventory updated from another tab".
-* **Implementation:** Uses a shared service that publishes state changes to `BroadcastChannel` and subscribes to receive updates from other tabs.
+ * **Given** a user has MixologyHub open in Tab A and Tab B.
+ * **When** the user clicks "Prepare Drink" in Tab A, deducting 50ml of Vodka.
+ * **Then** the Angular application uses `BroadcastChannel API` or listens to `window.addEventListener('storage')` for `localStorage` changes.
+ * **And** instantly updates the Angular Signal in Tab B to reflect the new inventory state without requiring a manual refresh.
+ * **And** displays a subtle notification in Tab B: "Inventory updated from another tab".
+ * **Implementation:** Uses a shared service that publishes state changes to `BroadcastChannel` and subscribes to receive updates from other tabs.
+ * **Senior Architectural Decision: Access Token Storage vs. XSS Risk**
+   * **Explicit Trade-off:** To enable cross-tab synchronization via `localStorage`, we must store the JWT access token in `localStorage` rather than HttpOnly cookies. This exposes the token to XSS attacks where malicious JavaScript could steal it. We accept this risk because:
+     1. **Cross-Tab Sync Requirement:** HttpOnly cookies cannot be read by JavaScript, preventing BroadcastChannel synchronization
+     2. **Offline Functionality:** Access tokens in localStorage enable offline queue persistence
+     3. **Mitigation:** Strict Content Security Policy (CSP), input sanitization, and regular security audits
+     4. **Short Token Lifetime:** 15-minute access token expiration limits exposure window
 
-**UC 7.26: LocalStorage Limit for Offline Queue**
-* **Given** a user is offline for an extended period and queues 150 preparations.
-* **When** the browser's `localStorage` or IndexedDB approaches its storage quota (typically 5-10MB).
-* **Then** the Angular Sync Service enforces a maximum queue size (e.g., 50 actions).
-* **And** disables further offline actions with a warning: "Offline queue full. Please sync before adding more actions."
-* **And** provides a "Clear Oldest" button to manually prune the queue.
-* **And** prevents browser memory crashes and data loss by proactively managing storage limits.
+**UC 7.26: Sync Payload Bounding for Offline Queue**
+ * **Given** a user is offline for an extended period and queues preparations.
+ * **When** the offline queue in IndexedDB reaches 50 pending operations.
+ * **Then** the UI disables further state-mutating actions to prevent generating a massive JSON payload that would cause `413 Payload Too Large` or transaction timeouts when the background sync finally flushes to the server.
+ * **And** shows a warning: "Offline queue full. Please sync before adding more actions."
+ * **And** provides a "Clear Oldest" button to manually prune the queue.
+ * **Senior Architectural Correction: IndexedDB as Primary Offline Store**
+   * **Explicit Decision:** The offline queue MUST be stored in IndexedDB, not localStorage. IndexedDB is asynchronous, can hold gigabytes of data, and is designed for structured storage. localStorage should only be used for the Access Token and lightweight User Preferences.
+   * **Rationale:** The 50-action limit is not to protect browser storage quotas (IndexedDB can handle much more), but to protect the backend from payload massive synchronization spikes when the device reconnects.
+
+**UC 7.27: State Reconciliation after Intermittent Network Drop**
+ * **Given** a user clicks "Prepare Drink" and the UI optimistically deducts 50ml of Vodka.
+ * **And** the network drops *while* the request is in-flight to the server.
+ * **When** the frontend times out, it rolls back the UI to the previous state (Vodka +50ml).
+ * **But** the backend successfully received and processed the request before the client disconnected.
+ * **Then** when the `NetworkService` detects connection restored (`window.addEventListener('online')`), it must fire a silent `GET /inventory/hash` (or background refresh).
+ * **And** forcibly sync the frontend Signal state with the Server state to resolve the optimistic UI desync, preventing the user from seeing ghost inventory.

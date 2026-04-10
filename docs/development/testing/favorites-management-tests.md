@@ -369,7 +369,39 @@ describe('Favorites Service - Search & Filter', () => {
     expect(result).toHaveLength(3); // All contain "berry"
   });
 });
-```
+
+**Example TDD for Favorite Pointer Migration on Fork (UC 6.11):**
+```typescript
+describe('Favorites Service - Favorite Pointer Migration (UC 6.11)', () => {
+  it('should atomically migrate favorite pointer when an external cocktail is forked', async () => {
+    const favoritesService = new FavoritesService();
+    const cocktailService = new CocktailService();
+    
+    // Mock user has favorited External API Cocktail '11000'
+    const mockFavorite = { 
+      id: 'fav-123', 
+      user_id: 'userA', 
+      external_cocktail_id: '11000', 
+      cocktail_id: null 
+    };
+    
+    jest.spyOn(favoritesService.favoriteRepo, 'findOne').mockResolvedValue(mockFavorite);
+    const saveFavoriteSpy = jest.spyOn(favoritesService.favoriteRepo, 'save').mockResolvedValue({} as any);
+    
+    // Simulate the CocktailService creating a fork
+    const newLocalForkId = 'local-uuid-456';
+    
+    // Trigger the migration listener/method
+    await favoritesService.migrateFavoritePointer('userA', '11000', newLocalForkId);
+    
+    // Verify the favorite was updated to drop the external ID and point to the new local UUID
+    expect(saveFavoriteSpy).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'fav-123',
+      external_cocktail_id: null,
+      cocktail_id: 'local-uuid-456'
+    }));
+  });
+});
 ```
 ```
 ```

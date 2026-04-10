@@ -38,12 +38,16 @@
 * **Then** the SQL engine ignores the missing `Lime Wedge` due to its `is_optional = true` flag.
 * **And** "Gin & Tonic" is successfully returned in the Makeable list.
 
-**UC 3.6: Discovering "Almost Makeable" (Missing 1 Ingredient)**
-* **Given** the user has Tequila and Triple Sec, but no Lime.
-* **When** the Makeable Cocktails query runs.
-* **Then** the system identifies "Margarita".
-* **And** tags it as `missing_ingredients: ["Lime"]`.
-* **And** returns it in a separate "Almost Makeable" category to drive user engagement/shopping.
+**UC 3.6: Discovering "Almost Makeable" (Missing Ingredients or Insufficient Quantity)**
+ * **Given** the user has Tequila and Triple Sec, but no Lime.
+ * **When** the Makeable Cocktails query runs.
+ * **Then** the system identifies "Margarita".
+ * **And** tags it as `missing_ingredients: ["Lime"]`.
+ * **And** returns it in a separate "Almost Makeable" category to drive user engagement/shopping.
+ * **Definition:** "Almost Makeable" includes cocktails where:
+   * User is missing exactly 1 required ingredient (has >0 quantity of N-1 ingredients)
+   * OR user has all ingredients but insufficient quantity of at least one (e.g., has 4oz Vodka but needs 6oz for 3 servings - UC 3.8)
+   * Excludes cocktails missing 2+ ingredients (those remain "Unmakeable")
 
 **UC 3.7: Serving Size Multipliers (Scaling)**
 * **Given** a user wants to make a batch of 4 "Mojitos".
@@ -98,11 +102,11 @@
 * **And** prevents inventory over-allocation across overlapping synonym hierarchies.
 
 **UC 3.19: Handling 0-Volume / Rinse Ingredients**
-* **Given** a "Sazerac" recipe requires an "Absinthe Rinse" (amount: `0` or `null`, unit: `rinse`).
-* **When** the makeability engine checks the user's inventory.
-* **Then** the system requires the user to have Absinthe in their inventory (quantity > 0).
-* **And** when "Prepared", the system does **not** deduct any volume for the Absinthe, but leaves the inventory untouched while deducting the primary spirits.
-* **And** marks rinse ingredients as "qualitative" rather than "quantitative" for inventory tracking purposes.
+ * **Given** a "Sazerac" recipe requires an "Absinthe Rinse" (amount: `0` or `null`, unit: `rinse`).
+ * **When** the makeability engine checks the user's inventory.
+ * **Then** the system requires the user to have Absinthe in their inventory with `quantity >= 3` (the hardcoded micro-deduction amount in `ml`), not just `> 0`.
+ * **And** when "Prepared", the system automatically converts the qualitative `rinse` into a hardcoded micro-deduction of `3 ml` via the `UnitConverterService`.
+ * **And** mathematically deducts this amount. Because the makeability check verified `quantity >= 3`, this prevents a PostgreSQL `CHECK (quantity >= 0)` constraint violation crash.
 
 **UC 3.20: Fractional Servings / Scaling Down**
 * **Given** a cocktail requires `2 oz` of Whiskey, but the user only has `1 oz`.
@@ -117,6 +121,7 @@
 * **And** queries the Redis synonym cache to find canonical ingredient relationships.
 * **And** passes the resolved UUIDs to the Makeability Math Engine for calculation.
 * **And** caches the string-to-UUID mappings to optimize subsequent evaluations.
+* **Clarification on Makeability Sorting:** External API cocktails with unparseable NLP measurements (e.g., "top up", "1 part", "to taste") are excluded from strict makeability percentage sorting (`sort=makeability`). They appear in unified search results but maintain a default position in the sort order, as their makeability score cannot be reliably calculated without precise volume measurements.
 
 **UC 3.22: Aggregating Specific Children to satisfy a Generic Parent**
 * **Given** a cocktail requires `4 oz` of generic "Whiskey".
@@ -143,10 +148,12 @@
 * **Note:** Requires the `density` column in the INGREDIENTS table to enable mass↔volume conversions.
 
 **UC 3.25: The N+1 Makeability Pagination Problem**
-* **Context:** Cannot paginate in SQL after doing in-memory math for makeability validation.
-* **Given** a user requests `GET /makeable?limit=10`.
-* **When** the SQL `HAVING` clause returns 5,000 potentially makeable cocktails.
-* **Then** the Math Engine limits its evaluation strictly to the first X records that satisfy the cursor.
-* **And** evaluates sequentially until exactly `limit=10` perfectly makeable cocktails are found.
-* **And** does NOT calculate math for all 5,000 before returning the first 10.
-* **Performance Optimization:** Uses cursor-based pagination with early termination to prevent O(N²) performance degradation as inventory grows.
+ * **Context:** Cannot paginate in SQL after doing in-memory math for makeability validation.
+ * **Given** a user requests `GET /makeable?limit=10&page=1&sort=makeability`.
+ * **When** the SQL `HAVING` clause returns 5,000 potentially makeable cocktails.
+ * **Then** the Math Engine evaluates cocktails sequentially with a hard cap of 200 iterations (ADR 0008 DoS protection).
+ * **And** evaluates until either: (1) `limit` makeable cocktails are found, OR (2) 200 iterations reached.
+ * **And** returns partial results if iteration cap reached (may return fewer than `limit` cocktails).
+ * **Performance & Security:** Uses offset-based pagination (not cursor-based) because cursor-based pagination is mathematically impossible when relying on dynamically computed in-memory scores without embedding the entire score state into the cursor.
+ * **Hard Limits:** Maximum `page=10`, maximum `offset=100` regardless of page/limit combination (ADR 0008).
+ * **Future Optimization:** For production-scale deployments, consider PostgreSQL materialized views or stored procedures to move unit conversion logic to database layer, enabling native `LIMIT 10` in SQL rather than in-memory evaluation (see Backend Architecture performance section).

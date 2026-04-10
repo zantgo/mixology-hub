@@ -19,26 +19,22 @@ describe('Ingredient Entity', () => {
     expect(ingredient.normalizedName).toBe('VODKA');
   });
 
-  it('should allow duplicate names for different users when isGlobal=false', async () => {
+  it('should map to the same ingredient ID when different users create a custom ingredient with the same name', async () => {
     const user1 = await createTestUser();
     const user2 = await createTestUser();
     
-    const ingredient1 = ingredientRepository.create({
-      name: 'Secret Sauce',
-      isGlobal: false,
-      createdBy: user1.id,
-      normalizedName: 'SECRET SAUCE',
-    });
+    // First user creates the ingredient
+    const result1 = await ingredientService.findOrCreate('Secret Sauce', user1.id);
     
-    const ingredient2 = ingredientRepository.create({
-      name: 'Secret Sauce',
-      isGlobal: false,
-      createdBy: user2.id,
-      normalizedName: 'SECRET SAUCE',
-    });
+    // Second user should get the same ingredient ID (UPSERT behavior)
+    const result2 = await ingredientService.findOrCreate('Secret Sauce', user2.id);
     
-    await expect(ingredientRepository.save(ingredient1)).resolves.not.toThrow();
-    await expect(ingredientRepository.save(ingredient2)).resolves.not.toThrow();
+    // Both users should be mapped to the exact same database row (UUID)
+    expect(result1.id).toBe(result2.id);
+    expect(result1.normalizedName).toBe('SECRET SAUCE');
+    expect(result2.normalizedName).toBe('SECRET SAUCE');
+    expect(result1.isGlobal).toBe(false);
+    expect(result2.isGlobal).toBe(false);
   });
 
   it('should prevent duplicate global ingredient names', async () => {
@@ -139,7 +135,7 @@ describe('SyncService', () => {
     const operationDto: SyncOperationDto = {
       clientOperationId: 'test-op-1',
       operationType: SyncOperationType.INVENTORY_UPDATE,
-      payload: { ingredientId: '123', amount: 100 },
+      payload: { ingredientId: '123', amountChange: "100", unit: 'ml' }, // Enforcing string boundaries for Decimal.js
       deviceTimestamp: new Date(),
     };
 
@@ -158,19 +154,19 @@ describe('SyncService', () => {
       {
         clientOperationId: 'op-1',
         operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'valid-id', amount: 100 },
+        payload: { ingredientId: 'valid-id', amountChange: "100", unit: 'ml' }, // String serialization
         deviceTimestamp: new Date(),
       },
       {
         clientOperationId: 'op-2',
         operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'invalid-id', amount: -100 }, // Will fail
+        payload: { ingredientId: 'invalid-id', amountChange: "-100", unit: 'ml' }, // Will fail, string serialization
         deviceTimestamp: new Date(),
       },
       {
         clientOperationId: 'op-3',
         operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'valid-id-2', amount: 50 },
+        payload: { ingredientId: 'valid-id-2', amountChange: "50", unit: 'ml' }, // String serialization
         deviceTimestamp: new Date(),
       },
     ];
@@ -186,7 +182,7 @@ describe('SyncService', () => {
     const operationDto: SyncOperationDto = {
       clientOperationId: 'failed-op',
       operationType: SyncOperationType.INVENTORY_UPDATE,
-      payload: { ingredientId: 'will-fail', amount: 100 },
+      payload: { ingredientId: 'will-fail', amountChange: "100", unit: 'ml' }, // String serialization
       deviceTimestamp: new Date(),
     };
 
@@ -410,13 +406,13 @@ describe('CocktailAggregatorService Pagination', () => {
 #### 6.1 End-to-End Sync Flow
 ```typescript
 describe('End-to-End Sync Flow', () => {
-  it('should complete full offline sync cycle', async () => {
-    // 1. User offline: queue operations
+  it('should complete full offline sync cycle with delta updates', async () => {
+    // 1. User offline: queue delta operations
     const offlineOperations: SyncOperationDto[] = [
       {
         clientOperationId: 'offline-1',
         operationType: SyncOperationType.INVENTORY_UPDATE,
-        payload: { ingredientId: 'vodka', amount: 500, unit: 'ml' },
+        payload: { ingredientId: 'vodka', amountChange: "-50", unit: 'ml' }, // String serialization enforced to prevent IEEE 754 corruption
         deviceTimestamp: new Date('2024-01-01T10:00:00Z'),
       },
       {
@@ -427,19 +423,26 @@ describe('End-to-End Sync Flow', () => {
       },
     ];
 
-    // 2. User comes online: sync operations
+    // 2. Setup initial inventory
     const user = await createTestUser();
+    await inventoryService.updateUserInventory(user.id, {
+      ingredientId: 'vodka',
+      quantity: 550,
+      unit: 'ml'
+    });
+    
+    // 3. User comes online: sync delta operations
     const syncResults = await syncService.processSyncOperations(user, offlineOperations);
     
-    // 3. Verify all operations processed
+    // 4. Verify all operations processed
     expect(syncResults).toHaveLength(2);
     expect(syncResults[0].status).toBe(SyncOperationStatus.SYNCED);
     expect(syncResults[1].status).toBe(SyncOperationStatus.SYNCED);
     
-    // 4. Verify data consistency
+    // 5. Verify delta was applied correctly (550 - 50 = 500)
     const inventory = await inventoryService.getUserInventory(user.id);
     expect(inventory).toContainEqual(
-      expect.objectContaining({ ingredientId: 'vodka', amount: 500 })
+      expect.objectContaining({ ingredientId: 'vodka', quantity: 500 })
     );
     
     const rating = await ratingService.getUserRating(user.id, 'mojito');

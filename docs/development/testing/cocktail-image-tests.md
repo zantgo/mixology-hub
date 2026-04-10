@@ -380,178 +380,191 @@ describe('Cocktail Image Error Handling', () => {
     expect(component.showFallback).toBe(true);
   }));
 
-  it('should implement an async validation job that periodically verifies public cocktail image URLs and nullifies dead links to prevent client-side waterfall errors', async () => {
-    const imageValidationService = new ImageValidationService();
-    const mockCocktailRepository = {
-      find: jest.fn().mockResolvedValue([
-        { id: 'cocktail1', imageUrl: 'https://example.com/alive.jpg', isPublic: true },
-        { id: 'cocktail2', imageUrl: 'https://example.com/dead.jpg', isPublic: true },
-        { id: 'cocktail3', imageUrl: null, isPublic: true }
-      ]),
-      save: jest.fn()
+  it('should reject image URLs with http:// protocol (require https://)', async () => {
+    const cocktailService = new CocktailService();
+    const mockCocktailDto = {
+      name: 'Test Cocktail',
+      ingredients: [{ ingredientId: 'ing1', amount: 2, unit: 'oz' }],
+      instructions: 'Test instructions',
+      imageUrl: 'http://example.com/image.jpg' // Insecure protocol
     };
 
-    const mockHttpClient = {
-      head: jest.fn()
-        .mockResolvedValueOnce({ status: 200 }) // Alive
-        .mockRejectedValueOnce(new Error('404 Not Found')) // Dead
-    };
-
-    imageValidationService.cocktailRepository = mockCocktailRepository;
-    imageValidationService.httpClient = mockHttpClient;
-
-    await imageValidationService.validatePublicCocktailImages();
-
-    // Should check both URLs
-    expect(mockHttpClient.head).toHaveBeenCalledTimes(2);
-    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/alive.jpg', { timeout: 5000 });
-    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/dead.jpg', { timeout: 5000 });
-
-    // Should save null for dead link
-    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'cocktail2',
-        imageUrl: null
-      })
+    // Should reject http:// URLs
+    await expect(cocktailService.createCocktail(mockCocktailDto)).rejects.toThrow(
+      'Image URL must use https:// protocol'
     );
-
-    // Should NOT save for alive link or already null link
-    expect(mockCocktailRepository.save).toHaveBeenCalledTimes(1);
   });
 
-  it('should respect rate limits when checking external image URLs', async () => {
-    const imageValidationService = new ImageValidationService();
-    const mockCocktailRepository = {
-      find: jest.fn().mockResolvedValue(
-        Array(100).fill(null).map((_, i) => ({
-          id: `cocktail${i}`,
-          imageUrl: `https://example.com/image${i}.jpg`,
-          isPublic: true
-        }))
-      ),
-      save: jest.fn()
+  it('should reject image URLs pointing to internal IP addresses', async () => {
+    const cocktailService = new CocktailService();
+    const mockCocktailDto = {
+      name: 'Test Cocktail',
+      ingredients: [{ ingredientId: 'ing1', amount: 2, unit: 'oz' }],
+      instructions: 'Test instructions',
+      imageUrl: 'https://169.254.169.254/metadata' // AWS metadata service
     };
 
+    // Should reject internal IP addresses
+    await expect(cocktailService.createCocktail(mockCocktailDto)).rejects.toThrow(
+      'Image URL cannot point to internal IP address'
+    );
+  });
+
+  it('should accept image URLs from any public domain with https://', async () => {
+    const cocktailService = new CocktailService();
+    const mockCocktailDto = {
+      name: 'Test Cocktail',
+      ingredients: [{ ingredientId: 'ing1', amount: 2, unit: 'oz' }],
+      instructions: 'Test instructions',
+      imageUrl: 'https://any-public-site.com/image.jpg' // Any public domain
+    };
+
+    // Should accept URLs from any public domain with https://
+    const result = await cocktailService.createCocktail(mockCocktailDto);
+    expect(result).toBeDefined();
+    expect(result.imageUrl).toBe('https://any-public-site.com/image.jpg');
+  });
+
+  it('should fetch image URLs through secure proxy to prevent client IP leakage (ADR 0011)', async () => {
+    const imageProxyService = new ImageProxyService();
     const mockHttpClient = {
-      head: jest.fn().mockResolvedValue({ status: 200 })
+      get: jest.fn().mockResolvedValue({
+        data: Buffer.from('fake-image-data'),
+        headers: { 'content-type': 'image/jpeg' }
+      })
     };
 
+    const mockCache = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn()
+    };
+
+    imageProxyService.httpClient = mockHttpClient;
+    imageProxyService.cache = mockCache;
+
+    const externalUrl = 'https://example.com/cocktail.jpg';
+    const result = await imageProxyService.proxyImage(externalUrl);
+
+    // Should fetch through proxy to prevent client IP leakage (ADR 0011)
+    expect(mockHttpClient.get).toHaveBeenCalledWith(externalUrl, expect.objectContaining({
+      headers: expect.objectContaining({
+        'User-Agent': 'MixologyHub-ImageProxy/1.0',
+        'Accept': 'image/*'
+      }),
+      responseType: 'arraybuffer',
+      maxBodyLength: 5 * 1024 * 1024
+    }));
+
+    // Should cache the result
+    expect(mockCache.set).toHaveBeenCalled();
+    expect(result.buffer).toBeInstanceOf(Buffer);
+    expect(result.contentType).toBe('image/jpeg');
+  });
+
+  it('should apply rate limiting to proxy requests to prevent abuse', async () => {
+    const abuseAwareImageProxyService = new AbuseAwareImageProxyService();
     const mockRateLimiter = {
-      acquire: jest.fn().mockResolvedValue(true)
-    };
-
-    imageValidationService.cocktailRepository = mockCocktailRepository;
-    imageValidationService.httpClient = mockHttpClient;
-    imageValidationService.rateLimiter = mockRateLimiter;
-
-    await imageValidationService.validatePublicCocktailImages();
-
-    // Should use rate limiter for each request
-    expect(mockRateLimiter.acquire).toHaveBeenCalledTimes(100);
-    expect(mockHttpClient.head).toHaveBeenCalledTimes(100);
-  });
-
-  it('should skip private cocktail images during validation', async () => {
-    const imageValidationService = new ImageValidationService();
-    const mockCocktailRepository = {
-      find: jest.fn().mockResolvedValue([
-        { id: 'public1', imageUrl: 'https://example.com/public.jpg', isPublic: true },
-        { id: 'private1', imageUrl: 'https://example.com/private.jpg', isPublic: false }
-      ]),
-      save: jest.fn()
+      check: jest.fn().mockResolvedValue(true)
     };
 
     const mockHttpClient = {
-      head: jest.fn().mockResolvedValue({ status: 200 })
-    };
-
-    imageValidationService.cocktailRepository = mockCocktailRepository;
-    imageValidationService.httpClient = mockHttpClient;
-
-    await imageValidationService.validatePublicCocktailImages();
-
-    // Should only check public cocktail
-    expect(mockHttpClient.head).toHaveBeenCalledTimes(1);
-    expect(mockHttpClient.head).toHaveBeenCalledWith('https://example.com/public.jpg', { timeout: 5000 });
-  });
-
-  it('should handle different types of image URL failures', async () => {
-    const imageValidationService = new ImageValidationService();
-    const mockCocktailRepository = {
-      find: jest.fn().mockResolvedValue([
-        { id: 'cocktail1', imageUrl: 'https://example.com/404.jpg', isPublic: true },
-        { id: 'cocktail2', imageUrl: 'https://example.com/timeout.jpg', isPublic: true },
-        { id: 'cocktail3', imageUrl: 'https://example.com/ssl.jpg', isPublic: true }
-      ]),
-      save: jest.fn()
-    };
-
-    const mockHttpClient = {
-      head: jest.fn()
-        .mockRejectedValueOnce({ status: 404, message: 'Not Found' })
-        .mockRejectedValueOnce(new Error('Timeout'))
-        .mockRejectedValueOnce(new Error('SSL certificate error'))
-    };
-
-    imageValidationService.cocktailRepository = mockCocktailRepository;
-    imageValidationService.httpClient = mockHttpClient;
-
-    await imageValidationService.validatePublicCocktailImages();
-
-    // Should nullify all failed URLs
-    expect(mockCocktailRepository.save).toHaveBeenCalledTimes(3);
-    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'cocktail1', imageUrl: null })
-    );
-    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'cocktail2', imageUrl: null })
-    );
-    expect(mockCocktailRepository.save).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'cocktail3', imageUrl: null })
-    );
-  });
-
-  it('should log validation results for monitoring', async () => {
-    const imageValidationService = new ImageValidationService();
-    const mockCocktailRepository = {
-      find: jest.fn().mockResolvedValue([
-        { id: 'cocktail1', imageUrl: 'https://example.com/alive.jpg', isPublic: true },
-        { id: 'cocktail2', imageUrl: 'https://example.com/dead.jpg', isPublic: true }
-      ]),
-      save: jest.fn()
-    };
-
-    const mockHttpClient = {
-      head: jest.fn()
-        .mockResolvedValueOnce({ status: 200 })
-        .mockRejectedValueOnce(new Error('404'))
-    };
-
-    const mockLogger = {
-      info: jest.fn(),
-      warn: jest.fn()
-    };
-
-    imageValidationService.cocktailRepository = mockCocktailRepository;
-    imageValidationService.httpClient = mockHttpClient;
-    imageValidationService.logger = mockLogger;
-
-    await imageValidationService.validatePublicCocktailImages();
-
-    // Should log results
-    expect(mockLogger.info).toHaveBeenCalledWith(
-      'Image validation completed',
-      expect.objectContaining({
-        totalChecked: 2,
-        alive: 1,
-        dead: 1
+      get: jest.fn().mockResolvedValue({
+        data: Buffer.from('fake-image-data'),
+        headers: { 'content-type': 'image/jpeg' }
       })
-    );
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      'Dead image URL detected and nullified',
+    };
+
+    abuseAwareImageProxyService.rateLimiter = mockRateLimiter;
+    abuseAwareImageProxyService.httpClient = mockHttpClient;
+
+    const externalUrl = 'https://example.com/cocktail.jpg';
+    const userId = 'user123';
+    
+    await abuseAwareImageProxyService.proxyImage(externalUrl, userId);
+
+    // Should apply rate limiting for user and domain
+    expect(mockRateLimiter.check).toHaveBeenCalledWith('user123', 'image_proxy');
+    expect(mockRateLimiter.check).toHaveBeenCalledWith('user123:example.com', 'domain_proxy');
+    
+    // Should still fetch through proxy
+    expect(mockHttpClient.get).toHaveBeenCalled();
+  });
+
+  it('should cache proxy responses to improve performance and reduce external requests', async () => {
+    const imageProxyService = new ImageProxyService();
+    const mockCache = {
+      get: jest.fn().mockResolvedValue({
+        buffer: Buffer.from('cached-image-data'),
+        contentType: 'image/png'
+      }),
+      set: jest.fn()
+    };
+
+    const mockHttpClient = {
+      get: jest.fn()
+    };
+
+    imageProxyService.cache = mockCache;
+    imageProxyService.httpClient = mockHttpClient;
+
+    const externalUrl = 'https://example.com/cached-image.png';
+    const result = await imageProxyService.proxyImage(externalUrl);
+
+    // Should return cached result without making HTTP request
+    expect(mockCache.get).toHaveBeenCalled();
+    expect(mockHttpClient.get).not.toHaveBeenCalled();
+    expect(result.buffer.toString()).toBe('cached-image-data');
+    expect(result.contentType).toBe('image/png');
+  });
+
+  it('should validate image content type and size in proxy to prevent malicious content', async () => {
+    const imageProxyService = new ImageProxyService();
+    const mockHttpClient = {
+      get: jest.fn().mockResolvedValue({
+        data: Buffer.from('fake-image-data'),
+        headers: { 'content-type': 'application/javascript' } // Non-image content
+      })
+    };
+
+    imageProxyService.httpClient = mockHttpClient;
+
+    const externalUrl = 'https://example.com/malicious.js';
+    
+    // Should reject non-image content types
+    await expect(imageProxyService.proxyImage(externalUrl))
+      .rejects
+      .toThrow('Non-image content type');
+  });
+
+  it('should log proxy activity for monitoring and security auditing', async () => {
+    const monitoredImageProxyService = new MonitoredImageProxyService();
+    const mockMetrics = {
+      recordProxySuccess: jest.fn(),
+      recordProxyFailure: jest.fn()
+    };
+
+    const mockHttpClient = {
+      get: jest.fn().mockResolvedValue({
+        data: Buffer.from('fake-image-data'),
+        headers: { 'content-type': 'image/jpeg' }
+      })
+    };
+
+    monitoredImageProxyService.metrics = mockMetrics;
+    monitoredImageProxyService.httpClient = mockHttpClient;
+
+    const externalUrl = 'https://example.com/cocktail.jpg';
+    const userId = 'user123';
+    
+    await monitoredImageProxyService.proxyImage(externalUrl, userId);
+
+    // Should log successful proxy request
+    expect(mockMetrics.recordProxySuccess).toHaveBeenCalledWith(
       expect.objectContaining({
-        cocktailId: 'cocktail2',
-        imageUrl: 'https://example.com/dead.jpg'
+        url: externalUrl,
+        userId: userId,
+        size: expect.any(Number),
+        cacheHit: expect.any(Boolean)
       })
     );
   });
@@ -618,8 +631,8 @@ const mockImageError = () => {
   return img;
 };
 
-// Use in tests
-jest.spyOn(window, 'Image').mockImplementation(mockImageSuccess);
+  // Use in tests
+  jest.spyOn(window, 'Image').mockImplementation(mockImageSuccess);
 ```
 
 ### Mocking External API Responses:
@@ -636,4 +649,34 @@ const mockExternalApiResponse = {
 };
 
 jest.spyOn(httpClient, 'get').mockResolvedValue({ data: mockExternalApiResponse });
+```
+
+## Test Service Classes (for reference)
+
+```typescript
+// Mock classes referenced in tests
+class ImageProxyService {
+  httpClient: any;
+  cache: any;
+  
+  async proxyImage(url: string, userId?: string): Promise<{ buffer: Buffer; contentType: string }> {
+    // Implementation from ADR 0011
+    throw new Error('Not implemented in test');
+  }
+}
+
+class AbuseAwareImageProxyService extends ImageProxyService {
+  rateLimiter: any;
+}
+
+class MonitoredImageProxyService extends ImageProxyService {
+  metrics: any;
+}
+
+class SecurityException extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SecurityException';
+  }
+}
 ```

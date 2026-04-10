@@ -148,6 +148,28 @@ When users create custom ingredients, the global catalog can get messy.
     *   **Default**: System Default (follows OS preference)
     *   **Persistence**: localStorage with Angular Signals
     *   **FOUC Prevention**: Read theme from localStorage before Angular bootstrap, apply via data-theme attribute
-    *   **Transition**: Smooth 200ms transition for all color properties
-    *   **System Detection**: Listen to `prefers-color-scheme` media query changes
-    *   **Screen Reader**: Announce theme changes via `LiveAnnouncer`
+  *   **Transition**: Smooth 200ms transition for all color properties
+  *   **System Detection**: Listen to `prefers-color-scheme` media query changes
+  *   **Screen Reader**: Announce theme changes via `LiveAnnouncer`
+
+---
+
+# 👮 8. Admin Moderation Flows
+
+**Admin Dashboard Access**: Accessible via `/admin` route for users with `role: 'admin'`.
+
+*   **Reported Content Queue**:
+    *   **UI**: Table view with columns: `Report ID`, `Cocktail Name`, `Report Reason`, `Reporter`, `Date`, `Status`, `Actions`
+    *   **Actions**: `Review`, `Dismiss`, `Delete Cocktail`, `Hide External Cocktail`, `Warn User`
+    *   **Filters**: `Status (pending/reviewed/dismissed/action_taken)`, `Report Type`, `Date Range`
+
+*   **External Cocktail Hiding**:
+    *   **When**: Admin selects "Hide External Cocktail" action for reported external API cocktails
+    *   **UI**: Modal with confirmation: "This will hide cocktail [ID] from all future search results. Reason: [dropdown: inappropriate/spam/copyright/other]"
+    *   **Result**: External ID added to `HIDDEN_EXTERNAL_COCKTAILS` blocklist, instantly filtered from unified search
+    *   **Audit Trail**: Action logged with admin ID, timestamp, and reason
+
+*   **Local Cocktail Moderation**:
+    *   **Delete**: Hard delete for severe violations, soft delete for minor issues
+    *   **Warning**: Automated email to cocktail author with violation details
+    *   **Notification**: Email to reporter thanking them for their report

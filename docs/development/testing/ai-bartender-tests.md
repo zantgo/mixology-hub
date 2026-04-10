@@ -1581,7 +1581,9 @@ describe('AI Service - Atomic Quota Enforcement', () => {
     }
   });
 
-  it('should use database row-level lock as fallback if Redis unavailable', async () => {
+
+
+  it('should fail closed (block AI requests) when Redis is unavailable', async () => {
     const aiService = new AIService();
     
     // Mock Redis failure
@@ -1592,43 +1594,13 @@ describe('AI Service - Atomic Quota Enforcement', () => {
     
     aiService.redis = mockRedis;
     
-    // Mock database transaction with row-level lock
-    const mockTransaction = jest.fn().mockImplementation(async (callback) => {
-      // Simulate SELECT ... FOR UPDATE
-      return callback();
-    });
+    // Should throw ServiceUnavailableException when Redis is down
+    await expect(aiService.generateRecipe('Vodka', { userId: 'user123' }))
+      .rejects
+      .toThrow('AI features temporarily unavailable');
     
-    const mockEntityManager = {
-      transaction: mockTransaction
-    };
-    
-    const mockAiUsageRepo = {
-      createQueryBuilder: jest.fn().mockReturnValue({
-        where: jest.fn().mockReturnThis(),
-        setLock: jest.fn().mockReturnThis(), // FOR UPDATE
-        getOne: jest.fn().mockResolvedValue({ count: 19 }),
-        update: jest.fn().mockReturnThis(),
-        set: jest.fn().mockReturnThis(),
-        execute: jest.fn().mockResolvedValue({ affected: 1 })
-      })
-    };
-    
-    aiService.entityManager = mockEntityManager;
-    aiService.aiUsageRepo = mockAiUsageRepo;
-    
-    const mockProvider = {
-      generateRecipe: jest.fn().mockResolvedValue({ name: 'Test', ingredients: [] })
-    };
-    aiService.provider = mockProvider;
-    
-    await aiService.generateRecipe('Vodka', { userId: 'user123' });
-    
-    // Should fall back to database locking
-    expect(mockTransaction).toHaveBeenCalled();
-    expect(mockAiUsageRepo.createQueryBuilder).toHaveBeenCalled();
-    
-    // Should still reach LLM provider
-    expect(mockProvider.generateRecipe).toHaveBeenCalled();
+    // Should NOT attempt database fallback (per ADR 0005)
+    expect(mockRedis.incr).toHaveBeenCalled();
   });
 
   it('should prevent quota bypass through time manipulation', async () => {

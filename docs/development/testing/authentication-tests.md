@@ -818,12 +818,10 @@ describe('Auth Guard - Mock Authentication Bypass', () => {
     );
   });
 
-  it('should disable certain security features when mock auth is enabled', async () => {
+  it('should allow rate-limit bypass via specific header during E2E testing', async () => {
     const authGuard = new JwtAuthGuard();
+    process.env.NODE_ENV = 'test'; // Only active in test environment
     
-    process.env.ENABLE_MOCK_AUTH = 'true';
-    
-    // Mock rate limiter - should be disabled for mock auth
     const mockRateLimiter = {
       consume: jest.fn()
     };
@@ -831,7 +829,7 @@ describe('Auth Guard - Mock Authentication Bypass', () => {
     
     const mockExecutionContext = {
       switchToHttp: () => ({
-        getRequest: () => ({ headers: {} })
+        getRequest: () => ({ headers: { 'x-test-bypass-ratelimit': 'true' } })
       }),
       getHandler: () => ({}),
       getClass: () => ({})
@@ -839,7 +837,7 @@ describe('Auth Guard - Mock Authentication Bypass', () => {
     
     await authGuard.canActivate(mockExecutionContext as any);
     
-    // Rate limiter should NOT be called for mock auth
+    // Rate limiter ignores request if header is present in test env
     expect(mockRateLimiter.consume).not.toHaveBeenCalled();
   });
 
@@ -1260,63 +1258,22 @@ describe('Auth Service - Race Condition Prevention', () => {
 **Example TDD for JWT Secret Rotation (UC 9.27):**
 ```typescript
 describe('Auth Service - JWT Secret Rotation', () => {
-  it('should instantly invalidate all tokens when JWT_SECRET changes', async () => {
+  it('should instantly invalidate all tokens when global token salt is incremented', async () => {
     const authService = new AuthService();
     
-    // Generate token with original secret
-    const originalSecret = 'original-secret-123';
-    process.env.JWT_SECRET = originalSecret;
-    
-    const token = authService.generateAccessToken('user123', Date.now(), 1);
-    
-    // Verify token validates with original secret
+    const token = authService.generateAccessToken('user123', Date.now(), 1); // saltVersion 1 inside token
     await expect(authService.validateAccessToken(token)).resolves.toBeDefined();
     
-    // Simulate emergency secret rotation (system breach)
-    process.env.JWT_SECRET = 'new-secret-after-breach-456';
+    // Simulate emergency global revocation via Redis
+    await authService.emergencyGlobalRevocation(); // Increments global salt to 2
     
-    // Token should be instantly invalid
+    // Token (saltVersion 1) should now be instantly invalid against Redis (saltVersion 2)
     await expect(authService.validateAccessToken(token))
       .rejects
-      .toThrow('Invalid token signature');
-    
-    // New tokens with new secret should work
-    const newToken = authService.generateAccessToken('user123', Date.now(), 1);
-    await expect(authService.validateAccessToken(newToken)).resolves.toBeDefined();
+      .toThrow('Token invalidated by global revocation');
   });
 
-  it('should handle concurrent requests during secret rotation', async () => {
-    const authService = new AuthService();
-    
-    // Store original secret reference
-    const originalSecret = 'original-secret';
-    process.env.JWT_SECRET = originalSecret;
-    
-    // Generate multiple tokens before rotation
-    const tokens = Array(5).fill(null).map(() => 
-      authService.generateAccessToken('user123', Date.now(), 1)
-    );
-    
-    // Simulate secret rotation while validating tokens
-    const validationPromises = tokens.map((token, index) => {
-      // Rotate secret halfway through validations
-      if (index === 2) {
-        process.env.JWT_SECRET = 'new-secret-rotated';
-      }
-      return authService.validateAccessToken(token).catch(e => e.message);
-    });
-    
-    const results = await Promise.all(validationPromises);
-    
-    // First 2 tokens should validate (before rotation)
-    expect(results[0]).not.toContain('Invalid token signature');
-    expect(results[1]).not.toContain('Invalid token signature');
-    
-    // Last 3 tokens should fail (after rotation)
-    expect(results[2]).toContain('Invalid token signature');
-    expect(results[3]).toContain('Invalid token signature');
-    expect(results[4]).toContain('Invalid token signature');
-  });
+
 
   it('should rotate token_version_salt for global session revocation', async () => {
     const authService = new AuthService();

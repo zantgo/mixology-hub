@@ -13,6 +13,8 @@ The AI recipe generation endpoint (`POST /ai`) accepts free-text user input that
 
 ### 1. Input Sanitization Layer
 
+**Architectural Trade-off:** We use a permissive character whitelist that allows common recipe punctuation (slashes, apostrophes, ampersands, parentheses) to avoid corrupting legitimate cocktail inputs like "1/2 oz Jack Daniel's & Cola". Security is enforced through strict JSON schema validation, payload size bounding, and keyword filtering rather than aggressive character stripping.
+
 **Before constructing the prompt:**
 ```typescript
 function sanitizeUserInput(input: string): string {
@@ -20,7 +22,9 @@ function sanitizeUserInput(input: string): string {
   const truncated = input.slice(0, MAX_INPUT_LENGTH);
   
   // 2. Character whitelisting (allow only safe characters)
-  const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.-]/g, '');
+  // Allow common recipe punctuation: slashes (/), apostrophes ('), ampersands (&), parentheses
+  // Rely on JSON schema validation and payload size bounding for security
+  const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '');
   
   // 3. Keyword filtering (block known attack patterns)
   const blockedPatterns = [

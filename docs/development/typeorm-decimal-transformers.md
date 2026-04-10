@@ -24,34 +24,39 @@ const remaining = userQuantity - requiredAmount; // NaN
 ### Implementation
 ```typescript
 // src/utils/column-numeric.transformer.ts
+import { Decimal } from 'decimal.js';
+
 export class ColumnNumericTransformer {
   /**
-   * Convert JavaScript number to database decimal string
+   * Convert decimal.js Decimal or JavaScript number to database decimal string
    */
-  to(data: number): string | null {
+  to(data: Decimal | number): string | null {
     if (data === null || data === undefined) {
       return null;
     }
+    
+    // Handle both Decimal instances and regular numbers
+    if (data instanceof Decimal) {
+      return data.toString();
+    }
+    
     return data.toString();
   }
 
   /**
-   * Convert database decimal string to JavaScript number
+   * Convert database decimal string to decimal.js Decimal instance
    */
-  from(data: string): number | null {
+  from(data: string): Decimal | null {
     if (data === null || data === undefined) {
       return null;
     }
     
-    // Parse as float for mathematical operations
-    const parsed = parseFloat(data);
-    
-    // Validate the parse was successful
-    if (isNaN(parsed)) {
+    // Return Decimal instance directly, preserving full precision
+    try {
+      return new Decimal(data);
+    } catch (error) {
       throw new Error(`Invalid decimal value from database: ${data}`);
     }
-    
-    return parsed;
   }
 }
 ```
@@ -59,6 +64,7 @@ export class ColumnNumericTransformer {
 ### Entity Configuration
 ```typescript
 // src/users/entities/user-inventory.entity.ts
+import { Decimal } from 'decimal.js';
 import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
 @Entity('user_inventory')
@@ -69,34 +75,29 @@ export class UserInventory {
   @Column({
     type: 'decimal',
     precision: 10, // Total digits
-    scale: 2,      // Decimal places
+    scale: 4,      // 4 decimal places to match recipe precision
     transformer: new ColumnNumericTransformer(), // REQUIRED
   })
-  quantity: number;
-
-  @Column({
-    type: 'decimal',
-    precision: 8,
-    scale: 2,
-    transformer: new ColumnNumericTransformer(),
-  })
-  amount: number;
+  quantity: Decimal;
 }
 
-// src/cocktails/entities/cocktail-ingredient.entity.ts
+ // src/cocktails/entities/cocktail-ingredient.entity.ts
+import { Decimal } from 'decimal.js';
+
 @Entity('cocktail_ingredients')
 export class CocktailIngredient {
   @Column({
     type: 'decimal',
-    precision: 8,
-    scale: 2,
+    precision: 10, // Total digits (matches database-schema.md)
+    scale: 4,      // 4 decimal places for fractional measurements (e.g., 1/3 = 0.3333)
     transformer: new ColumnNumericTransformer(),
+    nullable: true // REQUIRED: Allows qualitative amounts like 'dash' or 'rinse'
   })
-  amount: number;
+  amount: Decimal;
 }
 ```
 
-## 📊 Why Decimal(10,2) Not Float
+## 📊 Why Decimal(10,4) Not Float
 
 ### Precision Requirements
 | Use Case | Requirement | Why Decimal |
@@ -105,21 +106,39 @@ export class CocktailIngredient {
 | Unit Conversion | Mathematical accuracy | Prevents cumulative errors |
 | Recipe Scaling | Proportional calculations | Maintains ratio integrity |
 
+## 🖼️ String Column Lengths (Image URLs)
+
+### Image URL Column Configuration
+```typescript
+// src/cocktails/entities/cocktail.entity.ts
+@Entity('cocktails')
+export class Cocktail {
+  @Column({
+    type: 'text', // Use 'text' type for unlimited length (PostgreSQL)
+    nullable: true,
+    length: 2048 // Validation constraint, not database limit
+  })
+  imageUrl: string;
+}
+```
+
+**Important**: Use `type: 'text'` not `type: 'varchar'` for image URLs to avoid PostgreSQL column length limits. The `length: 2048` is for validation only (matches UC 10.7).
+
 ### The Float Problem
 ```typescript
 // Floating-point arithmetic errors
 const floatResult = 0.1 + 0.2; // 0.30000000000000004 (WRONG)
 const decimalResult = 0.1 + 0.2; // 0.30 (CORRECT with decimal)
 
-// Inventory calculation example
-const inventory = 500.00; // ml of vodka
-const required = 166.67;  // ml for 3 cocktails
+// Inventory calculation example with 4 decimal precision
+const inventory = 500.0000; // ml of vodka (4 decimal places)
+const required = 166.6667;  // ml for 3 cocktails (1/3 = 0.3333 * 500)
 
 // With float (potential error)
 const remainingFloat = inventory - (required * 3); // Might be 0.00999999999999
 
 // With decimal (exact)
-const remainingDecimal = inventory - (required * 3); // Exactly 0.00
+const remainingDecimal = inventory - (required * 3); // Exactly 0.0000
 ```
 
 ## 🧪 Testing Decimal Transformers
@@ -148,19 +167,19 @@ describe('ColumnNumericTransformer', () => {
 });
 
 describe('UserInventory Entity', () => {
-  test('quantity is always a number', async () => {
+  test('quantity is always a Decimal instance', async () => {
     const inventory = await userInventoryRepository.findOne({
       where: { userId: 'test' }
     });
     
     // This should pass with transformer
-    expect(typeof inventory.quantity).toBe('number');
-    expect(inventory.quantity).not.toBeNaN();
+    expect(inventory.quantity).toBeInstanceOf(Decimal);
+    expect(inventory.quantity.isNaN()).toBe(false);
     
-    // Mathematical operations should work
-    const half = inventory.quantity / 2;
-    expect(typeof half).toBe('number');
-    expect(half).not.toBeNaN();
+    // Mathematical operations should work with decimal.js methods
+    const half = inventory.quantity.div(2);
+    expect(half).toBeInstanceOf(Decimal);
+    expect(half.isNaN()).toBe(false);
   });
 });
 ```
@@ -182,7 +201,7 @@ describe('UserInventory Entity', () => {
 ## ⚠️ Common Pitfalls
 
 1. **Missing Transformer**: Mathematical operations fail silently
-2. **Incorrect Precision**: `decimal(10,2)` vs `decimal(8,4)` based on use case
+ 2. **Incorrect Precision**: `decimal(10,2)` vs `decimal(10,4)` based on use case (cocktail ingredients need 4 decimal places for fractional measurements)
 3. **Null Handling**: Ensure transformer handles null/undefined
 4. **Validation**: Add validation for non-numeric strings
 5. **Testing**: Always test with edge cases (zero, negative, large numbers)

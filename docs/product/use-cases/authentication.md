@@ -21,12 +21,14 @@
 * **And** sensitive fields (like the hash) are stripped from the response payload.
 
 **UC 9.4: JWT Login & Token Generation**
-* **Given** a registered user submits correct credentials.
-* **When** `POST /auth/login` is called.
-* **Then** the system validates the password hash.
-* **And** generates a signed JWT containing the `user_id`.
-* **And** returns the Access Token in the JSON response payload (kept in Angular memory).
-* **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh` header to prevent the token from being sent to unrelated endpoints.
+ * **Given** a registered user submits correct credentials.
+ * **When** `POST /auth/login` is called.
+ * **Then** the system validates the password hash.
+ * **And** generates a signed JWT containing the `user_id`.
+ * **And** returns the Access Token in the JSON response payload (stored in localStorage for cross-tab sync - see Senior Arch Decision below).
+ * **And** sets the Refresh Token via a `Set-Cookie: refreshToken=...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth/refresh` header to prevent the token from being sent to unrelated endpoints.
+ * **Senior Architectural Decision: LocalStorage for Access Tokens**
+   * **Explicit Trade-off:** To support cross-tab state synchronization (UC 7.25) and offline operation queueing (UC 12.1), we explicitly abandon the "in-memory only" access token pattern. Access Tokens will be persisted in localStorage. We accept the XSS exposure risk, mitigating it via short 15-minute token lifespans and strict CSP headers, prioritizing multi-tab/offline UX over maximal token security.
 
 **UC 9.5: Token Expiration & Refresh**
 * **Given** a user's Access Token has expired.
@@ -34,6 +36,8 @@
 * **Then** the server rejects it with `401 Unauthorized`.
 * **And** the Angular HTTP Interceptor automatically attempts to hit the `/auth/refresh` endpoint using the HttpOnly Refresh Token cookie to maintain a seamless UX.
 * **And** returns a new Access Token in the JSON response payload.
+* **Senior Architectural Decision: Stale JWT Acceptance for Offline Queuing**
+  * **Explicit Trade-off:** We explicitly accept a deviation from standard JWT lifecycle enforcement during offline mode. To support extended offline usage (e.g., 10-day camping trips), the frontend Angular application will ignore the `exp` (expiration) claim of the Access Token only when `navigator.onLine === false`. It will continue to use the cryptographically verified `user_id` from the stale JWT payload to partition local IndexedDB storage and queue operations. We trade strict local session timeouts for uninterrupted offline UX. When the device reconnects, the Sync Service will pause the queue, execute the HttpOnly refresh token rotation, and append the new valid Access Token to the pending offline payload batch before transmitting to the server.
 
 **UC 9.6: Refresh Token Rotation & Reuse Detection**
 * **Given** a user presents a valid refresh token cookie.
@@ -63,19 +67,30 @@
 * **And** grants access to the protected admin endpoint.
 
 **UC 9.10: GDPR Account Deletion (Right to be Forgotten)**
-* **Given** an authenticated user.
-* **When** they trigger the `DELETE /users/me` endpoint.
-* **Then** the system permanently deletes their `users` row.
-* **And** cascades to delete their `user_inventory`, `favorites`, and private `cocktails`.
-* **And** anonymizes (or soft-deletes) any public Custom Cocktails they authored (setting `created_by = NULL`).
-* **And** returns a `204 No Content` to confirm deletion.
+ * **Given** an authenticated user.
+ * **When** they trigger the `DELETE /users/me` endpoint.
+ * **Then** the system permanently deletes their `users` row.
+ * **And** cascades to delete their `user_inventory`, `favorites`, and private `cocktails`.
+ * **And** anonymizes (or soft-deletes) any public Custom Cocktails they authored (setting `created_by = NULL`).
+ * **And** anonymizes AI_RECIPES by setting `created_by = NULL` (preserving AI training data while severing user association).
+ * **And** returns a `204 No Content` to confirm deletion.
+  * **Senior Architectural Decision: GDPR Soft Anonymization Limit**
+    * **Explicit Trade-off:** True GDPR "Right to be Forgotten" for user-generated text fields (recipe instructions, custom ingredient names) requires Natural Language Processing to scrub PII. For MVP, we define "Anonymization" strictly as the severing of the relational Database Foreign Key (`created_by = NULL`). We explicitly accept the risk that users may leave PII in their public recipe text, which will remain visible post-deletion. Users are responsible for editing their text before triggering account deletion.
+
+  * **Senior Architectural Decision: Retention of Anonymized Soft-Deleted Content**
+    * **Explicit Trade-off:** When a user triggers GDPR account deletion, any of their Public Cocktails that were previously "Soft Deleted" (to preserve other users' Favorites) will be stripped of their `created_by` foreign key but will remain in the database indefinitely. We explicitly accept accumulating these "ownerless ghost records" in our database to ensure that historical Favorites and Preparation Logs belonging to other users are never abruptly broken.
 
 **UC 9.11: Password Reset Flow**
-* **Given** a user forgets their password.
-* **When** they request a password reset via `POST /auth/forgot-password`.
-* **Then** the system generates a time-limited, single-use token.
-* **And** emails it to the user's registered email address.
-* **And** when the user submits the token + new password via `POST /auth/reset-password`, the system validates the token and updates the password hash.
+ * **Given** a user forgets their password.
+ * **When** they request a password reset via `POST /auth/forgot-password`.
+ * **Then** the system generates a time-limited, single-use token.
+ * **And** emails it to the user's registered email address.
+ * **And** when the user submits the token + new password via `POST /auth/reset-password`, the system validates the token and updates the password hash.
+ * **And** increments the user's `token_version` in the database to invalidate all active JWT access tokens.
+ * **And** revokes all refresh tokens for that user by setting `is_revoked = true` on all rows in the `REFRESH_TOKENS` table where `user_id = :userId`.
+ * **And** forces re-authentication on all devices for security.
+ * **Senior Architectural Decision: Eventual Consistency for Access Token Revocation**
+   * **Explicit Trade-off:** Because we prioritize API performance (O(1) stateless JWT verification) over a Redis blocklist, we explicitly accept an "Eventual Consistency" model for Access Token revocation. When a user resets their password or changes their email, their `token_version` is incremented in PostgreSQL, but their existing Access Token remains valid in the wild until its hard 15-minute expiration time (`exp`). We trade absolute immediate security lockdown for high-performance authentication.
 
 **UC 9.12: Email Verification (Optional)**
 * **Given** a new user registers.
@@ -92,19 +107,30 @@
 * **And** both can independently refresh their access tokens.
 * **And** if the user logs out from one device, only that specific refresh token is revoked.
 
-**UC 9.14: JWT Blacklisting on Logout**
-* **Given** a user logs out.
+**UC 9.14: Selective JWT Blacklisting on Standard Logout**
+* **Given** a user logs out from their current device.
 * **When** the `POST /auth/logout` endpoint is called.
-* **Then** the system increments the user's `token_version` in the database.
-* **And** future JWT validation checks will reject tokens with an outdated `token_version` claim.
-* **And** prevents replay attacks with stolen tokens.
+* **Then** the system marks *only* the specific `refresh_token` presented in the request as `is_revoked = true` in the `REFRESH_TOKENS` table.
+* **And** clears the HttpOnly cookie for that specific device.
+* **And** explicitly DOES NOT increment the user's `token_version`, preserving their active sessions on other devices (phones, tablets).
 
-**UC 9.15: Refresh Token Reuse Detection**
-* **Given** a malicious actor steals a user's refresh token.
-* **When** they attempt to use it after the legitimate user has already refreshed.
-* **Then** the system detects the reuse (old token presented after rotation).
-* **And** revokes the entire token family for that user.
-* **And** forces re-authentication on all devices for security.
+**UC 9.15: Refresh Token Reuse Detection with Grace Period**
+ * **Given** a malicious actor steals a user's refresh token.
+ * **When** they attempt to use it after the legitimate user has already refreshed.
+ * **Then** the system detects the reuse (old token presented after rotation).
+ * **And** applies a 5-second grace period with token caching: if the old token is presented within 5 seconds of rotation, the backend returns the EXACT SAME new access/refresh token pair that was generated for the first request.
+ * **And** this prevents token family chain invalidation when multiple SPA tabs race to refresh simultaneously.
+ * **And** if the old token is presented after the grace period, revokes the entire token family for that user.
+ * **And** forces re-authentication on all devices for security.
+ * **Implementation:** 
+   * **Primary (Redis)**: When Tab A refreshes, store the generated token pair in Redis with key `refresh_grace:${userId}:${oldRefreshTokenHash}` and 5-second TTL.
+   * **Fallback (PostgreSQL)**: If Redis is unavailable, the grace period is **DISABLED** and the system immediately revokes the token family on any refresh request. This prevents token family divergence where different tabs would receive different token pairs.
+   * **Rationale**: Better to force re-authentication during Redis outages than risk creating multiple valid token chains that can't be coordinated.
+ * **Redis Outage Mitigation**: 
+   * **Short Token Expiry**: Refresh tokens expire in 24 hours (not 7 days) to limit exposure window
+   * **User Notification**: Frontend shows "Service degraded - re-authentication required" message during Redis outages
+   * **Monitoring**: Track Redis outage frequency and duration to assess impact
+ * **Note:** The grace period prevents false positives from multi-tab SPA race conditions while maintaining security against actual token theft. During Redis outages, security takes precedence over UX to prevent token family divergence.
 
 **UC 9.16: Token Family Rotation on Suspicious Activity**
 * **Given** the system detects suspicious activity (e.g., refresh token reuse).
@@ -145,11 +171,18 @@
 * **Then** the system aggregates their Profile, Inventory, Favorites, and Custom Cocktails.
 * **And** returns a standardized JSON file containing all their personal data.
 
-**UC 9.22: Recalculating Ratings on GDPR Account Deletion**
-* **Given** a user has rated several public cocktails.
-* **When** they trigger the `DELETE /users/me` endpoint.
-* **Then** their individual rows in the `cocktail_ratings` pivot table are permanently deleted.
-* **And** an asynchronous background job is triggered to recalculate and update the cached `rating` average on the `COCKTAILS` table for all affected drinks.
+**UC 9.22: Bulk Rating Recalculation with Optimistic Concurrency**
+ * **Given** a user has rated several public cocktails (potentially 2,000+).
+ * **When** they trigger the `DELETE /users/me` endpoint.
+ * **Then** their individual rows in the `cocktail_ratings` pivot table are permanently deleted.
+ * **And** an asynchronous background job recalculates ratings using **batch optimistic updates**:
+   * **Batch Processing**: Process cocktails in batches of 100 to avoid transaction size issues
+   * **Atomic Updates**: Single SQL per cocktail: `UPDATE cocktails SET rating = ((rating * rating_count) - :userRating) / (rating_count - 1), rating_count = rating_count - 1 WHERE id = :cocktailId AND rating_count > 1`
+   * **Zero-Rating Handling**: If `rating_count - 1 = 0`, set `rating = NULL, rating_count = 0`
+   * **Conflict Resilience**: Exponential backoff retry for concurrent updates
+   * **Progress Tracking**: Track completion percentage for large deletions
+ * **Performance**: Avoids `SELECT FOR UPDATE` contention, enables parallel processing of batches.
+ * **Monitoring**: Logs batch completion times and retry counts for operational visibility.
 
 **UC 9.23: GDPR Anonymization of Analytics & Logs**
 * **Given** a user has 50 entries in `PREPARATION_LOGS` and 2 entries in `REPORTED_CONTENT`.
@@ -189,10 +222,7 @@
 **UC 9.27: Emergency Global Session Revocation (Admin Protocol)**
 * **Given** a suspected system-wide breach or JWT secret compromise.
 * **When** an Admin triggers the emergency global logout via `POST /admin/security/global-revoke`.
-* **Then** the system truncates the `REFRESH_TOKENS` table.
-* **And** increments a global system-wide `token_version_salt` stored in Redis.
-* **And** publishes a Redis Pub/Sub message to all backend instances with the new salt version.
-* **And** instantly invalidates every active user session across the platform.
-* **And** forces all users to re-authenticate on their next request.
+* **Then** the system increments the `global_token_salt_version` persisted in the `SYSTEM_SETTINGS` PostgreSQL table (to ensure it survives cache evictions/restarts).
+* **And** subsequently updates the cached version in Redis.
+* **And** publishes a Redis Pub/Sub message to all backend instances to instantly invalidate every active user session across the platform.
 * **And** logs the emergency action with full admin audit trail including IP, timestamp, and reason.
-* **And** sends security alerts to all admin users about the global revocation event.

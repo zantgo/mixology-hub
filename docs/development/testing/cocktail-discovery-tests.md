@@ -3,28 +3,33 @@
 **Example TDD for Unified Pagination (UC 2.6):**
 ```typescript
 describe('CocktailAggregatorService - Unified Pagination', () => {
-  it('should correctly merge local and external results for pagination', async () => {
+  it('should correctly merge local and external results for cursor pagination', async () => {
     const aggregatorService = new CocktailAggregatorService();
     
     // Mock: 2 local results, 50 external results
     jest.spyOn(aggregatorService, 'searchLocal').mockResolvedValue({
-      data: [{ id: 'local1' }, { id: 'local2' }],
+      data: [{ id: 'local1', createdAt: '2026-04-08T10:00:00.000Z' }, { id: 'local2', createdAt: '2026-04-08T09:00:00.000Z' }],
+      nextCursor: null,
       hasMore: false
     });
     
     jest.spyOn(aggregatorService, 'searchExternal').mockResolvedValue(
-      Array(50).fill(null).map((_, i) => ({ id: `external${i}` }))
+      Array(50).fill(null).map((_, i) => ({ id: `external${i}`, createdAt: `2026-04-08T08:${59-i}:00.000Z` }))
     );
     
-    // Page 1: limit=10
-    const page1 = await aggregatorService.searchUnified('margarita', { limit: 10, page: 1 });
+    // First request: limit=10, no cursor
+    const page1 = await aggregatorService.searchUnified('margarita', { limit: 10 });
     expect(page1.data).toHaveLength(10);
     expect(page1.data[0].id).toBe('local1');
     expect(page1.data[1].id).toBe('local2');
     expect(page1.data[2].id).toBe('external0'); // First 8 external results
+    expect(page1.nextCursor).toBeTruthy(); // Should have a cursor for next page
     
-    // Page 2: should get external results 8-17
-    const page2 = await aggregatorService.searchUnified('margarita', { limit: 10, page: 2 });
+    // Second request: use cursor from first page
+    const page2 = await aggregatorService.searchUnified('margarita', { 
+      limit: 10, 
+      cursor: page1.nextCursor 
+    });
     expect(page2.data).toHaveLength(10);
     expect(page2.data[0].id).toBe('external8'); // Continues from where page 1 left off
   });

@@ -174,7 +174,7 @@ export class MeasureParserService {
 
 #### 🚀 Performance Optimization (Future Consideration)
 
-For production-scale deployments with large ingredient catalogs, the current two-step approach (SQL filter + in-memory math) could become a bottleneck. Two database-centric optimizations are available:
+For production-scale deployments with large ingredient catalogs, the current two-step approach (SQL filter + in-memory math) could become a bottleneck, potentially exceeding the 100ms response time requirement (UC 11.1) for users with highly restricted inventories. Two database-centric optimizations are available:
 
 1. **PostgreSQL Materialized Views:** Pre-compute unit-converted inventory quantities in a materialized view that refreshes on inventory changes. This moves the math to the database layer.
 

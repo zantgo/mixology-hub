@@ -131,36 +131,89 @@ test.describe('AI Bartender Flow', () => {
   });
 });
 
-### Deterministic AI Testing Strategy
+### Deterministic AI Testing Strategy with WireMock
+
+**Architectural Decision:** E2E tests must NOT mock `/api/ai/generate` at the browser level using Playwright's `page.route()`. This bypasses backend validation, DTO parsing, prompt injection defenses, and AI adapter logic. Instead:
+
+1. **WireMock Server:** Run a local WireMock instance during CI/CD that simulates the external AI API
+2. **Environment Configuration:** Set `AI_API_URL=http://localhost:8081` (WireMock) instead of real AI provider
+3. **Backend Integration:** Backend makes actual HTTP requests to WireMock, executing full controller logic
+4. **Deterministic Responses:** WireMock returns predefined responses for consistent testing
+
+**WireMock Setup:**
+```typescript
+// wiremock/mappings/ai-generate.json
+{
+  "request": {
+    "method": "POST",
+    "url": "/v1/chat/completions",
+    "headers": {
+      "Authorization": {
+        "contains": "Bearer"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "choices": [{
+        "message": {
+          "content": "{\"name\": \"Mocked Vodka Drink\", \"ingredients\": [{\"name\": \"vodka\", \"measure\": \"2 oz\"}], \"instructions\": \"Test instructions\"}"
+        }
+      }]
+    }
+  }
+}
+```
+
+**CI/CD Configuration:**
+```yaml
+# docker-compose.test.yml
+services:
+  wiremock:
+    image: wiremock/wiremock:latest
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./wiremock/mappings:/home/wiremock/mappings
+      - ./wiremock/__files:/home/wiremock/__files
+  
+  backend:
+    environment:
+      - AI_API_URL=http://wiremock:8080
+      - AI_API_KEY=mock-key-for-testing
+```
 ```typescript
 test.describe('E2E - AI Determinism & Cost Control', () => {
-  test('Should mock LLM network requests during CI/CD execution', async ({ page }) => {
-    // Intercept outbound network requests to the AI provider
-    await page.route('**/api/ai/generate', async route => {
-      const json = {
-        id: "mock-uuid",
-        prompt: "Ingredients: Vodka",
-        generated_recipe: {
-          name: "Mocked Vodka Drink",
-          ingredients: [{ name: "vodka", measure: "2 oz" }],
-          instructions: "Test instructions"
-        }
-      };
-      await route.fulfill({ json });
-    });
-
+  test('Should use WireMock for AI API during CI/CD execution', async ({ page }) => {
+    // DO NOT intercept /api/ai/generate - this bypasses backend validation
+    // Instead, configure the backend's AI_API_URL environment variable to point to WireMock
+    // WireMock runs locally and provides deterministic responses
+    
     await page.goto('/ai-bartender');
     await page.fill('textarea[name="ingredients"]', 'Vodka');
     await page.click('button:has-text("Generate Recipe")');
     
-    // Assert against the mocked deterministic response
+    // Wait for backend to process request (hits WireMock, not real AI API)
+    await page.waitForResponse(response => 
+      response.url().includes('/api/ai/generate') && response.status() === 200
+    );
+    
+    // Assert against the deterministic response from WireMock
     await expect(page.locator('.recipe-name')).toContainText('Mocked Vodka Drink');
   });
 
   test('Should handle AI API timeouts gracefully', async ({ page }) => {
-    // Mock a timeout response
-    await page.route('**/api/ai/generate', async route => {
-      await route.abort('timedout');
+    // Configure WireMock to simulate timeout for this test
+    // DO NOT intercept /api/ai/generate at browser level
+    // WireMock configuration: delay response by 30 seconds to trigger backend timeout
+    
+    await page.goto('/ai-bartender');
+    await page.fill('textarea[name="ingredients"]', 'Vodka');
+    await page.click('button:has-text("Generate Recipe")');
+    
+    // Assert timeout UI is shown
+    await expect(page.locator('.error-message')).toContainText('Request timed out');
     });
 
     await page.goto('/ai-bartender');

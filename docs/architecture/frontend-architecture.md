@@ -153,3 +153,13 @@ Creating a cocktail involves complex, dynamic data structures (e.g., a recipe ca
 We utilize **Angular Reactive Forms** with `FormArray` to handle this.
 
 - **Why?** Reactive forms provide synchronous access to form state, making it easy to dynamically add/remove ingredient rows in the UI while maintaining strict validation rules (e.g., ensuring `measure` and `ingredientId` are provided before enabling the "Save" button).
+
+## 🚫 Cross-Device Real-Time Sync Limitations
+
+**Senior Architectural Decision: Absence of Cross-Device Real-Time Sync**
+**Explicit Trade-off:** While cross-tab synchronization works perfectly via BroadcastChannel API (UC 7.25), cross-device synchronization for shared accounts (e.g., two roommates using the same login on different phones) will experience "phantom" stale state. We explicitly accept that one user will not see the other's real-time inventory deductions until a hard refresh or state-mutating action occurs. We trade perfect multi-device real-time parity for backend architectural simplicity by omitting WebSockets/SSE in the MVP.
+
+## 🔢 HTML Input Precision Boundary
+
+**Senior Architectural Decision: HTML Input Precision Boundary**
+**Explicit Trade-off:** Standard HTML `<input type="number">` elements inherently cast inputs to IEEE 754 floats. To strictly maintain `decimal.js` precision from end-to-end, all fractional ingredient inputs in Angular Reactive Forms MUST use `<input type="text" inputmode="decimal">`. We accept the minor UX trade-off of losing the native browser "spinner" arrows in exchange for preventing silent float corruption before the data reaches our math engine.

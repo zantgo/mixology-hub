@@ -34,14 +34,15 @@
 * **And** unifies and returns the results.
 
 **UC 2.6: Unified Pagination Handling**
-* **Given** a unified search where the local DB has 2 results and the external API has 50 results.
-* **When** the user requests `page=1&limit=10`.
-* **Then** the Aggregator Service:
-  * **Local Database:** Uses optimized offset pagination with `WHERE id > last_id` for performance (cursor-like behavior)
-  * **External API:** Uses offset pagination with TheCocktailDB's `page` parameter
-  * **Combination:** Correctly combines 2 local and 8 external results
-* **And** preserves the offset so `page=2` correctly fetches external items 9-18.
-* **And** caches pagination state in Redis to maintain consistency across requests.
+ * **Given** a unified search where the local DB has 2 results and the external API has 50 results.
+ * **When** the user requests `limit=10`.
+ * **Then** the Aggregator Service:
+    * **Local Database:** Uses cursor-based pagination with `WHERE (created_at < :cursorTimestamp OR (created_at = :cursorTimestamp AND id < :cursorId))`
+    * **External API:** Uses offset-based pagination by caching full results in Redis and slicing based on array index position (not cursor ID)
+    * **Combination:** Correctly combines 2 local and 8 external results using array indexing over the Redis cache
+ * **And** returns a `nextCursor` that is a Base64 encoded JSON object containing both the local database timestamp/UUID and the external API array index (e.g., `eyJ0IjoiMjAyNi...`).
+ * **And** caches pagination state in Redis to maintain consistency across requests.
+ * **Architectural Decision:** For unified search with mixed ID types (UUID vs integer strings), use composite cursors encoded as Base64 JSON to track both local cursor state and external API offset simultaneously.
 
 **UC 2.7: Manual Custom Cocktail Creation**
 * **Given** a user wants to add their family's secret Margarita recipe.
@@ -59,10 +60,11 @@
 * **And** successfully updates the relational mappings and cocktail details.
 
 **UC 2.9: Deleting a Custom Cocktail (Dangling Local Favorites)**
-* **Given** User A created a cocktail, and User B added it to their Favorites.
-* **When** User A issues a `DELETE /cocktails/:id` request.
-* **Then** the cocktail is deleted (or soft-deleted via `is_deleted` flag).
-* **And** the database utilizes a `CASCADE DELETE` (or the Aggregator handles it gracefully) so User B's Favorite list doesn't crash.
+ * **Given** User A created a cocktail, and User B added it to their Favorites.
+ * **When** User A issues a `DELETE /cocktails/:id` request.
+ * **Then** the cocktail is soft-deleted via `is_deleted` flag (UC 10.4).
+ * **And** the Aggregator Service filters out soft-deleted cocktails from User B's Favorites list, showing "Recipe deleted by author" instead of crashing.
+ * **Note:** No CASCADE DELETE is used since soft deletion preserves the Favorites relationship while hiding the cocktail.
 
 **UC 2.10: Custom Cocktail Privacy Scoping**
 * **Given** a user creates a custom cocktail and sets `is_public: false`.
@@ -142,20 +144,26 @@
 * **When** the user clicks "Edit Recipe" to change an ingredient.
 * **Then** the backend intercepts the request and creates a *new* local `Cocktails` record.
 * **And** sets `source: 'local'`, `parent_external_id: '11000'`, and `created_by: user_id`.
+* **Senior Architectural Decision: Lineage Tracking for Forked Cocktails**
+  * **Explicit Trade-off:** When users edit external API cocktails, we create local forks rather than modifying the original. The `parent_external_id` field preserves lineage, allowing us to track which external cocktail inspired each local variant. We trade database simplicity (no need for complex versioning systems) for clear attribution and the ability to analyze popular source cocktails.
 
 **UC 2.23: Sorting Unified Search by Makeability**
-* **Given** the user searches for "Martini" and gets 10 results.
-* **When** the frontend requests the results with `sort=makeable`.
-* **Then** the Aggregator Service passes the results through the `MakeableCocktailsService`.
-* **And** pushes the cocktails the user has 100% of the ingredients for to the top of the array.
-* **And** pushes the "Missing 1 ingredient" to the middle, and completely unmakeable to the bottom.
+ * **Given** the user searches for "Martini" and gets 10 results.
+ * **When** the frontend requests the results with `sort=makeability`.
+ * **Then** the Aggregator Service passes the results through the `MakeableCocktailsService`.
+ * **And** pushes the cocktails the user has 100% of the ingredients for to the top of the array.
+ * **And** pushes the "Missing 1 ingredient" to the middle, and completely unmakeable to the bottom.
+ * **Senior Architectural Decision: Makeability Sorting Exclusion for External APIs**
+   * **Explicit Trade-off:** Because external API cocktails require expensive on-the-fly NLP trigram resolution to map string measurements to local UUIDs (UC 3.21), sorting a Unified Search by makeability creates a severe CPU and Database bottleneck. We explicitly dictate that when `sort=makeability` is applied to Unified Search, the CocktailAggregatorService will automatically drop all External API results, returning ONLY Local Database cocktails. We trade search comprehensiveness for guaranteed server stability under heavy Math/NLP loads.
 
 **UC 2.24: Aggregator Pagination State via Redis**
 * **Given** an external API returns an unpaginated array of 50 cocktails.
 * **When** the Aggregator maps this to internal DTOs.
-* **Then** the Aggregator caches the *entire unified array* in Redis under the `search_cursor_key`.
-* **And** subsequent cursor requests pull directly from the cached Redis array using `slice(offset, offset + limit)` rather than hitting the database or external API again.
+* **Then** the Aggregator caches the external API results in Redis under the `search_cursor_key`.
+* **And** subsequent cursor requests pull external results directly from the cached Redis array using `slice(offset, offset + limit)` rather than hitting the external API again.
 * **And** implements TTL expiration (e.g., 5 minutes) to prevent stale search results.
+* **Senior Architectural Decision: Asymmetric Aggregator Caching**
+  * **Explicit Trade-off:** The backend cannot cache an "entire unified array" because the local PostgreSQL database utilizes strict cursor pagination (fetching only 10 rows at a time). We explicitly mandate an Asymmetric Caching Strategy: The Redis cache will ONLY store the raw, unpaginated JSON payloads returned by the External API (TheCocktailDB), which are safely bounded (usually <100 items). Local database results are NEVER cached in this search array and rely entirely on live PostgreSQL cursor performance. We trade slightly higher database read volume for the prevention of massive Redis memory leaks.
 
 **UC 2.25: Fuzzy Search / Typo Tolerance**
 * **Given** a user searches for "Margaritta" (typo).
@@ -190,21 +198,28 @@
 * **And** stops processing when it encounters a `null` or empty string.
 * **And** successfully outputs a clean `ingredients: []` array containing only valid entries.
 
-**UC 2.30: Rating a Cocktail**
-* **Given** a user views a cocktail they've prepared or favorited.
-* **When** they submit a 1-5 star rating via `POST /cocktails/:id/rate`.
-* **Then** the system checks if the cocktail exists locally:
-  * **If local cocktail:** Inserts or updates their row in the `COCKTAIL_RATINGS` pivot table.
-  * **If external cocktail:** Auto-forks the external cocktail to create a local copy with `source='api'` and `external_id` preserved, then rates the forked copy.
-* **And** triggers an asynchronous background job to recalculate and update the cached `rating` average on the `COCKTAILS` table.
-* **And** returns the updated average rating in the response.
+**UC 2.30: Rating a Cocktail with Optimistic Concurrency**
+ * **Given** a user views a cocktail they've prepared or favorited.
+ * **When** they submit a 1-5 star rating via `POST /cocktails/:id/rate`.
+ * **Then** the system checks if the cocktail exists locally:
+   * **If local cocktail:** Inserts or updates their row in the `COCKTAIL_RATINGS` pivot table and recalculates the cached `rating` average and `rating_count` on the `COCKTAILS` table.
+   * **If external cocktail:** Creates a "Shadow Record" in the `EXTERNAL_COCKTAIL_RATINGS` table with `external_id` and `user_id`, without forking the cocktail into the local `COCKTAILS` table.
+  * **And** uses **optimistic concurrency control** for local cocktails:
+    * **Atomic Update**: Single SQL statement calculates new average: `UPDATE cocktails SET rating = COALESCE(((rating * rating_count) + :newRating) / NULLIF(rating_count + 1, 0), :newRating), rating_count = rating_count + 1 WHERE id = :cocktailId`
+    * **NULL Handling**: Uses `COALESCE` and `NULLIF` to handle first rating (when `rating` is NULL and `rating_count` is 0)
+    * **Conflict Handling**: If concurrent update detected (row count = 0), retry with exponential backoff
+    * **No Row Locking**: Avoids `SELECT FOR UPDATE` to prevent contention
+ * **And** returns the updated average rating and rating count in the response for local cocktails, or the user's personal rating for external cocktails.
+ * **Senior Architectural Decision: Shadow Rating Aggregation for External APIs**
+   * **Explicit Trade-off:** We cannot fork external cocktails per-user strictly for ratings without fragmenting the community score. We explicitly dictate that when a user rates an external cocktail, the system DOES NOT fork the cocktail into the `COCKTAILS` table. Instead, it creates a "Shadow Record" in a new `EXTERNAL_COCKTAIL_RATINGS` table. We trade unified table architecture for the ability to accurately aggregate and display community scores for public API drinks without polluting our local database with thousands of identical clones.
 
-**UC 2.31: Updating a Rating**
+**UC 2.31: Updating a Rating with Atomic Recalculation**
 * **Given** a user has previously rated a cocktail 4 stars.
 * **When** they change their rating to 5 stars via `POST /cocktails/:id/rate`.
 * **Then** the system performs an UPSERT on the `COCKTAIL_RATINGS` table.
-* **And** recalculates the average rating (removing the old 4, adding the new 5).
-* **And** updates the cached `rating` column on the `COCKTAIL_RATINGS` table atomically.
+  * **And** atomically recalculates the average: `UPDATE cocktails SET rating = GREATEST(0.00, LEAST(5.00, ((rating * rating_count) - :oldRating + :newRating) / NULLIF(rating_count, 0))) WHERE id = :cocktailId`
+* **And** uses optimistic concurrency with retry logic for concurrent updates.
+* **Note**: Rating count stays the same (user updating, not adding new rating).
 
 **UC 2.32: Handling External API Image Link Rot**
 * **Given** the user views an external cocktail from TheCocktailDB where the `strDrinkThumb` URL has expired or returns a 403/404.

@@ -82,7 +82,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"2026-04-08T10:30:00.000Z_abc123\",\n  \"hasMore\": true,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": true,\n  \"limit\": 10\n}"
             }
           ]
         },
@@ -231,7 +231,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"2026-04-08T10:30:00.000Z_def456\",\n  \"hasMore\": false,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": false,\n  \"limit\": 10\n}"
             }
           ]
         },
@@ -247,7 +247,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": 500,\n  \"unit\": \"ml\"\n}",
+              "raw": "{\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": \"500\",\n  \"unit\": \"ml\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -274,7 +274,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": 500,\n  \"unit\": \"ml\"\n}"
+                  "raw": "{\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": \"500\",\n  \"unit\": \"ml\"\n}"
                 },
                 "url": {
                   "raw": "{{base_url}}/user-inventory",
@@ -292,7 +292,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"id\": \"123e4567-e89b-12d3-a456-426614174001\",\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": 500,\n  \"unit\": \"ml\",\n  \"updatedAt\": \"2026-04-08T10:30:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"123e4567-e89b-12d3-a456-426614174001\",\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": \"500\",\n  \"unit\": \"ml\",\n  \"updatedAt\": \"2026-04-08T10:30:00.000Z\"\n}"
             }
           ]
         }

@@ -8,31 +8,38 @@
 * **And** the user's inventory is deducted to `440.86 ml`.
 * **And** the transaction commits successfully.
 
-**UC 4.2: Failing to prepare due to insufficient stock (Rollback)**
+**UC 4.2: Two-Phase Preparation with Insufficient Stock**
 * **Given** the user has `50 ml` of "Whiskey".
 * **And** attempts to prepare a drink requiring `60 ml`.
 * **When** the `POST /cocktails/:id/prepare` endpoint is called.
-* **Then** the validation fails in the Math Engine.
-* **And** the database transaction rolls back automatically to prevent negative numbers.
-* **And** the inventory remains exactly at `50 ml`.
-* **And** the API returns a `400 Bad Request`.
+* **Then** the system executes two-phase preparation:
+  * **Phase 1**: Creates preparation log with `inventory_status: 'pending'`
+  * **Phase 2**: Attempts inventory deduction, which fails validation in Math Engine
+* **And** updates preparation log with `inventory_status: 'failed_insufficient'` and error details
+* **And** the inventory remains at `50 ml` (no deduction).
+* **And** the API returns `201 Created` with preparation log ID and warning about insufficient inventory.
+* **And** the frontend shows: "Cocktail prepared! (Note: Inventory insufficient for full deduction)"
 
-**UC 4.3: Preventing Negative Inventory via Concurrent Requests (Race Condition)**
+**UC 4.3: Race Condition Handling with Two-Phase Preparation**
 * **Given** the user has exactly `50 ml` of "Vodka" left.
 * **And** a cocktail requires `30 ml` of Vodka.
 * **When** the user inadvertently double-clicks, sending two simultaneous `POST /cocktails/:id/prepare` requests.
-* **Then** the database row-level lock (or transaction isolation) processes them sequentially.
-* **And** the first transaction succeeds, deducting `30 ml` (leaving `20 ml`).
-* **And** the second transaction fails validation, triggering an automatic rollback.
+* **Then** both requests create preparation logs with `inventory_status: 'pending'`.
+* **And** the database row-level lock processes inventory deductions sequentially:
+  * First transaction succeeds, deducting `30 ml` (leaving `20 ml`), updates log to `inventory_status: 'deducted'`
+  * Second transaction fails validation, updates log to `inventory_status: 'failed_insufficient'`
+* **And** both preparation logs exist for analytics and undo history.
 * **And** the database is protected from dropping to `-10 ml`.
 
-**UC 4.4: Undoing a Preparation (Accidental Click)**
-* **Given** the user accidentally clicked "Prepare" on a Martini.
-* **And** `59.14 ml` of Gin was just deducted, creating a preparation log entry.
-* **When** the user clicks "Undo" within a reasonable UI timeframe (triggering `POST /preparations/:log_id/undo`).
-* **Then** a transaction adds the exact required amounts back to the user's inventory.
-* **And** if the ingredient row was manually deleted by the user after reaching zero (not automatically deleted), the system recreates the row with the restored quantity.
-* **And** marks the preparation log as undone.
+**UC 4.4: Undoing a Preparation with Inventory-Aware Logic**
+ * **Given** the user accidentally clicked "Prepare" on a Martini.
+ * **And** a preparation log exists with `inventory_status: 'deducted'` (59.14 ml of Gin was deducted).
+ * **When** the user clicks "Undo" within a reasonable UI timeframe (triggering `POST /preparations/:log_id/undo`).
+ * **Then** a transaction adds the exact required amounts back to the user's inventory.
+ * **And** if the ingredient row was manually deleted by the user after reaching zero (not automatically deleted), the system recreates the row with the restored quantity.
+ * **And** marks the preparation log as undone.
+ * **Special Case - Failed Inventory**: If preparation log has `inventory_status: 'failed_insufficient'`, undo only marks log as undone (no inventory adjustment needed).
+ * **Special Case - Admin Ingredient Deletion**: If an admin hard-deleted the ingredient from the global `INGREDIENTS` catalog (UC 1.20), the undo transaction gracefully skips restoring that specific ingredient rather than failing with a Foreign Key Constraint Violation. The preparation log is still marked as undone, and other ingredients are restored normally.
 
 **UC 4.5: Batch Preparation Deduction**
 * **Given** the user verifies they can make 4 "Mojitos" (UC 3.7).
@@ -54,6 +61,8 @@
 * **Given** a user prepared a cocktail 20 minutes ago.
 * **When** they attempt to trigger the Undo endpoint.
 * **Then** the system rejects it with a `TimeLimitExceeded` error (strictly enforcing the 15-minute window).
+* **Senior Architectural Decision: Token Refresh Grace Period for Undo Boundaries**
+  * **Explicit Trade-off:** Because our Access Token lifespan (15 minutes) exactly matches the Preparation Undo window (15 minutes), a mid-flight token refresh cycle (UC 9.5) can artificially delay an Undo request past the deadline. To prevent this race condition, the backend TimeLimitExceeded validator will internally allow a 16-minute window (a 60-second hidden grace period) to account for network latency and JWT rotation cycles, while the UI strictly advertises 15 minutes.
 
 **UC 4.12: Undoing a Batch Preparation**
 * **Given** a user prepared a batch of 4 Mojitos (deducting `8 oz` of Rum).
@@ -63,12 +72,13 @@
 * **And** maintains ACID consistency across all ingredients in the batch.
 
 **UC 4.13: Undoing preparation after manual ingredient hard-delete**
-* **Given** the user prepares a cocktail, deducting `2 oz` of Vodka.
-* **And** the user immediately goes to their inventory and **manually deletes** the entire "Vodka" row.
-* **When** the user clicks "Undo" on the cocktail preparation within the 15-minute window.
-* **Then** the `restoreInventory` transaction detects the missing row.
-* **And** safely re-creates the Vodka row with the exact deducted amount (`2 oz`).
-* **And** ensures the undo works even if the user manually deleted the ingredient after the preparation.
+ * **Given** the user prepares a cocktail, deducting `2 oz` of Vodka.
+ * **And** the user immediately goes to their inventory and **manually deletes** the entire "Vodka" row.
+ * **When** the user clicks "Undo" on the cocktail preparation within the 15-minute window.
+ * **Then** the `restoreInventory` transaction detects the missing row.
+ * **And** safely re-creates the Vodka row with the exact deducted amount (`2 oz`).
+ * **And** ensures the undo works even if the user manually deleted the ingredient after the preparation.
+ * **Edge Case - Global Ingredient Deletion**: If an admin hard-deleted "Vodka" from the global `INGREDIENTS` catalog (UC 1.20), the undo transaction gracefully skips restoring this ingredient and logs a warning. The preparation log is marked as undone, and other ingredients are restored normally.
 
 **UC 4.14: Preparing External Cocktails On-The-Fly**
 * **Given** the user discovers a cocktail from TheCocktailDB.
@@ -110,13 +120,13 @@
 * **And** ignores the missing Lime without throwing a `400 Bad Request`.
 * **And** the transaction succeeds with partial deduction.
 
-**UC 4.19: Idempotency of the Undo Action**
-* **Given** a preparation log (`log_id: 123`) has already been successfully undone (`undone = true`).
-* **When** a second concurrent or subsequent `POST /preparations/123/undo` request arrives.
-* **Then** the database detects the `undone = true` state.
-* **And** returns a `409 Conflict` (not `200 OK`) without adding the inventory back a second time.
-* **Architectural Decision:** Returning `409 Conflict` explicitly tells the UI "This was already handled," preventing the frontend from accidentally incrementing visual stock twice if it relies on success responses. A `200 OK` would imply the action just succeeded, potentially causing UI state inconsistencies.
-* **And** prevents the user from artificially inflating their inventory.
+**UC 4.19: Idempotency of the Undo Action with Idempotency-Key**
+ * **Given** a preparation log (`log_id: 123`) has already been successfully undone (`undone = true`).
+ * **When** a second concurrent or subsequent `POST /preparations/123/undo` request arrives with the same `Idempotency-Key` header.
+ * **Then** the backend checks the Redis idempotency cache using the unified format defined in ADR 0012: `idempotency:v2:{userId}:preparation:undo:{UUID}`.
+ * **And** returns the cached `200 OK` response (consistent with UC 4.21 pattern) without adding the inventory back a second time.
+ * **Architectural Alignment:** The Redis caching layer strictly utilizes the unified format defined in ADR 0012 (`idempotency:v2:{userId}:{operation}:{uuid}`) rather than raw HTTP paths, ensuring consistency between online clicks and offline sync batch processing.
+ * **And** prevents the user from artificially inflating their inventory through retries or double-clicks.
 
 **UC 4.20: Preparation Undo vs. Mutated Recipes**
 * **Given** a user prepares a cocktail, and the exact deduction is logged in the `PREPARATION_LOGS.deducted_ingredients` JSONB snapshot.
@@ -126,9 +136,14 @@
 * **And** completely ignores the current state of the `COCKTAILS` table.
 * **And** ensures the undo works even if the cocktail no longer exists or has different ingredient requirements.
 
-**UC 4.21: Idempotency Keys for Preparation (Network Retries)**
-* **Given** a client sends a `POST /cocktails/:id/prepare` request with an `Idempotency-Key` header (e.g., a UUID generated on button click).
-* **When** a network timeout occurs and the client automatically retries the exact same request.
-* **Then** the backend checks the Redis idempotency cache using the `Idempotency-Key`.
-* **And** returns the cached `200 OK` response without deducting the inventory a second time.
-* **And** prevents double-deduction from mobile network retries while maintaining exactly-once semantics.
+**UC 4.21: Unified Idempotency System for State-Mutating Operations**
+ * **Given** a client sends any state-mutating request (POST, PUT, PATCH, DELETE) with an idempotency identifier.
+ * **When** a duplicate request arrives (network retry, double-click, offline sync).
+ * **Then** the Unified Idempotency Service checks:
+    * **Primary**: Redis cache for performance (fast path)
+    * **Fallback**: PostgreSQL `unified_idempotency` table as source of truth
+    * **Format**: `idempotency:v2:{userId}:{operation}:{uuid}` as defined in ADR 0012
+ * **And** returns the cached response without re-executing the operation.
+ * **And** prevents double-deduction/inconsistent state while maintaining exactly-once semantics.
+ * **Architecture**: PostgreSQL UNIQUE constraint guarantees no duplicates; Redis cache provides performance; automatic cache warming on startup.
+ * **Security**: Idempotency keys are namespaced by user ID and operation to prevent cross-user attacks.

@@ -24,19 +24,25 @@
 * **Then** the backend validates a CSRF token (or relies on strict `SameSite=Strict` cookie policies + CORS origin validation).
 * **And** rejects unauthorized automated requests to prevent session hijacking.
 
-**UC 13.5: SSRF and Malicious Image URL Protection**
-* **Given** a malicious user submits a custom cocktail with an `image_url` pointing to an internal IP (e.g., `http://169.254.169.254` or `javascript:alert(1)`).
-* **When** the `POST /cocktails` endpoint receives the request.
-* **Then** the validation layer strictly enforces `http://` or `https://` protocols.
-* **And** the frontend sanitizes the URL via Angular's `DomSanitizer` before binding to the `src` attribute.
-* **And** the backend never fetches the URL directly (preventing SSRF).
+**UC 13.5: SSRF and Client IP Leakage Prevention via Secure Image Proxy**
+ * **Given** a user submits a custom cocktail with an `image_url`.
+ * **Then** the validation layer strictly enforces the `https://` protocol (rejecting `http://`, `file://`, `javascript:`).
+ * **And** the backend DNS resolver checks the hostname to explicitly reject routing to internal or private IP ranges (e.g., `10.x.x.x`, `127.0.0.1`, `169.254.169.254`, `localhost`).
+ * **And** the backend Image Proxy Service fetches the image through a secure proxy with:
+   * **Content Validation**: Validates image format, size (max 5MB), and content type
+   * **Security Controls**: Timeouts (5s), redirect limits (2), and request filtering
+   * **Caching**: 24-hour cache to improve performance and reduce external requests
+   * **Abuse Prevention**: Rate limiting per user and per domain
+ * **And** the frontend loads images via the secure proxy endpoint (`/api/images/proxy`) to prevent client IP leakage to external domains.
+ * **And** users are shown a privacy notice explaining that their IP address is protected when viewing external images.
+ * **And** if the proxy fails, the frontend shows a secure fallback image with appropriate error messaging.
 
-**UC 13.6: Pagination Deep-Offset DoS Prevention**
-* **Given** a malicious script attempts to scrape the database by requesting `limit=100&page=999999`.
-* **When** the request hits the Aggregator or Inventory service.
-* **Then** the backend enforces a hard cap on maximum pagination depth (e.g., max 100 pages).
-* **And** returns a `400 Bad Request` to prevent high CPU/Memory load from massive offset scans.
-* **And** implements cursor-based pagination where possible to avoid offset-based performance degradation.
+**UC 13.6: Pagination Cursor-Based DoS Prevention**
+ * **Given** a malicious script attempts to scrape the database by requesting deep pagination.
+ * **When** the request hits the Aggregator or Inventory service.
+ * **Then** the backend enforces cursor-based pagination which inherently prevents deep offset performance issues.
+ * **And** implements rate limiting on cursor generation to prevent excessive pagination requests.
+ * **And** validates cursor format to prevent malformed cursor attacks.
 
 **UC 13.7: CORS Policy Enforcement**
 * **Given** a malicious site (`http://evil.com`) attempts to make an AJAX request to the MixologyHub API.
@@ -67,9 +73,16 @@
 * **And** the reporting user receives confirmation that their report has been received and will be reviewed.
 
 **UC 13.11: Admin Moderation of Reported Content**
-* **Given** a user has reported a public cocktail (creating a `REPORTED_CONTENT` row).
-* **When** an Admin reviews it and calls `PATCH /admin/reports/:id/resolve` with action `delete_cocktail`.
-* **Then** the cocktail is hard-deleted or soft-deleted.
-* **And** the report status is updated to `action_taken`.
-* **And** the system automatically emails the reporting user thanking them, and the offending author with a warning.
-* **And** maintains audit trail of moderation actions for compliance.
+ * **Given** a user has reported a public cocktail (creating a `REPORTED_CONTENT` row).
+ * **When** an Admin reviews it and calls `PATCH /admin/reports/:id/resolve` with action `delete_cocktail`.
+ * **Then** the cocktail is hard-deleted (not soft-deleted) using PostgreSQL's ON DELETE CASCADE.
+ * **And** the report status is updated to `action_taken`.
+ * **And** the system automatically emails the reporting user thanking them, and attempts to email the offending author with a warning.
+ * **And** maintains audit trail of moderation actions for compliance.
+  * **Senior Architectural Decision: Admin Hard Delete vs. Analytics Preservation**
+    * **Explicit Trade-off:** While user Favorites will be ruthlessly eradicated via `ON DELETE CASCADE` when an Admin hard-deletes toxic content, `PREPARATION_LOGS` will explicitly use `ON DELETE SET NULL`. We accept that orphaned preparation logs containing the offending `cocktailNameSnapshot` will remain in the database for up to 90 days (until cleaned by cron jobs). We trade immediate, absolute data eradication for the preservation of global inventory depletion metrics and system-wide usage analytics.
+  * **Senior Architectural Decision: Anonymized Author Moderation Blackhole**
+    * **Explicit Trade-off:** When an Administrator takes punitive action against a reported Public Cocktail, the system attempts to email a warning to the author. We explicitly acknowledge that if the author has previously deleted their account under GDPR (UC 9.10, setting `created_by = NULL`), this notification step is impossible. The moderation service must gracefully catch this NULL reference, skip the warning email, and proceed with the cocktail deletion. We trade complete moderation feedback loops for strict GDPR compliance.
+ * **When** an Admin reviews a reported external API cocktail and selects "Hide Content".
+ * **Then** the `external_id` is added to the `HIDDEN_EXTERNAL_COCKTAILS` blocklist.
+ * **And** the `CocktailAggregatorService` automatically filters this ID out of all future unified search results.

@@ -26,22 +26,26 @@ describe('IngredientService - Synonym Resolution', () => {
 **Example TDD for Database Integrity - UUID Collision & Idempotency:**
 ```typescript
 describe('Database Integrity - UUID Collision & Idempotency', () => {
-  it('should safely fail open if Redis is down during Idempotency check', async () => {
+  it('should fallback to PostgreSQL if Redis is down during Idempotency check', async () => {
     const prepService = new CocktailPreparationService();
     const redisService = new RedisService();
+    const idempotencyRepo = new IdempotencyRepository();
     
     // Redis crashes
     jest.spyOn(redisService, 'get').mockRejectedValue(new Error('Redis connection lost'));
     prepService.redisService = redisService;
+    prepService.idempotencyRepo = idempotencyRepo;
     
+    // Mock PostgreSQL fallback
+    const dbSpy = jest.spyOn(idempotencyRepo, 'findByKey').mockResolvedValue(null);
     const inventorySpy = jest.spyOn(prepService.inventoryService, 'deductInventory').mockResolvedValue(true);
     
-    // The system should catch the Redis error, log a warning, and proceed with the transaction
-    // (Failing OPEN to ensure the app still works if the cache dies)
+    // Should fallback to PostgreSQL, NOT fail open
     await expect(
       prepService.prepareCocktail('cocktail123', 1, 'userA', 'idemp-key-1')
     ).resolves.toBeDefined();
     
+    expect(dbSpy).toHaveBeenCalled(); // Proves PostgreSQL fallback was used
     expect(inventorySpy).toHaveBeenCalled();
   });
 
