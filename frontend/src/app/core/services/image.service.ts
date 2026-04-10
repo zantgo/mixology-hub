@@ -14,12 +14,23 @@ export class ImageService {
 
   /**
    * Get a safe image URL with fallback to default images
+   * Now supports both external URLs and local upload paths
    */
-  getSafeCocktailImageUrl(imageUrl?: string, cocktailName?: string): string {
-    if (!imageUrl || !this.isValidUrl(imageUrl)) {
-      return this.getDefaultCocktailImage(cocktailName);
+  getSafeCocktailImageUrl(imageUrl?: string, imageFull?: string, imageThumb?: string, cocktailName?: string): string {
+    // Prefer local uploaded images over external URLs
+    if (imageThumb) {
+      return imageThumb;
     }
-    return imageUrl;
+    if (imageFull) {
+      return imageFull;
+    }
+    
+    // Fallback to legacy external URL
+    if (imageUrl && this.isValidUrl(imageUrl)) {
+      return imageUrl;
+    }
+    
+    return this.getDefaultCocktailImage(cocktailName);
   }
 
   /**

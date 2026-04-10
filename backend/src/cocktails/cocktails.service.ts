@@ -27,13 +27,22 @@ export class CocktailsService {
     private readonly unitConverter: UnitConverterService,
   ) {}
 
-  async create(createCocktailDto: CreateCocktailDto): Promise<Cocktail> {
-    const mockUser = await this.userRepository.findOne({ 
+  async create(createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string }, userId?: string): Promise<Cocktail> {
+    let user: User | null;
+    
+    if (userId) {
+      user = await this.userRepository.findOne({ 
+        where: { id: userId } 
+      });
+    } else {
+      // Fallback to mock user for backward compatibility
+      user = await this.userRepository.findOne({ 
         where: { email: 'mock@test.com' } 
-    });
+      });
+    }
 
-    if (!mockUser) {
-        throw new NotFoundException('Mock user not found in database');
+    if (!user) {
+      throw new NotFoundException('User not found in database');
     }
 
     const cocktail = await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
@@ -41,9 +50,10 @@ export class CocktailsService {
         name: createCocktailDto.name,
         description: createCocktailDto.description,
         instructions: createCocktailDto.instructions,
-        image_url: createCocktailDto.imageUrl,
+        image_full: createCocktailDto.imageFull,
+        image_thumb: createCocktailDto.imageThumb,
         is_public: createCocktailDto.isPublic ?? true, // Default to true if not provided
-        user: mockUser,
+        user: user,
       });
 
       const savedCocktail = await transactionalEntityManager.save(newCocktail);
@@ -136,9 +146,20 @@ export class CocktailsService {
     return cocktail;
   }
 
-  async update(id: string, updateCocktailDto: UpdateCocktailDto) {
+  async update(id: string, updateCocktailDto: UpdateCocktailDto & { imageFull?: string; imageThumb?: string }, userId?: string) {
     const cocktail = await this.findOne(id);
-    Object.assign(cocktail, updateCocktailDto);
+    
+    // Check if user owns the cocktail (if userId is provided)
+    if (userId && cocktail.user?.id !== userId) {
+      throw new NotFoundException(`Cocktail #${id} not found or you don't have permission to update it`);
+    }
+    
+    Object.assign(cocktail, {
+      ...updateCocktailDto,
+      image_full: updateCocktailDto.imageFull,
+      image_thumb: updateCocktailDto.imageThumb,
+    });
+    
     return await this.cocktailRepository.save(cocktail);
   }
 

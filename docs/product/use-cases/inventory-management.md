@@ -141,6 +141,8 @@
  * **And** sets the `ingredient_id` to `NULL` (or softly tombstones it) in `cocktail_ingredients` so existing custom recipes do not completely break, but flag the missing ingredient.
  * **Senior Architectural Decision: Orphaned Ingredient Math Degradation**
    * **Explicit Trade-off:** When an Admin hard-deletes an ingredient, the relational link is severed, and the math engine can no longer deduce the `baseUnit`. We explicitly mandate that any cocktail containing an ingredient where `ingredient_id IS NULL` is immediately and silently filtered out of the "Makeable Cocktails" SQL query. We trade historical recipe preservation for math engine stability; recipes with deleted ingredients are permanently classified as "Unmakeable."
+ * **Senior Architectural Decision: Recipe UI Degradation on Admin Hard Deletes**
+   * **Explicit Trade-off:** We explicitly accept that when an Administrator hard-deletes a global ingredient, any custom recipes relying on that ingredient will permanently lose the ingredient's name reference, rendering it as an blank or "Unknown Ingredient" in the UI. We trade strict relational database normalization (refusing to duplicate string names into the COCKTAIL_INGREDIENTS pivot table) for this rare, edge-case UI degradation. If an author wants to fix their recipe, they must edit it and assign a new ingredient.
 
 **UC 1.20a: User Cannot Delete Custom Ingredients**
  * **Given** a user creates a custom ingredient "Secret Syrup" that enters the shared global namespace (UC 10.5).
@@ -171,6 +173,8 @@
 * **Senior Architectural Decision: Strict Base-Unit Isolation on Ingredient Merges**
   * **Explicit Trade-off:** We explicitly forbid Administrators from merging two ingredients that have differing `baseUnit` types (e.g., merging a Volume into a Count). To protect the mathematical integrity of historical `user_inventory` and `cocktail_ingredients` data, the Admin UI will throw a `409 Conflict: Incompatible Base Units`. We trade administrative convenience (forcing admins to manually delete the erroneous ingredient rather than merging it) for the guarantee that the `UnitConverterService` math engine will never crash on corrupted cross-unit sums.
   * **Note:** With the removal of offline sync functionality, there are no pending operations to fail when ingredients are merged.
+* **Senior Architectural Decision: JSONB Log Corruption Tolerance on Admin Merges**
+  * **Explicit Trade-off:** We explicitly accept that Admin taxonomy merges are instantly destructive to active 15-minute preparation undo windows. We trade the complexity of executing deep JSONB schema-migration queries (which would require parsing and updating thousands of JSON text blobs upon every ingredient merge) for simple, fast Admin moderation. Users attempting to undo a drink containing an ingredient that was merged mid-flight will receive a generic 500 error, and the undo action will fail.
 
 **UC 1.24: Admin Taxonomy & Synonym CRUD**
 * **Given** the math engine relies on synonyms for makeability.

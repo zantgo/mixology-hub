@@ -40,12 +40,7 @@
 * **Then** the custom ingredient record is NOT deleted, ensuring the Public Cocktail's relational integrity does not break.
 * **And** the custom ingredient's `created_by` foreign key is safely set to `NULL` (anonymized).
 
-**UC 10.7: Maximum URL Length Enforcement (Image URLs)**
-* **Given** a malicious user submits a Custom Cocktail with an `image_url` containing a 10,000-character string (Base64 payload or buffer overflow attempt).
-* **When** the DTO validation pipe runs.
-* **Then** it enforces a strict maximum length (e.g., 2048 characters) for URLs.
-* **And** rejects the payload with a `400 Bad Request` before hitting the database.
-* **And** prevents database column overflow and potential DoS attacks through oversized payloads.
+
 
 **UC 10.8: Exposing Private Ingredients via Public Cocktails**
 * **Given** User A creates a custom ingredient (`is_global: false`) and uses it in a custom cocktail.

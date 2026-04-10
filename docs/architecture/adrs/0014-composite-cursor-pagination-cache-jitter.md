@@ -355,6 +355,8 @@ export class CacheAnalyticsService {
 - UC 2.6: Unified Pagination Handling (composite cursor)
 - UC 2.3: Redis Caching for External APIs (6-hour TTL)
 - ADR 0008: O(N×Page) DoS Risk in Makeability Pagination (pagination limits)
+- **Senior Architectural Decision: Relevance Scoring Asymmetry in Unified Search**
+  - **Explicit Trade-off:** We explicitly acknowledge that cursor-based pagination is mathematically impossible when unifying two fundamentally disparate full-text search relevance scales (Local `pg_trgm` vs External API ranking). We mandate that when `sort=relevance` is active, the system MUST fallback to Offset-based pagination (`page/limit`) to allow in-memory merging and slicing. We trade absolute pagination stability for the ability to provide cross-platform relevance sorting.
 
 ## Evolution Plan
 1. **Phase 2**: Implement predictive cache warming based on user behavior

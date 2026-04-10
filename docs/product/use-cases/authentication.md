@@ -171,15 +171,10 @@
 **UC 9.22: Bulk Rating Recalculation with Optimistic Concurrency**
  * **Given** a user has rated several public cocktails (potentially 2,000+).
  * **When** they trigger the `DELETE /users/me` endpoint.
- * **Then** their individual rows in the `cocktail_ratings` pivot table are permanently deleted.
- * **And** an asynchronous background job recalculates ratings using **batch optimistic updates**:
-   * **Batch Processing**: Process cocktails in batches of 100 to avoid transaction size issues
-   * **Atomic Updates**: Single SQL per cocktail: `UPDATE cocktails SET rating = ((rating * rating_count) - :userRating) / (rating_count - 1), rating_count = rating_count - 1 WHERE id = :cocktailId AND rating_count > 1`
-   * **Zero-Rating Handling**: If `rating_count - 1 = 0`, set `rating = NULL, rating_count = 0`
-   * **Conflict Resilience**: Exponential backoff retry for concurrent updates
-   * **Progress Tracking**: Track completion percentage for large deletions
- * **Performance**: Avoids `SELECT FOR UPDATE` contention, enables parallel processing of batches.
- * **Monitoring**: Logs batch completion times and retry counts for operational visibility.
+ * **Then** their individual rows in the `cocktail_ratings` pivot table are permanently deleted via PostgreSQL `ON DELETE CASCADE`.
+ * **And** the system does NOT attempt to recalculate ratings synchronously or asynchronously.
+ * **Senior Architectural Decision: Deprecation of the GDPR Rating Recalculation Worker**
+   * **Explicit Trade-off:** To resolve the race condition between PostgreSQL ON DELETE CASCADE destroying pivot data and the backend attempting to subtract those ratings, we explicitly deprecate the GdprRatingRecalculationService and all asynchronous batch-processing queues for rating deletions. No background worker will be built to handle GDPR rating math. We explicitly accept that average ratings on the COCKTAILS table will remain mathematically inflated when a user deletes their account, until the universal Nightly Recalibration Cron Job (ADR 0015) sweeps the database and self-heals all averages. We trade real-time mathematical purity for vast architectural simplification and guaranteed database integrity.
 
 **UC 9.23: GDPR Anonymization of Analytics & Logs**
 * **Given** a user has 50 entries in `PREPARATION_LOGS` and 2 entries in `REPORTED_CONTENT`.

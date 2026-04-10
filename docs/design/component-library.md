@@ -60,7 +60,8 @@ Used for primary actions like "Prepare Drink"
 ```html
 <article class="cocktail-card">
   <div class="card-image">
-    <img [src]="cocktail.imageUrl" [alt]="cocktail.name" (error)="onImageError($event)">
+    <!-- Local thumbnail rendered directly from backend uploads -->
+    <img [src]="cocktail.imageThumb || '/assets/images/cocktail-placeholder.jpg'" [alt]="cocktail.name" (error)="onImageError($event)">
     <button class="favorite-btn" (click)="toggleFavorite()" aria-label="Toggle favorite">
       <app-icon [name]="isFavorite ? 'heart-filled' : 'heart-outline'"></app-icon>
     </button>
@@ -88,7 +89,7 @@ Used for primary actions like "Prepare Drink"
 - **Container**: `var(--color-bg-secondary)`, `var(--border-radius-lg)`
 - **Shadow**: `var(--shadow-card)`
 - **Hover**: `var(--shadow-card-hover)`, translateY(-2px)
-- **Image**: 16:9 aspect ratio, object-fit cover
+- **Image**: 1:1 aspect ratio (square), object-fit cover
 - **Favorite Button**: Positioned top-right, 40px × 40px
 - **Makeability Badge**: Positioned top-left with color coding:
   - 🟢 Makeable: `var(--color-makeable)`

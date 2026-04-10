@@ -1,5 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ImageService } from '../../core/services/image.service';
 
 @Component({
   selector: 'app-cocktail-image',
@@ -35,24 +36,21 @@ import { CommonModule } from '@angular/common';
   `]
 })
 export class CocktailImageComponent implements OnInit {
-  @Input() imageUrl?: string;
+  @Input() imageUrl?: string; // Legacy field
+  @Input() imageFull?: string; // New field for full-size image
+  @Input() imageThumb?: string; // New field for thumbnail image
+  @Input() cocktailName?: string; // For consistent default image selection
   @Input() altText: string = 'Cocktail image';
   @Input() width: string = '100%';
   @Input() height: string = 'auto';
   @Input() objectFit: 'cover' | 'contain' | 'fill' = 'cover';
   @Input() imageClass: string = '';
   
-  private defaultImages = [
-    'assets/images/cocktails/default/cocktail-1.svg',
-    'assets/images/cocktails/default/cocktail-2.svg',
-    'assets/images/cocktails/default/cocktail-3.svg',
-    'assets/images/cocktails/default/cocktail-4.svg',
-    'assets/images/cocktails/default/cocktail-5.svg'
-  ];
-  
   private currentImageUrl: string = '';
   private errorCount = 0;
   private maxRetries = 3;
+
+  constructor(private imageService: ImageService) {}
 
   ngOnInit() {
     this.setImageUrl();
@@ -64,11 +62,12 @@ export class CocktailImageComponent implements OnInit {
 
   private setImageUrl() {
     this.errorCount = 0;
-    if (this.imageUrl) {
-      this.currentImageUrl = this.imageUrl;
-    } else {
-      this.currentImageUrl = this.getRandomDefaultImage();
-    }
+    this.currentImageUrl = this.imageService.getSafeCocktailImageUrl(
+      this.imageUrl,
+      this.imageFull,
+      this.imageThumb,
+      this.cocktailName
+    );
   }
 
   get displayImageUrl(): string {

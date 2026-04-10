@@ -33,9 +33,13 @@ export class Cocktail {
   @Expose({ name: 'externalId' })
   external_id: string; // ID from TheCocktailDB to prevent duplicates
 
-  @Column({ name: 'image_url', nullable: true })
-  @Expose({ name: 'imageUrl' })
-  image_url: string; // URL to cocktail image, null for default fallback
+  @Column({ name: 'image_full', type: 'varchar', length: 255, nullable: true })
+  @Expose({ name: 'imageFull' })
+  image_full: string; // Path to full-size image (1024x1024 WebP)
+
+  @Column({ name: 'image_thumb', type: 'varchar', length: 255, nullable: true })
+  @Expose({ name: 'imageThumb' })
+  image_thumb: string; // Path to thumbnail image (300x300 WebP)
 
   @Column({ name: 'is_deleted', default: false })
   @Expose({ name: 'isDeleted' })

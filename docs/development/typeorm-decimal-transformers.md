@@ -106,23 +106,30 @@ export class CocktailIngredient {
 | Unit Conversion | Mathematical accuracy | Prevents cumulative errors |
 | Recipe Scaling | Proportional calculations | Maintains ratio integrity |
 
-## 🖼️ String Column Lengths (Image URLs)
+## 🖼️ Local Image Path Columns
 
-### Image URL Column Configuration
+### Image Path Configuration
 ```typescript
 // src/cocktails/entities/cocktail.entity.ts
 @Entity('cocktails')
 export class Cocktail {
   @Column({
-    type: 'text', // Use 'text' type for unlimited length (PostgreSQL)
-    nullable: true,
-    length: 2048 // Validation constraint, not database limit
+    type: 'varchar',
+    length: 255,
+    nullable: true
   })
-  imageUrl: string;
+  imageFull: string;
+
+  @Column({
+    type: 'varchar',
+    length: 255,
+    nullable: true
+  })
+  imageThumb: string;
 }
 ```
 
-**Important**: Use `type: 'text'` not `type: 'varchar'` for image URLs to avoid PostgreSQL column length limits. The `length: 2048` is for validation only (matches UC 10.7).
+**Important**: Because we now store local file paths (`/uploads/cocktails/uuid.webp`) instead of raw external URLs, we safely restrict the column length to `varchar(255)`.
 
 ### The Float Problem
 ```typescript

@@ -67,7 +67,8 @@ export class RatingService {
         instructions: externalCocktail.instructions,
         source: 'api',
         external_id: externalId,
-        image_url: externalCocktail.imageUrl,
+        image_full: externalCocktail.imageFull,
+        image_thumb: externalCocktail.imageThumb,
         user, // The user who forked it by rating
         is_public: false, // Private to the user who forked it
         is_deleted: false,

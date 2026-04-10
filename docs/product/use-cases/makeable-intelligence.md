@@ -67,6 +67,8 @@
 * **Given** a cocktail recipe uses "parts" (e.g., 1 part Gin, 1 part Campari).
 * **When** the system evaluates makeability without a `totalVolumeMl` parameter.
 * **Then** it flags the cocktail as `requiresUserInput` to prompt the user for their desired total volume.
+* **Senior Architectural Decision: Volumetric Bias for Ratio-Based Cocktails**
+  * **Explicit Trade-off:** We explicitly accept a volumetric bias in our ratio math engine. When users input a `totalVolumeMl` for part-based drinks, the engine will blindly distribute that liquid volume across all parts, reverse-converting to mass for non-liquid ingredients using their density column. We trade strict culinary accuracy for simplified algorithmic distribution, accepting that part-based drinks heavily featuring solids/powders may calculate unpalatable ratios.
 
 **UC 3.10: Synonym Aggregation for Makeability**
 * **Given** a user has 30ml "Triple Sec" and 40ml "Cointreau" (synonyms for Orange Liqueur).

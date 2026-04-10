@@ -52,13 +52,10 @@
 * **And** input forms for inventory automatically default to their preferred unit.
 
 **UC 7.9: Cocktail Image Display with Fallback**
-* **Given** a cocktail card component receives a cocktail object with optional `imageUrl`.
+* **Given** a cocktail card component receives a cocktail object.
 * **When** the component renders the cocktail image.
-* **Then** it attempts to load the image from the provided URL.
-* **And** shows a loading skeleton/placeholder during image fetch.
-* **And** if the URL fails to load (404, network error, or invalid), falls back to default local image (`/assets/images/cocktails/default/cocktail-placeholder.jpg`).
-* **And** maintains aspect ratio and responsive sizing across different screen sizes.
-* **And** logs image loading failures to analytics without breaking the UI.
+* **Then** it attempts to load the local `/uploads/...` path from `imageThumb`.
+* **And** if `imageThumb` is null, or if the local file was accidentally deleted causing a 404, it falls back to the default local image (`/assets/images/cocktails/default/cocktail-placeholder.jpg`).
 
 **UC 7.10: Optimistic Update Rollback**
 * **Given** the user clicks "Prepare" and the Signal optimistically deducts inventory.
@@ -86,14 +83,7 @@
 * **Then** the frontend globally applies a `dark-theme` CSS class to the document root.
 * **And** overrides OS-level `prefers-color-scheme` settings.
 
-**UC 7.14: MVP Image URL Constraint (No File Upload)**
-* **Given** a user is creating a custom cocktail or ingredient on their mobile device.
-* **When** they interact with the image field expecting to upload a photo.
-* **Then** the UI clearly indicates this is a "Paste Image URL" field only (no binary file upload in MVP).
-* **And** shows a tooltip explaining: "For MVP, please use a public image URL. Future versions will support photo uploads."
-* **And** the UI attempts to preview the image URL on `blur` or `debounce`.
-* **And** shows a clear error if the pasted link is a broken image or blocked by CORS.
-* **Technical Constraint:** MVP scope excludes S3/R2 file upload infrastructure. Users must use existing public image URLs.
+
 
 **UC 7.15: Search State Preservation Across Navigation**
 * **Given** a user searches for "Martini" with filters (ABV: 20-30%, Glass: Martini Glass).
@@ -139,12 +129,7 @@
 * **And** prevents the user from submitting a request that is guaranteed to fail validation.
 * **And** displays a tooltip explaining the conversion constraint when incompatible units are attempted.
 
-**UC 7.21: Secure Image Proxy Rendering (IP Privacy)**
-* **Given** the frontend needs to render a cocktail image sourced from an external API (e.g., TheCocktailDB).
-* **When** the browser makes the GET request for the image asset.
-* **Then** the Angular `<img [src]="sanitizedUrl">` tag points STRICTLY to the backend proxy (`/api/images/proxy?url=...&hash=...`).
-* **And** the frontend explicitly never makes direct outbound requests to the external host, guaranteeing zero client IP leakage (per ADR 0011).
-* **And** utilizes the `SecureImageComponent` to seamlessly fallback to `cocktail-placeholder.jpg` if the proxy returns a 4xx/5xx error.
+
 
 **UC 7.24: Asynchronous AI Loading State Recovery**
 * **Given** a user requests an AI recipe and navigates to the "Inventory" page while waiting.

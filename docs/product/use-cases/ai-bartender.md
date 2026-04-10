@@ -51,6 +51,8 @@
  * **And** injects the inventory list into the LLM system prompt (e.g., "Only use these ingredients: Vodka, Orange Juice").
  * **And** generates a recipe guaranteed to be 100% makeable immediately.
  * **Frontend Validation:** The "Strict Inventory" toggle/button should be disabled if the user's inventory does not contain at least one liquid/spirit base (`baseUnit = 'ml'`). Allowing generation with only "Salt" or "Mint" will cause the LLM to hallucinate non-consumable recipes.
+ * **Senior Architectural Decision: LLM Non-Determinism vs. Strict Inventory Constraints**
+   * **Explicit Trade-off:** We explicitly acknowledge that we cannot mathematically force an LLM to adhere 100% to a strict inventory list without hallucinations. We dictate that the backend will silently validate the AI's output against the user's inventory. If the LLM hallucinates an unowned ingredient, the backend will swallow the output and trigger up to 2 automated retries. If it still fails, the UI will throw a soft error asking the user to try again. We trade guaranteed immediate makeability for increased API token expenditure and occasional UX friction.
 
 **UC 5.9: Payload Size / Token Limitation Defense**
 * **Given** a user submits an ingredient list exceeding 500 characters or 20 ingredients.
@@ -132,7 +134,7 @@
 **UC 5.19: AI Cocktail Default Image Fallback**
 * **Given** the AI generates a new transient recipe.
 * **When** the user saves it via `save-as-cocktail`.
-* **Then** the system assigns a specific "AI Generated" default placeholder to the `image_url` field.
+* **Then** the system assigns a specific "AI Generated" default placeholder to the `image_full` and `image_thumb` fields.
 * **And** the frontend visually distinguishes it from standard user-created cocktails.
 
 **UC 5.20: Fetching AI Daily Quota Status**

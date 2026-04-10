@@ -86,7 +86,7 @@ USERS ||--o{ REFRESH_TOKENS : "has_sessions"
 
    decimal(5,4) density DEFAULT 1.0 "Used for Mass <-> Volume. CHECK (density >= 0.1)"
 
-  uuid created_by FK "nullable: true"
+   uuid created_by FK "nullable: true, ON DELETE SET NULL"
 
   timestamp created_at
 
@@ -108,8 +108,8 @@ USERS ||--o{ REFRESH_TOKENS : "has_sessions"
   
 
 INGREDIENT_RELATIONS {
-  uuid parent_id FK
-  uuid child_id FK
+  uuid parent_id FK "ON DELETE CASCADE" -- ADD THIS
+  uuid child_id FK "ON DELETE CASCADE"  -- ADD THIS
   string relationship_type "enum: 'synonym', 'is_a'"
 }
 
@@ -133,12 +133,13 @@ INGREDIENT_RELATIONS {
 
    string parent_external_id "nullable: true, tracks original external ID when forking API cocktails"
 
-     string image_url "nullable: true, max length: 2048 characters (text column)"
+      string image_full "nullable: true, max length: 255 characters (varchar)"
+      string image_thumb "nullable: true, max length: 255 characters (varchar)"
     decimal rating "nullable: true, cached average rating"
     integer rating_count DEFAULT 0 "number of ratings for calculating average"
     string category "nullable: true"
     string glassware "nullable: true"
-    uuid created_by FK "nullable: true"
+    uuid created_by FK "nullable: true, ON DELETE SET NULL"
    timestamp created_at
    }
 
@@ -150,7 +151,7 @@ INGREDIENT_RELATIONS {
 
   uuid cocktail_id FK "ON DELETE CASCADE"
 
-   uuid ingredient_id FK "nullable: true" /* Allows Admin ON DELETE SET NULL to work */
+    uuid ingredient_id FK "nullable: true, ON DELETE SET NULL" /* Allows Admin ON DELETE SET NULL to work */
 
    string measure
 
@@ -166,13 +167,13 @@ INGREDIENT_RELATIONS {
 
   
 
-  USER_INVENTORY {
+   USER_INVENTORY {
 
   uuid id PK
 
-  uuid user_id FK
+  uuid user_id FK "ON DELETE CASCADE"
 
-  uuid ingredient_id FK
+  uuid ingredient_id FK "ON DELETE CASCADE"
 
     decimal(10,4) quantity "CHECK (quantity >= 0)"
 
@@ -215,19 +216,19 @@ INGREDIENT_RELATIONS {
 
   
 
- AI_RECIPES {
+AI_RECIPES {
   uuid id PK
   string prompt
   jsonb generated_recipe
-  uuid created_by FK "nullable: true"
-  uuid cocktail_id FK "nullable: true, links to saved cocktail if user saves it"
+  uuid created_by FK "nullable: true, ON DELETE SET NULL"
+  uuid cocktail_id FK "nullable: true, links to saved cocktail if user saves it, ON DELETE SET NULL"
   timestamp created_at
- }
+}
 
 COCKTAIL_RATINGS {
   uuid id PK
-  uuid user_id FK
-  uuid cocktail_id FK
+  uuid user_id FK "ON DELETE CASCADE"
+  uuid cocktail_id FK "ON DELETE CASCADE"
   decimal score
   timestamp created_at
   timestamp updated_at
@@ -235,7 +236,7 @@ COCKTAIL_RATINGS {
 
 EXTERNAL_COCKTAIL_RATINGS {
   uuid id PK
-  uuid user_id FK
+  uuid user_id FK "ON DELETE CASCADE" -- ADD THIS
   string external_id "The external API ID (e.g., '11000' from TheCocktailDB)"
   decimal score
   timestamp created_at
@@ -245,9 +246,10 @@ EXTERNAL_COCKTAIL_RATINGS {
 
 PREPARATION_LOGS {
   uuid id PK
-  uuid user_id FK "nullable: true"
-  uuid cocktail_id FK "nullable: true"
+  uuid user_id FK "nullable: true, ON DELETE SET NULL"
+  uuid cocktail_id FK "nullable: true, ON DELETE SET NULL"
   string external_cocktail_id "nullable: true"
+  string cocktail_name_snapshot "Snapshot of the cocktail name at time of prep to prevent amnesia if original is deleted"
   integer servings
   jsonb deducted_ingredients "Stores exact IDs, amounts, units deducted"
   string inventory_status "enum: 'pending', 'deducted', 'failed_insufficient', 'failed_other' DEFAULT 'pending'"
@@ -258,38 +260,38 @@ PREPARATION_LOGS {
 
  REFRESH_TOKENS {
   uuid id PK
-  uuid user_id FK
+  uuid user_id FK "ON DELETE CASCADE"
   string token_family "Used for rotating token chains"
   string hashed_token "bcrypt hash of the current refresh token"
   boolean is_revoked DEFAULT false
   timestamp expires_at
   timestamp rotated_at "nullable: true, Used for 5-second grace period fallback"
   timestamp created_at
-}
+ }
 
 REPORTED_CONTENT {
   uuid id PK
-  uuid reported_by FK "User who reported the content" "nullable: true"
-  uuid cocktail_id FK "nullable: true"
+  uuid reported_by FK "User who reported the content" "nullable: true, ON DELETE SET NULL"
+  uuid cocktail_id FK "nullable: true, ON DELETE SET NULL"
   string external_cocktail_id "nullable: true"
   string report_reason "enum: 'inappropriate', 'spam', 'copyright', 'other'"
   string details "optional text details from reporter"
   string status "enum: 'pending', 'reviewed', 'dismissed', 'action_taken' DEFAULT 'pending'"
-  uuid reviewed_by FK "nullable: true, admin who reviewed"
+  uuid reviewed_by FK "nullable: true, admin who reviewed, ON DELETE SET NULL"
   timestamp created_at
   timestamp reviewed_at "nullable: true"
 }
 
  HIDDEN_EXTERNAL_COCKTAILS {
   string external_id PK
-  uuid hidden_by FK "admin user id"
+  uuid hidden_by FK "admin user id" "nullable: true, ON DELETE SET NULL"
   string reason
   timestamp created_at
 }
 
   USER_AI_QUOTAS {
    uuid id PK
-   uuid user_id FK
+  uuid user_id FK "ON DELETE CASCADE"
    date quota_date "Date for which quota is tracked (YYYY-MM-DD)"
    integer usage_count DEFAULT 0 "Atomic counter for daily AI generations"
    timestamp last_updated_at
@@ -303,7 +305,7 @@ REPORTED_CONTENT {
   string setting_key PK "e.g., 'global_token_salt_version'"
   string setting_value "JSON or string value"
   timestamp updated_at
-  uuid updated_by FK "nullable: true, admin who changed it"
+   uuid updated_by FK "nullable: true, admin who changed it, ON DELETE SET NULL"
 }
 
 -- SYNC_OPERATIONS table has been removed as part of the Online-Only Mandate
@@ -373,7 +375,8 @@ Stores user-created recipes or AI-saved recipes.
 
 - **`cocktails.external_id`:** Allows the local DB to reference `TheCocktailDB` recipes without duplicating all API data locally.
 
-- **`cocktails.image_url`:** Optional URL string for cocktail images. Supports external URLs (e.g., from TheCocktailDB) or user-provided URLs. Frontend falls back to default image if URL is invalid or fails to load.
+- **`cocktails.image_full`:** Path to full-size cocktail image (1024x1024 WebP format) stored locally in uploads directory.
+- **`cocktails.image_thumb`:** Path to thumbnail cocktail image (300x300 WebP format) stored locally in uploads directory.
 
 - **`cocktail_ingredients.measure`:** A human-readable string (e.g., "A pinch", "1 1/2 oz") for UI display.
 

@@ -82,7 +82,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": true,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"imageFull\": \"/uploads/cocktails/ext-11000-full.webp\",\n      \"imageThumb\": \"/uploads/cocktails/ext-11000-thumb.webp\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": true,\n  \"limit\": 10\n}"
             }
           ]
         },
@@ -231,7 +231,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": false,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"imageFull\": \"/uploads/cocktails/ext-11000-full.webp\",\n      \"imageThumb\": \"/uploads/cocktails/ext-11000-thumb.webp\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": false,\n  \"limit\": 10\n}"
             }
           ]
         },

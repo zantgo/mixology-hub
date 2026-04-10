@@ -234,7 +234,8 @@ describe('RatingService', () => {
       name: 'Mojito',
       description: 'Classic Cuban cocktail',
       instructions: 'Mix ingredients...',
-      imageUrl: 'https://example.com/mojito.jpg',
+      imageFull: '/uploads/cocktails/ext-11000-full.webp',
+      imageThumb: '/uploads/cocktails/ext-11000-thumb.webp',
     });
 
     const ratingDto: RatingDto = { score: 5 };

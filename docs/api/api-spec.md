@@ -152,9 +152,11 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
   - `sort`: Sorting strategy (optional, default: `relevance`, options: `relevance`, `makeability`, `rating`)
     - `relevance`: Default sorting based on search relevance (uses cursor-based pagination)
     - `makeability`: Sorts by makeability status (makeable → missing 1 ingredient → unmakeable) (uses offset-based pagination)
-    - `rating`: Sorts by cocktail rating (highest to lowest) (uses offset-based pagination)
+    - `rating`: Sorts by rating (highest to lowest) (uses offset-based pagination)
       - **Senior Architectural Decision: External API Sorting Segregation**
       - **Explicit Trade-off:** When users apply dynamic sorts (like `sort=rating` or `sort=makeability`), external API results inherently lack the relational data required to participate fairly. We explicitly decide that when custom sorts are applied, Local Database results will always be sorted and displayed first, with External API results appended at the end with a default "Null" value. We trade perfect chronological unification for accurate local data prioritization.
+      - **Senior Architectural Decision: Relevance Scoring Asymmetry in Unified Search**
+      - **Explicit Trade-off:** We explicitly acknowledge that cursor-based pagination is mathematically impossible when unifying two fundamentally disparate full-text search relevance scales (Local `pg_trgm` vs External API ranking). We mandate that when `sort=relevance` is active, the system MUST fallback to Offset-based pagination (`page/limit`) to allow in-memory merging and slicing. We trade absolute pagination stability for the ability to provide cross-platform relevance sorting.
 
 - **Response (200 OK):**
 
@@ -170,7 +172,8 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
  
  "name": "Mojito",
  
- "imageUrl": "https://www.thecocktaildb.com/images/media/drink/metwgh1606770327.jpg",
+  "imageFull": "/uploads/cocktails/uuid-full.webp",
+  "imageThumb": "/uploads/cocktails/uuid-thumb.webp",
  
  "source": "api",
  
@@ -198,40 +201,20 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
 
 Creates a new custom cocktail recipe. The cocktail is automatically linked to the authenticated user as the creator.
 
-- **Request Body:**
-```json
-{
-  "name": "Secret Margarita",
-  "instructions": "1. Rim glass with salt...",
-  "imageUrl": "https://example.com/margarita.jpg",
-  "isPublic": true,
-  "ingredients": [
-    {
-      "ingredientId": "uuid-of-tequila",
-      "measure": "2 oz",
-      "amount": "2",
-      "unit": "oz"
-    },
-    {
-      "name": "Custom Syrup",
-      "baseUnit": "ml",
-      "measure": "1 oz",
-      "amount": "1",
-      "unit": "oz"
-    }
-  ]
-}
-```
+- **Content-Type:** `multipart/form-data`
+- **Request Body (Form Data):**
+  - `name`: "Secret Margarita"
+  - `instructions`: "1. Rim glass with salt..."
+  - `isPublic`: "true"
+  - `ingredients`: (JSON stringified array) `[{"ingredientId": "uuid...", "measure": "2 oz", "amount": 2, "unit": "oz"}]`
+  - `image`: (File) The actual image file (JPG, PNG, WebP)
 
 - **Validation:**
   - `name`: Required, string, max 100 chars
   - `instructions`: Required, string
-  - `imageUrl`: Optional, must be valid URL format if provided (string only, no binary uploads). Must use `https://` protocol and cannot point to internal IP addresses. Frontend applies `referrerpolicy="no-referrer"` to prevent tracking.
+  - `image`: Optional. Max 2MB. Enforced by Multer `FileInterceptor`. Must be `image/jpeg`, `image/png`, or `image/webp`.
   - `isPublic`: Optional boolean (default: true)
-  - `ingredients`: Required array with at least 1 ingredient
-    - Each ingredient must have either `ingredientId` (existing ingredient) OR `name` + `baseUnit` (new custom ingredient)
-    - For new ingredients: `name` required, `baseUnit` must be one of: `ml`, `g`, `count`
-    - For all ingredients: `measure` required (display string), `amount` and `unit` required for mathematical operations
+  - `ingredients`: Required array with at least 1 ingredient.
 
 - **Response (201 Created):**
 ```json
@@ -239,7 +222,8 @@ Creates a new custom cocktail recipe. The cocktail is automatically linked to th
   "id": "uuid-of-new-cocktail",
   "name": "Secret Margarita",
   "instructions": "1. Rim glass with salt...",
-  "imageUrl": "https://example.com/margarita.jpg",
+  "imageFull": "/uploads/cocktails/uuid-full.webp",
+  "imageThumb": "/uploads/cocktails/uuid-thumb.webp",
   "isPublic": true,
   "source": "local",
   "createdBy": "user-uuid",
@@ -247,7 +231,7 @@ Creates a new custom cocktail recipe. The cocktail is automatically linked to th
 }
 ```
 
-- **Error (400 Bad Request):** Invalid input data or invalid image URL format
+- **Error (400 Bad Request):** Invalid input data or invalid image file format/size (e.g., >2MB or non-image MIME type)
 - **Error (401 Unauthorized):** User not authenticated
 
 #### `GET /cocktails/:id` (Get Cocktail Details)
@@ -260,7 +244,8 @@ Fetches detailed information for a specific cocktail, including full ingredient 
   "id": "uuid-of-cocktail",
   "name": "Secret Margarita",
   "instructions": "1. Rim glass with salt...",
-  "imageUrl": "https://example.com/margarita.jpg",
+  "imageFull": "/uploads/cocktails/uuid-full.webp",
+  "imageThumb": "/uploads/cocktails/uuid-thumb.webp",
   "isPublic": true,
   "source": "local",
   "createdBy": "user-uuid",
@@ -290,7 +275,7 @@ Updates an existing custom cocktail. If the user is the original creator, the co
 - **Request Body:** Same structure as `POST /cocktails` (all fields optional except at least one must be provided)
 - **Response (200 OK):** Updated cocktail object (if owner)
 - **Response (201 Created):** New forked cocktail object with a new UUID (if not owner)
-- **Error (400 Bad Request):** Invalid input data or invalid image URL format
+- **Error (400 Bad Request):** Invalid input data or invalid image file format/size (e.g., >2MB or non-image MIME type)
 - **Error (401 Unauthorized):** User not authenticated
 - **Error (404 Not Found):** Cocktail not found
 
@@ -538,7 +523,8 @@ Fetches a paginated list of cocktails authored by the authenticated user.
       "id": "uuid-of-cocktail",
       "name": "Secret Margarita",
       "instructions": "1. Rim glass with salt...",
-      "imageUrl": "https://example.com/margarita.jpg",
+  "imageFull": "/uploads/cocktails/uuid-full.webp",
+  "imageThumb": "/uploads/cocktails/uuid-thumb.webp",
       "isPublic": true,
       "source": "local",
        "createdBy": "user-uuid",

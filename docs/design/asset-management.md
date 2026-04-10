@@ -174,8 +174,8 @@ img:not(.loaded) {
 }
 ```
 
-### Image Fallback System (UC 7.9 & 2.32)
-When external API images fail (404, network error):
+### Image Fallback System (UC 7.9 & 2.11)
+When local image files are missing, accidentally deleted from the disk, or paths are null:
 
 ```typescript
 // image-fallback.service.ts
@@ -214,13 +214,13 @@ export class ImageFallbackService {
 - **Style:** Minimalist vector illustration
 - **Colors:** Use design system colors
 - **Content:** Cocktail glass silhouette on gradient background
-- **Dimensions:** 800×450px (16:9 aspect ratio)
+- **Dimensions:** 800×800px (1:1 aspect ratio)
 - **Format:** WebP (primary), JPEG (fallback)
 
 **SVG Alternative:**
 ```svg
 <!-- /assets/images/cocktail-placeholder.svg -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800">
   <defs>
     <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#121212"/>

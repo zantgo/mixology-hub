@@ -45,19 +45,17 @@
  * **Architectural Decision:** For unified search with mixed ID types (UUID vs integer strings), use composite cursors encoded as Base64 JSON to track both local cursor state and external API offset simultaneously.
 
 **UC 2.7: Manual Custom Cocktail Creation**
-* **Given** a user wants to add their family's secret Margarita recipe.
-* **When** they submit the `POST /cocktails` payload containing ingredients, instructions, measures, and optional `image_url`.
-* **Then** the backend validates all required relational data (ingredients exist or creates custom ones).
-* **And** validates the `image_url` format if provided (UC 2.13).
-* **And** creates a local `Cocktails` record flagged with `created_by = user_id`.
-* **And** makes it immediately searchable in the unified search (UC 2.1).
+* **Given** a user wants to add their family's secret recipe.
+* **When** they submit a `multipart/form-data` payload containing ingredients, instructions, and an optional `image` file.
+* **Then** the backend validates all required relational data.
+* **And** passes the image to the `ImageService` for Sharp processing (UC 2.13).
+* **And** creates a local `Cocktails` record with the generated local `/uploads/` paths.
 
 **UC 2.8: Editing/Updating a Custom Cocktail**
-* **Given** a user has previously created a custom "Secret Margarita".
-* **When** the user submits a `PUT /cocktails/:id` request to modify the ingredients, instructions, or `image_url`.
+* **Given** a user has previously created a custom cocktail.
+* **When** the user submits a `PUT /cocktails/:id` request to modify the recipe or upload a new `image`.
 * **Then** the backend verifies `created_by === current_user_id` (Ownership Guard).
-* **And** validates the `image_url` format if provided (UC 2.13).
-* **And** successfully updates the relational mappings and cocktail details.
+* **And** if a new image is provided, processes it and safely deletes the old image files from the local disk to prevent storage bloat.
 
 **UC 2.9: Deleting a Custom Cocktail (Dangling Local Favorites)**
  * **Given** User A created a cocktail, and User B added it to their Favorites.
@@ -72,25 +70,24 @@
 * **Then** the Aggregator Service completely excludes that private cocktail from the results.
 * **And** it is only visible when the author searches their own data.
 
-**UC 2.11: Cocktail Image URL Storage & Fallback**
-* **Given** a cocktail has an optional `image_url` field in the database.
-* **When** the cocktail data is retrieved from any source (local DB or external API).
-* **Then** the system includes the `image_url` in the response payload.
-* **And** if the `image_url` is null or empty, a default fallback image path is provided.
-* **And** the frontend handles failed image loads by falling back to the default image.
+**UC 2.11: Cocktail Image Display & Fallback**
+* **Given** a cocktail has optional `image_full` and `image_thumb` fields.
+* **When** the cocktail data is retrieved from the API.
+* **Then** the frontend uses `image_thumb` for lists/cards and `image_full` for detail views.
+* **And** if the paths are null, the frontend immediately falls back to the default local `/assets/images/cocktail-placeholder.jpg`.
 
-**UC 2.12: External API Image Mapping**
-* **Given** TheCocktailDB API returns a cocktail with `strDrinkThumb` field containing an image URL.
-* **When** the Aggregator Service maps external data to internal `Cocktail` DTO.
-* **Then** it maps `strDrinkThumb` to the `image_url` field.
-* **And** validates the URL format before storing or returning it.
+**UC 2.12: Server-Side Ingestion of External API Images**
+* **Given** TheCocktailDB API returns a cocktail with `strDrinkThumb` containing an external image URL.
+* **When** the Aggregator Service maps the external data.
+* **Then** the backend downloads the image buffer from the URL.
+* **And** passes it through the local `ImageService` (Sharp) to generate standardized local WebP thumbnails.
+* **And** stores/returns the safe local `/uploads/` paths to the frontend, preventing client IP leakage.
 
-**UC 2.13: Image URL Validation on Cocktail Creation/Update**
-* **Given** a user submits a custom cocktail with an `image_url` field.
-* **When** the backend processes the `POST /cocktails` or `PUT /cocktails/:id` request.
-* **Then** the validation layer checks if the `image_url` is a valid URL format.
-* **And** rejects the request with `400 Bad Request` if the URL format is invalid.
-* **And** allows `null` or empty string for no image.
+**UC 2.13: Image Upload Validation & Processing**
+* **Given** a user submits an image file.
+* **When** the backend processes the `POST /cocktails` request.
+* **Then** the Multer interceptor strictly rejects files > 2MB or non-image MIME types.
+* **And** the Sharp processor automatically resizes, converts to WebP, and forces a 1:1 aspect ratio.
 
 **UC 2.14: Local vs. External Duplicate Resolution**
 * **Given** a user searches for "Mojito".
@@ -118,6 +115,8 @@
 * **When** User A edits the recipe to contain "Bleach".
 * **Then** the system detects the recipe is favorited by other users.
 * **And** either forks the recipe (creates a new version) OR prevents editing of core ingredients for public cocktails with >0 favorites.
+* **Senior Architectural Decision: Author Forking Sprawl vs Community Immutability**
+  * **Explicit Trade-off:** We explicitly accept that Authors lose absolute mutation rights over their own creations the moment a single other user favorites them. We mandate that any ingredient edits to a favorited public recipe will forcefully fork it into a new record for the Author, preserving the legacy version in the database for the community. We trade author dashboard simplicity (which will become cluttered with version forks) for strict community recipe immutability.
 
 **UC 2.18: Advanced Filtering**
 * **Given** a user searches for "Margarita".
@@ -223,13 +222,11 @@
 * **And** uses optimistic concurrency with retry logic for concurrent updates.
 * **Note**: Rating count stays the same (user updating, not adding new rating).
 
-**UC 2.32: Handling External API Image Link Rot**
-* **Given** the user views an external cocktail from TheCocktailDB where the `strDrinkThumb` URL has expired or returns a 403/404.
-* **When** the browser attempts to render the image.
-* **Then** the Angular `onError` directive catches the broken image.
-* **And** immediately swaps it for the local `cocktail-placeholder.jpg`.
-* **And** prevents the UI layout from collapsing.
-* **And** logs the broken image URL to analytics for monitoring external API image reliability.
+**UC 2.32: Handling External API Image Ingestion Failures**
+* **Given** the backend attempts to ingest a TheCocktailDB image (UC 2.12) but the external URL returns a 404/403.
+* **When** the Axios download request fails.
+* **Then** the Aggregator catches the error gracefully.
+* **And** assigns `null` to `image_full` and `image_thumb`, allowing the frontend to seamlessly render the default local placeholder.
 
 **UC 2.33: Bounding Custom Cocktail Recipe Amounts**
 * **Given** a malicious user creates a custom cocktail.

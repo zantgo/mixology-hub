@@ -51,7 +51,7 @@ Used during: Unified Search, AI Generation, API calls
 }
 
 .skeleton-image {
-  aspect-ratio: 16/9;
+  aspect-ratio: 1/1;
   background: var(--color-bg-secondary);
 }
 

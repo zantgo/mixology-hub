@@ -278,7 +278,7 @@ p {
 ### Aspect Ratio Boxes
 ```html
 <!-- Prevent layout shift for images -->
-<div class="aspect-ratio-box" style="--aspect-ratio: 16/9">
+<div class="aspect-ratio-box" style="--aspect-ratio: 1/1">
   <img src="cocktail.jpg" alt="Cocktail" loading="lazy" />
 </div>
 ```

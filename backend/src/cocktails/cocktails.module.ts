@@ -11,6 +11,7 @@ import { ExternalModule } from '../external/external.module';
 import { CocktailAggregatorService } from './cocktail-aggregator.service';
 import { UtilsModule } from '../utils/utils.module';
 import { UsersModule } from '../users/users.module'; // <-- FIX: Imported the module
+import { ImageService } from '../images/image.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { UsersModule } from '../users/users.module'; // <-- FIX: Imported the mo
     forwardRef(() => UsersModule), // <-- FIX: Injected the module
   ],
   controllers:[CocktailsController],
-  providers: [CocktailsService, CocktailAggregatorService],
+  providers: [CocktailsService, CocktailAggregatorService, ImageService],
   exports:[CocktailAggregatorService],
 })
 export class CocktailsModule {}

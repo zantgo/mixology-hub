@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive, IsUrl } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -29,9 +29,11 @@ class CreateCocktailIngredientDto {
 }
 
 /**
- * DTO for creating a new cocktail recipe.
+ * DTO for creating a new cocktail recipe with file upload.
+ * This DTO expects the data to be sent as JSON string in the 'data' field
+ * when using multipart/form-data with file upload.
  */
-export class CreateCocktailDto {
+export class CreateCocktailWithFileDto {
   @ApiProperty({ example: 'Mojito', description: 'Name of the cocktail' })
   @IsString()
   @IsNotEmpty()
@@ -53,8 +55,6 @@ export class CreateCocktailDto {
   @Type(() => CreateCocktailIngredientDto)
   ingredients: CreateCocktailIngredientDto[];
 
-
-
   @ApiProperty({ 
     example: true, 
     description: 'Whether the cocktail is publicly visible to other users',
@@ -62,5 +62,6 @@ export class CreateCocktailDto {
     default: true 
   })
   @IsOptional()
+  @IsBoolean()
   isPublic?: boolean;
 }

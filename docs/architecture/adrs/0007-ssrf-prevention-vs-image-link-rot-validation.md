@@ -1,7 +1,7 @@
 # ADR 0007: SSRF Prevention vs. Image Link Rot Validation Trade-off
 
 ## Status
-Superseded by ADR 0011
+Deprecated (Replaced by Native Uploads - ADR 0016)
 
 ## Context
 **Update:** This ADR has been superseded by [ADR 0011](./0011-client-ip-leakage-external-images.md). We no longer maintain "Zero Server-Side Fetching" as stated below. Instead, we have implemented a secure image proxy to prevent client IP leakage while maintaining SSRF protection through controlled outbound requests.

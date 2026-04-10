@@ -246,13 +246,19 @@ export class GlobalIdempotencyInterceptor implements NestInterceptor {
       return next.handle();
     }
     
+    // Authentication prerequisite for idempotency (Senior Architectural Decision)
+    const userId = request.user?.id;
+    if (!userId) {
+      // Unauthenticated requests bypass idempotency to prevent cross-user cache leakage
+      return next.handle();
+    }
+    
     // Get or generate idempotency key
     const idempotencyKey = this.getIdempotencyKey(request);
     if (!idempotencyKey) {
       return next.handle();
     }
     
-    const userId = request.user?.id;
     const operation = this.getOperationIdentifier(request);
     const payloadHash = await this.requestHasher.hashRequest(request);
     
@@ -405,6 +411,9 @@ export class RequestHasherService {
 
   - **Senior Architectural Decision: Standardized Idempotency Key Namespace**
   - **Explicit Trade-off:** To resolve namespace collisions between user-generated HTTP headers and system-generated fallback keys, the definitive Redis/PostgreSQL idempotency format will strictly be `idempotency:v2:{userId}:{operation}:{source}:{uuid}` (where source is `client` or `system`). We accept the slightly longer string allocation in Redis/Postgres memory to guarantee namespace safety across different origin vectors. All API specs must be updated to reflect this 5-part structure.
+
+  - **Senior Architectural Decision: Authentication Prerequisite for Idempotency**
+  - **Explicit Trade-off:** To prevent Cross-User Cache Leakage where userId evaluates to undefined, we explicitly dictate that the GlobalIdempotencyInterceptor MUST completely bypass and ignore any request where request.user?.id is falsy. We accept the trade-off that public, unauthenticated routes (like Registration or Login) will not benefit from idempotency protection. We trade the prevention of double-registrations for absolute cryptographic safety against cross-user data leakage.
 
 ## Mitigation Strategies
 

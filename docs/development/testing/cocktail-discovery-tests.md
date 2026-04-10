@@ -305,7 +305,7 @@ describe('CocktailService - Public Editing Guard', () => {
     
     // Mock that this cocktail has 5 users who favorited it
     jest.spyOn(cocktailService.favoritesRepo, 'count').mockResolvedValue(5);
-    
+
     await expect(cocktailService.updateCocktail('cocktail123', 'author123', {
       ingredients: [{ ingredientId: 'bleach-123', measure: '1 oz' }]
     })).rejects.toThrow('Cannot modify ingredients of a public cocktail currently favorited by other users.');
@@ -372,6 +372,50 @@ describe('CocktailService - Public Editing Guard', () => {
     });
     
     expect(mockSave).toHaveBeenCalled();
+  });
+
+  it('should demonstrate author forking sprawl trade-off', async () => {
+    const cocktailService = new CocktailService();
+    
+    // Mock: Author has a popular cocktail with 10 favorites
+    jest.spyOn(cocktailService.favoritesRepo, 'count').mockResolvedValue(10);
+    
+    // Author makes 5 successive ingredient edits
+    const forkIds = ['fork-1', 'fork-2', 'fork-3', 'fork-4', 'fork-5'];
+    let forkIndex = 0;
+    
+    jest.spyOn(cocktailService, 'forkCocktail').mockImplementation(() => {
+      const result = {
+        id: forkIds[forkIndex],
+        name: `Original Cocktail v${forkIndex + 1}`,
+        parentId: 'cocktail123'
+      };
+      forkIndex++;
+      return Promise.resolve(result);
+    });
+    
+    // Simulate 5 ingredient edits by the author
+    const edits = [
+      { ingredients: [{ ingredientId: 'rum', measure: '2.5 oz' }] },
+      { ingredients: [{ ingredientId: 'rum', measure: '3 oz' }] },
+      { ingredients: [{ ingredientId: 'lime', measure: '1.5 oz' }] },
+      { ingredients: [{ ingredientId: 'mint', measure: '10 leaves' }] },
+      { ingredients: [{ ingredientId: 'sugar', measure: '2 tsp' }] }
+    ];
+    
+    const results = [];
+    for (const edit of edits) {
+      const result = await cocktailService.updateCocktail('cocktail123', 'author123', edit);
+      results.push(result);
+    }
+    
+    // Author now has 5 forked versions cluttering their dashboard
+    expect(results).toHaveLength(5);
+    expect(results.map(r => r.id)).toEqual(['fork-1', 'fork-2', 'fork-3', 'fork-4', 'fork-5']);
+    
+    // Trade-off: Author dashboard simplicity vs community recipe immutability
+    // This test demonstrates the architectural decision: Authors lose mutation rights
+    // over their own creations when others favorite them, resulting in version sprawl
   });
 });
 ```
@@ -847,7 +891,8 @@ describe('CocktailService - Forking External Recipes', () => {
       instructions: 'Mix all ingredients',
       glassware: 'Highball',
       category: 'Cocktail',
-      image_url: 'https://example.com/mojito.jpg'
+      image_full: '/uploads/cocktails/ext-11000-full.webp',
+      image_thumb: '/uploads/cocktails/ext-11000-thumb.webp'
     };
     
     jest.spyOn(cocktailService.cocktailRepo, 'findOne').mockResolvedValue(externalCocktail);
@@ -863,7 +908,8 @@ describe('CocktailService - Forking External Recipes', () => {
       instructions: 'Mix all ingredients',
       glassware: 'Highball',
       category: 'Cocktail',
-      image_url: 'https://example.com/mojito.jpg',
+      image_full: '/uploads/cocktails/ext-11000-full.webp',
+      image_thumb: '/uploads/cocktails/ext-11000-thumb.webp',
       source: 'local',
       parent_external_id: '11000',
       created_by: 'user123'

@@ -35,7 +35,7 @@
 * **And** monitors cache hit/miss ratios to optimize memory allocation for frequently accessed data.
 * **Senior Architectural Decision: Redis Logical Database Segregation**
   * **Explicit Trade-off:** We cannot mix volatile cache data with persistent state data under an `allkeys-lru` policy. We explicitly dictate the use of two separate Redis Logical Databases (or separate instances):
-    * **Redis DB 0 (Volatile Cache):** Used for Unified Search and Image Proxy caching. Configured with `allkeys-lru` to prevent memory crashes.
+    * **Redis DB 0 (Volatile Cache):** Used for Unified Search caching. Configured with `allkeys-lru` to prevent memory crashes.
     * **Redis DB 1 (Persistent State):** Used for AI Quotas (UC 5.20), Rate Limiting, Idempotency Keys, and JWT Grace Periods. Configured with `noeviction` (relying strictly on exact TTLs). We accept the minor operational overhead of maintaining two connection pools in NestJS to guarantee that caching spikes never destroy financial and security constraints.
   * **Critical Financial Constraint:** AI Quota keys (`ai_quota:{user}:{date}`) MUST be stored in Redis DB 1 with `noeviction` policy. If memory reaches 100% on DB 1, the system will reject new AI generation requests (Fail Closed) rather than evicting existing quota keys, preventing unbounded financial abuse of the LLM API.
 

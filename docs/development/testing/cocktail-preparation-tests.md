@@ -1090,7 +1090,7 @@ describe('Preparation Service - Idempotency Key', () => {
     
     // Assert: Inventory deducted only ONCE, Redis caching caught the second
     expect(inventoryService.deductInventory).toHaveBeenCalledTimes(1);
-    expect(redisService.get).toHaveBeenCalledWith(`idempotency:v2:userA:cocktail:prepare:${idempotencyKey}`);
+    expect(redisService.get).toHaveBeenCalledWith(`idempotency:v2:userA:cocktail:prepare:client:${idempotencyKey}`);
   });
 
   it('should return cached response for duplicate idempotency key', async () => {
@@ -1110,7 +1110,7 @@ describe('Preparation Service - Idempotency Key', () => {
     
     // Assert: Should return cached response without processing
     expect(result).toEqual(cachedResponse.body);
-    expect(redisService.get).toHaveBeenCalledWith(`idempotency:v2:user123:cocktail:prepare:${idempotencyKey}`);
+    expect(redisService.get).toHaveBeenCalledWith(`idempotency:v2:user123:cocktail:prepare:client:${idempotencyKey}`);
   });
 
   it('should generate idempotency key if not provided', async () => {
@@ -1136,7 +1136,7 @@ describe('Preparation Service - Idempotency Key', () => {
     // Assert: Should generate and use auto key
     expect(preparationService.generateIdempotencyKey).toHaveBeenCalled();
     expect(redisService.setex).toHaveBeenCalledWith(
-      `idempotency:v2:user123:cocktail:prepare:${mockUuid}`,
+      `idempotency:v2:user123:cocktail:prepare:system:${mockUuid}`,
       3600, // 1 hour TTL
       expect.any(String)
     );

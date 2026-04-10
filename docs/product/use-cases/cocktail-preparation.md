@@ -56,6 +56,8 @@
 * **Given** a cocktail uses parts (1 part Gin, 1 part Vermouth).
 * **When** the user prepares it providing `totalVolumeMl: 120`.
 * **Then** the math engine divides the volume by total parts (60ml each) and deducts accordingly.
+* **Senior Architectural Decision: Volumetric Bias for Ratio-Based Cocktails**
+  * **Explicit Trade-off:** We explicitly accept a volumetric bias in our ratio math engine. When users input a `totalVolumeMl` for part-based drinks, the engine will blindly distribute that liquid volume across all parts, reverse-converting to mass for non-liquid ingredients using their density column. We trade strict culinary accuracy for simplified algorithmic distribution, accepting that part-based drinks heavily featuring solids/powders may calculate unpalatable ratios.
 
 **UC 4.8: Time-Bounded "Undo" Functionality**
 * **Given** a user prepared a cocktail 20 minutes ago.
@@ -79,6 +81,8 @@
  * **And** safely re-creates the Vodka row with the exact deducted amount (`2 oz`).
  * **And** ensures the undo works even if the user manually deleted the ingredient after the preparation.
  * **Edge Case - Global Ingredient Deletion**: If an admin hard-deleted "Vodka" from the global `INGREDIENTS` catalog (UC 1.20), the undo transaction gracefully skips restoring this ingredient and logs a warning. The preparation log is marked as undone, and other ingredients are restored normally.
+ * **Senior Architectural Decision: Ephemeral Undo Unit Corruption Tolerance**
+   * **Explicit Trade-off:** We acknowledge a microscopic race condition: if an Administrator forcefully overrides a global ingredient's baseUnit during a user's active 15-minute preparation window, and the user clicks "Undo" after having deleted their inventory row, the system will recreate the row using the old numeric amount paired with the new, incompatible unit type. We explicitly accept this temporary data corruption risk. We trade the immense complexity of deeply versioning historical unit-types inside the PREPARATION_LOGS JSONB payload for a simpler architecture, accepting that this 1-in-a-million scenario will require manual user correction via the UI.
 
 **UC 4.14: Preparing External Cocktails On-The-Fly**
 * **Given** the user discovers a cocktail from TheCocktailDB.
@@ -136,6 +140,8 @@
 * **Then** the system relies strictly on the `deducted_ingredients` JSONB payload to restore inventory.
 * **And** completely ignores the current state of the `COCKTAILS` table.
 * **And** ensures the undo works even if the cocktail no longer exists or has different ingredient requirements.
+* **Senior Architectural Decision: JSONB Log Corruption Tolerance on Admin Merges**
+  * **Explicit Trade-off:** We explicitly accept that Admin taxonomy merges are instantly destructive to active 15-minute preparation undo windows. We trade the complexity of executing deep JSONB schema-migration queries (which would require parsing and updating thousands of JSON text blobs upon every ingredient merge) for simple, fast Admin moderation. Users attempting to undo a drink containing an ingredient that was merged mid-flight will receive a generic 500 error, and the undo action will fail.
 
 **UC 4.21: Unified Idempotency System for State-Mutating Operations**
  * **Given** a client sends any state-mutating request (POST, PUT, PATCH, DELETE) with an idempotency identifier.

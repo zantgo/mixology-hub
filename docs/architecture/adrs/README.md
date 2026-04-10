@@ -47,7 +47,7 @@ Each ADR follows this structure:
 **Summary**: **DEPRECATED** - Offline functionality removed as part of Online-Only Mandate. This ADR documented delta-only sync for offline inventory operations.
 
 ### [ADR 0007: SSRF Prevention vs. Image Link Rot Validation Trade-off](./0007-ssrf-prevention-vs-image-link-rot-validation.md)
-**Status**: Superseded by ADR 0011  
+**Status**: Deprecated (Replaced by Native Uploads - ADR 0016)  
 **Summary**: Decision to prioritize SSRF prevention over link validation - backend validates URL format only, frontend handles broken images at runtime.
 
 ### [ADR 0008: O(N×Page) DoS Risk in Makeability Pagination](./0008-makeability-pagination-dos-risk.md)
@@ -63,7 +63,7 @@ Each ADR follows this structure:
 **Summary**: **DEPRECATED** - Offline functionality removed as part of Online-Only Mandate. This ADR documented security gap where offline logout didn't revoke server-side tokens.
 
 ### [ADR 0011: Client IP Leakage via External Images Despite SSRF Prevention](./0011-client-ip-leakage-external-images.md)
-**Status**: Accepted  
+**Status**: Deprecated (Replaced by Native Uploads - ADR 0016)  
 **Summary**: Decision to implement secure image proxy for all external cocktail images to prevent client IP leakage while maintaining SSRF protection.
 
 ### [ADR 0012: Unified Idempotency System to Prevent Redis-PostgreSQL Clash](./0012-unified-idempotency-system.md)
@@ -81,6 +81,10 @@ Each ADR follows this structure:
 ### [ADR 0015: Accept Precision Drift in Atomic Ratings](./0015-accept-precision-drift-in-atomic-ratings.md)
 **Status**: Accepted  
 **Summary**: Decision to accept minor decimal precision drift in atomic rating calculations (O(1) performance) with nightly cron job correction, trading mathematical accuracy for update performance.
+
+### [ADR 0016: Local Image Processing via Sharp](./0016-local-image-processing-via-sharp.md)
+**Status**: Accepted  
+**Summary**: Decision to replace URL-based image fetching with secure local file upload system using Sharp for image processing, eliminating SSRF and IP leakage risks.
 
 ## How to Create a New ADR
 

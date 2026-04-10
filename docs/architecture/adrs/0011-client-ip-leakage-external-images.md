@@ -1,7 +1,7 @@
 # ADR 0011: Client IP Leakage via External Images Despite SSRF Prevention
 
 ## Status
-Accepted
+Deprecated (Replaced by Native Uploads - ADR 0016)
 
 ## Context
 The system accepts user-submitted image URLs for custom cocktails (UC 2.7) with SSRF prevention (ADR 0007, UC 13.5). The current implementation has a client-side security vulnerability:

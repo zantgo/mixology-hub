@@ -84,7 +84,7 @@ MixologyHub is a utility app that blends utility (inventory math) with lifestyle
 
 ## Flow 6: Custom Recipe Creation (UC 7.3)
 *   **Layout**: A dynamic Angular `FormArray`.
-*   **Fields**: Name, Instructions, Image URL (with instant preview on blur).
+*   **Fields**: Name, Instructions, Image File Upload (with instant local preview).
 *   **Dynamic Ingredients**: 
     *   Rows with `Ingredient Name` (autocomplete search), `Measure` (free text like "1 1/2 oz"), and a trash can icon to remove the row.
     *   "+ Add Ingredient" button appends a new row. Focus is automatically moved to the new input for screen readers and keyboard users.

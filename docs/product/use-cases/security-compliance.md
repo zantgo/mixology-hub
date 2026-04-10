@@ -24,18 +24,7 @@
 * **Then** the backend validates a CSRF token (or relies on strict `SameSite=Strict` cookie policies + CORS origin validation).
 * **And** rejects unauthorized automated requests to prevent session hijacking.
 
-**UC 13.5: SSRF and Client IP Leakage Prevention via Secure Image Proxy**
- * **Given** a user submits a custom cocktail with an `image_url`.
- * **Then** the validation layer strictly enforces the `https://` protocol (rejecting `http://`, `file://`, `javascript:`).
- * **And** the backend DNS resolver checks the hostname to explicitly reject routing to internal or private IP ranges (e.g., `10.x.x.x`, `127.0.0.1`, `169.254.169.254`, `localhost`).
- * **And** the backend Image Proxy Service fetches the image through a secure proxy with:
-   * **Content Validation**: Validates image format, size (max 5MB), and content type
-   * **Security Controls**: Timeouts (5s), redirect limits (2), and request filtering
-   * **Caching**: 24-hour cache to improve performance and reduce external requests
-   * **Abuse Prevention**: Rate limiting per user and per domain
- * **And** the frontend loads images via the secure proxy endpoint (`/api/images/proxy`) to prevent client IP leakage to external domains.
- * **And** users are shown a privacy notice explaining that their IP address is protected when viewing external images.
- * **And** if the proxy fails, the frontend shows a secure fallback image with appropriate error messaging.
+
 
 **UC 13.6: Pagination Cursor-Based DoS Prevention**
  * **Given** a malicious script attempts to scrape the database by requesting deep pagination.
@@ -76,6 +65,7 @@
  * **Given** a user has reported a public cocktail (creating a `REPORTED_CONTENT` row).
  * **When** an Admin reviews it and calls `PATCH /admin/reports/:id/resolve` with action `delete_cocktail`.
  * **Then** the cocktail is hard-deleted (not soft-deleted) using PostgreSQL's ON DELETE CASCADE.
+ * **And** the backend executes `fs.unlink` to delete the associated `.webp` files from `/uploads/cocktails/` directory to prevent orphaned image files.
  * **And** the report status is updated to `action_taken`.
  * **And** the system automatically emails the reporting user thanking them, and attempts to email the offending author with a warning.
  * **And** maintains audit trail of moderation actions for compliance.

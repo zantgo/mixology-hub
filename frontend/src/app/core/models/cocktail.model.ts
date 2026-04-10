@@ -17,7 +17,9 @@ export interface Cocktail {
   isPublic: boolean;
   source: 'local' | 'api' | 'ai';
   externalId?: string;
-  imageUrl?: string;
+  imageUrl?: string; // Legacy field for backward compatibility
+  imageFull?: string; // New field for full-size image
+  imageThumb?: string; // New field for thumbnail image
   ingredients: CocktailIngredient[];
   createdAt: Date;
 }

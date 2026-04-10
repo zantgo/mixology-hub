@@ -5,6 +5,8 @@ import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { UserInventoryService } from '../users/user-inventory.service';
+import { ImageService } from '../images/image.service';
+import axios from 'axios';
 
 export interface SearchFilters {
   ingredient?: string;
@@ -32,6 +34,7 @@ export class CocktailAggregatorService {
     private readonly localService: CocktailsService,
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly inventoryService: UserInventoryService,
+    private readonly imageService: ImageService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
@@ -258,7 +261,7 @@ export class CocktailAggregatorService {
   /**
    * Enhanced mapper with validation and additional metadata.
    */
-  private mapExternalToLocal(drink: any) {
+  private async mapExternalToLocal(drink: any) {
     if (!drink || !drink.idDrink || !drink.strDrink) {
       return null;
     }
@@ -295,6 +298,29 @@ export class CocktailAggregatorService {
     // Calculate complexity score
     const complexityScore = this.calculateComplexityScore(ingredients.length, totalVolumeMl);
 
+    // Download and process external image
+    let imageFull: string | null = null;
+    let imageThumb: string | null = null;
+    const externalImageUrl = this.validateImageUrl(drink.strDrinkThumb);
+    
+    if (externalImageUrl) {
+      try {
+        // Download the image
+        const response = await axios.get(externalImageUrl, { 
+          responseType: 'arraybuffer',
+          timeout: 5000 // 5 second timeout
+        });
+        
+        // Process with ImageService
+        const imagePaths = await this.imageService.processAndSaveBuffer(response.data);
+        imageFull = imagePaths.full;
+        imageThumb = imagePaths.thumb;
+      } catch (error) {
+        this.logger.warn(`Failed to download external image for ${drink.strDrink}:`, error);
+        // Continue without image - will use default fallback
+      }
+    }
+
     return {
       id: `ext-${drink.idDrink}`,
       externalId: drink.idDrink,
@@ -303,7 +329,9 @@ export class CocktailAggregatorService {
       instructions: drink.strInstructions || 'No instructions provided',
       is_public: true,
       source: 'api',
-      image_url: this.validateImageUrl(drink.strDrinkThumb),
+      image_url: externalImageUrl, // Keep for backward compatibility
+      image_full: imageFull, // New local image path
+      image_thumb: imageThumb, // New local thumbnail path
       category: drink.strCategory || null,
       alcoholic: drink.strAlcoholic === 'Alcoholic',
       glass: drink.strGlass || null,
@@ -451,7 +479,7 @@ export class CocktailAggregatorService {
 
     // 2. Normalize and combine
     const normalizedExternal = Array.isArray(externalCocktails) 
-      ? externalCocktails.map(drink => this.mapExternalToLocal(drink))
+      ? (await Promise.all(externalCocktails.map(drink => this.mapExternalToLocal(drink)))).filter(Boolean)
       : [];
 
     let unifiedList = [...localCocktails, ...normalizedExternal];
