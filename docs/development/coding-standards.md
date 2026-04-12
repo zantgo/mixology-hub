@@ -159,7 +159,7 @@ We follow the **Conventional Commits** specification to ensure a clean, searchab
   We explicitly accept this duplication and bundle size increase to guarantee perfect mathematical parity between the Angular UI and PostgreSQL, prioritizing data integrity over minimal bundle size and DRY purity.
 
 ### Decimal String Serialization Trade-off
-**Senior Architectural Decision: Decimal String Serialization over HTTP**
+**Architectural Decision: Decimal String Serialization over HTTP**
 **Explicit Trade-off:** To prevent IEEE 754 floating-point corruption over the network, we retract the decision to serialize quantities as native JSON numbers. All inventory quantities and recipe amounts MUST be serialized as strings (e.g., `"quantity": "500.3333"`) in JSON payloads. The Angular frontend will instantiate its `decimal.js` objects directly from these strings. We trade a slight increase in payload byte size for absolute mathematical parity across the stack.
 
 **Note:** IndexedDB serialization is no longer required as offline functionality has been removed.
@@ -206,7 +206,7 @@ const quantity = new Decimal(response.quantity); // Preserves exact precision
 - **Shared Math Constants:** All conversion factors (oz→ml, tbsp→ml, etc.) are defined in `shared/math-constants.ts` imported by both frontend and backend.
 
 ### Database Alignment
-- PostgreSQL `decimal(10,2)` columns must align with `decimal.js` precision. Use TypeORM transformers to convert between database strings and JavaScript numbers while maintaining precision.
+- PostgreSQL `decimal(10,4)` columns must align with `decimal.js` precision. Use TypeORM transformers to convert between database strings and JavaScript numbers while maintaining precision.
 
 ### Testing for Consistency
 - **Cross-Platform Tests:** Unit tests verify that frontend and backend calculations produce identical results for the same inputs.

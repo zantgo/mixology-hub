@@ -32,25 +32,26 @@ You can use this interface to explore all endpoints, view schema models, and exe
 
 1. **Strict Validation:** All endpoints use NestJS's `ValidationPipe` with `whitelist: true` and `forbidNonWhitelisted: true`. If a client sends an undocumented field, the API will automatically reject the request with a `400 Bad Request`, protecting against mass-assignment attacks.
 
-2. **Standardized Pagination:** Most list endpoints use cursor-based pagination for performance and consistency. However, endpoints that sort by dynamically calculated fields (like `makeability` or `rating`) use offset-based pagination as a pragmatic trade-off.
+2. **Standardized Pagination:** All list endpoints use traditional page/limit pagination for simplicity and consistency. To prevent deep pagination performance issues, page numbers are capped at 100.
 
-    **Cursor-based Pagination (Default):**
+    **Page-based Pagination (Standard):**
     - `limit` (default: 10, max: 100): Number of items per page
-    - `cursor` (optional): Opaque cursor string for pagination
-      - **Standard endpoints:** `timestamp_uuid` format (e.g., `2026-04-08T10:30:00.000Z_uuid`)
-      - **Unified Search:** Base64-encoded JSON containing `{t, id, ext}` for local/external offset tracking
+    - `page` (default: 1, max: 100): Page number (1-indexed)
    
    **Benefits:**
-   - Prevents UI duplication when new items are added during pagination
-   - More performant for large datasets (avoids OFFSET performance issues)
-   - Consistent ordering across pagination requests
-   - Deterministic results for infinite scroll implementations
+   - Simple and intuitive API for clients
+   - Consistent implementation across all endpoints
+   - Easy to implement pagination UI with page numbers
+   - Predictable performance with page number caps
+   - Compatible with traditional database queries using OFFSET/LIMIT
 
-   **Offset-based Pagination (Dynamic Sorting):**
-   - `limit` (default: 10, max: 100): Number of items per page
+   **Security Considerations:**
+   - Page number is capped at 100 to prevent deep pagination DoS attacks
+   - Users can browse up to 1,000 results (100 pages × 10 items per page)
+   - For deeper results, users must use search filters
    - `page` (optional, default: 1): Page number for offset calculation
    
-   **Trade-off:** When sorting by dynamically calculated fields (makeability, rating), cursor-based pagination is impossible without encoding the sort value into the cursor. For MVP simplicity, we accept offset-based pagination for these specific endpoints, acknowledging the potential for duplicates if data changes during pagination.
+    **Trade-off:** When sorting by dynamically calculated fields (makeability, rating), page-based pagination is used with strict page number limits to prevent performance degradation. For MVP simplicity, we accept offset-based pagination for these specific endpoints, acknowledging the potential for duplicates if data changes during pagination.
 
 3. **Standardized Error Response:** All error responses (4xx and 5xx) follow a consistent envelope structure to simplify frontend error handling.
 
@@ -65,33 +66,31 @@ You can use this interface to explore all endpoints, view schema models, and exe
    }
    ```
 
-4. **Response Envelope:** Paginated endpoints return data in a standard cursor-based envelope:
+4. **Response Envelope:** Paginated endpoints return data in a standard page-based envelope:
 
 ```json
 {
   "data": [],
-  "nextCursor": "abc123_uuid_or_timestamp",
-  "hasMore": true,
-  "limit": 10
+  "meta": {
+    "currentPage": 1,
+    "nextPage": 2,
+    "itemsPerPage": 10,
+    "totalItems": 150,
+    "totalPages": 15
+  }
 }
 ```
 
 **Implementation notes:**
-- Use `created_at` timestamp concatenated with `id` for deterministic ordering (e.g., `2026-04-08T10:30:00.000Z_uuid`)
-- The `nextCursor` is the value to use in the next request's `cursor` parameter
-- When `hasMore` is `false`, the client has reached the end of results
-- Always order by `created_at DESC, id DESC` for consistent pagination
-- Cursor is opaque to clients - they should treat it as an arbitrary string
+- `currentPage`: The current page number (1-indexed)
+- `nextPage`: The next page number, or `null` if this is the last page
+- `itemsPerPage`: Number of items per page (matches the `limit` parameter)
+- `totalItems`: Total number of items across all pages
+- `totalPages`: Total number of pages available
+- When `nextPage` is `null`, the client has reached the end of results
+- Always include proper ordering (e.g., `created_at DESC, id DESC`) for consistent pagination
 
- 5. **Idempotency Keys for State-Mutating Operations:** All POST, PUT, PATCH, and DELETE endpoints that modify state support the `Idempotency-Key` header to prevent duplicate operations from network retries or double-clicks. Idempotency keys follow the unified format defined in ADR 0012: `idempotency:v2:{userId}:{operation}:{source}:{uuid}` (where source is `client` or `system`) (e.g., `idempotency:v2:user_<ID>:cocktail:prepare:client:<UUID>` and `idempotency:v2:user_<ID>:preparation:undo:system:<UUID>`) to prevent cross-contamination between different users and operations while ensuring namespace safety across different origin vectors.
-
-    **Header:**
-    - `Idempotency-Key`: Optional UUID string generated by client
-   
-    **Behavior:**
-    - If key matches a recent successful operation (within 1 hour), returns cached response
-    - Client should generate a new UUID for each distinct user action
-    - Required for preparation, undo, and inventory updates
+ 5. **Simple Request Handling:** All POST, PUT, PATCH, and DELETE endpoints process requests directly without complex idempotency mechanisms. In the MVP, duplicate requests from network retries or double-clicks may result in duplicate operations that users must manually correct.
 
  6. **Rate Limiting:** Rate-limited endpoints return standard HTTP headers for client-side handling:
 
@@ -143,20 +142,21 @@ You can use this interface to explore all endpoints, view schema models, and exe
 
 Fetches a paginated list of cocktails. If the `name` query parameter is provided, the API triggers the **CocktailAggregatorService** to seamlessly blend local DB recipes with external recipes from TheCocktailDB.
 
+**Architectural Decision: Asymmetric Catalog Browsing (External API Dropping)**
+**Explicit Trade-off:** Because third-party REST APIs like TheCocktailDB require strict search parameters and do not natively support unbounded, paginated catalog browsing, an architectural asymmetry exists. We explicitly mandate that if a client calls GET /cocktails without providing a name search query, the CocktailAggregatorService MUST silently drop the external API query entirely and return ONLY paginated results from the Local PostgreSQL Database. We trade external catalog browsing comprehensiveness for 3rd-party API compatibility and adherence to external rate limits.
+
   
 - **Query Parameters:** 
   - `limit`: Number of items per page (default: 10, max: 100)
-  - `cursor`: Opaque cursor for pagination (required when `sort=relevance`, not used when `sort=makeability`)
-  - `page`: Page number for offset pagination (required when `sort=makeability`, default: 1)
+  - `page`: Page number (default: 1, max: 100)
   - `name`: Search query (optional)
   - `sort`: Sorting strategy (optional, default: `relevance`, options: `relevance`, `makeability`, `rating`)
-    - `relevance`: Default sorting based on search relevance (uses cursor-based pagination)
-    - `makeability`: Sorts by makeability status (makeable → missing 1 ingredient → unmakeable) (uses offset-based pagination)
-    - `rating`: Sorts by rating (highest to lowest) (uses offset-based pagination)
-      - **Senior Architectural Decision: External API Sorting Segregation**
-      - **Explicit Trade-off:** When users apply dynamic sorts (like `sort=rating` or `sort=makeability`), external API results inherently lack the relational data required to participate fairly. We explicitly decide that when custom sorts are applied, Local Database results will always be sorted and displayed first, with External API results appended at the end with a default "Null" value. We trade perfect chronological unification for accurate local data prioritization.
-      - **Senior Architectural Decision: Relevance Scoring Asymmetry in Unified Search**
-      - **Explicit Trade-off:** We explicitly acknowledge that cursor-based pagination is mathematically impossible when unifying two fundamentally disparate full-text search relevance scales (Local `pg_trgm` vs External API ranking). We mandate that when `sort=relevance` is active, the system MUST fallback to Offset-based pagination (`page/limit`) to allow in-memory merging and slicing. We trade absolute pagination stability for the ability to provide cross-platform relevance sorting.
+    - `relevance`: Default sorting based on search relevance
+    - `makeability`: Sorts by makeability status (makeable → missing 1 ingredient → unmakeable)
+    - `rating`: Sorts by rating (highest to lowest)
+      - **Architectural Decision: External API Sorting Exclusion for Makeability**
+      - **Explicit Trade-off:** When users apply `sort=makeability`, external API cocktails require expensive on-the-fly NLP trigram resolution to map string measurements to local UUIDs (UC 3.21), creating a severe CPU and Database bottleneck. We explicitly dictate that when `sort=makeability` is applied to Unified Search, the CocktailAggregatorService will automatically drop all External API results, returning ONLY Local Database cocktails. We trade search comprehensiveness for guaranteed server stability under heavy Math/NLP loads.
+      - **Note:** For other sort types (`rating`, `relevance`), external API results are included with appropriate default values.
 
 - **Response (200 OK):**
 
@@ -166,32 +166,36 @@ Fetches a paginated list of cocktails. If the `name` query parameter is provided
 
 "data": [
 
- {
- 
- "id": "11000",
- 
- "name": "Mojito",
- 
-  "imageFull": "/uploads/cocktails/uuid-full.webp",
-  "imageThumb": "/uploads/cocktails/uuid-thumb.webp",
- 
- "source": "api",
- 
-  "isPublic": true,
- 
- "ingredients": [
- 
- { "measure": "2 oz", "ingredient": { "name": "light rum" } }
- 
- ]
- 
- }
+  {
+  
+  "id": "11000",
+  
+  "name": "Mojito",
+  
+    "imageFull": null,
+    "imageThumb": null,
+  
+  "source": "api",
+  
+   "isPublic": true,
+  
+  "ingredients": [
+  
+  { "measure": "2 oz", "ingredient": { "name": "light rum" } }
+  
+  ]
+  
+  }
 
  ],
   
-"nextCursor": "eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9",
-"hasMore": false,
-"limit": 10
+ "meta": {
+    "currentPage": 1,
+    "nextPage": null,
+    "itemsPerPage": 10,
+    "totalItems": 1,
+    "totalPages": 1
+  }
   
    }
  
@@ -206,7 +210,7 @@ Creates a new custom cocktail recipe. The cocktail is automatically linked to th
   - `name`: "Secret Margarita"
   - `instructions`: "1. Rim glass with salt..."
   - `isPublic`: "true"
-  - `ingredients`: (JSON stringified array) `[{"ingredientId": "uuid...", "measure": "2 oz", "amount": 2, "unit": "oz"}]`
+  - `ingredients`: (JSON stringified array) `[{"ingredientId": "uuid...", "measure": "2 oz", "amount": "2", "unit": "oz"}]`
   - `image`: (File) The actual image file (JPG, PNG, WebP)
 
 - **Validation:**
@@ -294,23 +298,23 @@ Deletes a custom cocktail. Only the original creator can delete their cocktail.
 
 Calculates required ingredient amounts, mathematically converts units to match the user's inventory, and deducts the stock within an ACID-compliant database transaction.
 
-**Headers:**
-- `Idempotency-Key`: Optional UUID string to prevent duplicate preparations from network retries. If provided and matches a recent successful preparation, returns the previous response without performing the operation again.
-
 **Request Body (optional):**
 ```json
 {
   "servings": 1,
-  "totalVolumeMl": 120
+  "totalVolumeMl": "120.00"
 }
 ```
 
 **Parameters:**
 - `servings`: Optional number of servings (default: 1, min: 1, max: 1000)
-- `totalVolumeMl`: Optional total volume in ml for part-based recipes (default: 60, min: 1, max: 10000)
+- `totalVolumeMl`: Optional total volume in ml for part-based recipes, serialized as a string to preserve decimal precision (no default, min: "1", max: "10000")
 
-**Senior Architectural Decision: Volume-Over-Servings Precedence for Part-Based Math**
+**Architectural Decision: Volume-Over-Servings Precedence for Part-Based Math**
 **Explicit Trade-off:** To resolve mathematical ambiguity during API requests, we dictate that if a recipe uses ratio/parts, the `totalVolumeMl` parameter represents the **absolute total yield** of the transaction. If `servings` is also provided, it is treated strictly as analytical metadata (stored in `PREPARATION_LOGS` for user history) and is mathematically ignored during inventory deduction. We trade dynamic per-serving multiplication on part-based drinks for strict, predictable total-volume deductions.
+
+**Architectural Decision: Volume Scaling Exclusivity for Part-Based Recipes**
+**Explicit Trade-off:** We explicitly restrict the `totalVolumeMl` parameter exclusively to part/ratio-based cocktails. If a client passes `totalVolumeMl` to a fixed-unit recipe (e.g., standard ounces or ml), the backend will entirely ignore the volume request and scale strictly using the `servings` multiplier integer. We trade the flexibility of "make exactly 500ml of Margarita" for rigid, predictable mathematical integrity of classic culinary ratios.
 
 **Response (200 OK):**
 ```json
@@ -323,35 +327,26 @@ Calculates required ingredient amounts, mathematically converts units to match t
       "ingredientName": "Rum",
       "amount": "2",
       "unit": "oz",
-      "remainingStock": 480
+      "remainingStock": "480"
     }
   ]
 }
 ```
 
-**Response (200 OK - Idempotent Replay):**
-If the same `Idempotency-Key` is reused within 1 hour:
-```json
-{
-  "message": "Cocktail already prepared with this idempotency key",
-  "preparationId": "uuid-of-original-preparation",
-  "preparedAt": "2026-04-08T10:30:00.000Z",
-  "isReplay": true
-}
-```
 
-**Headers (Idempotent Response):**
-- `X-Idempotent-Replayed`: `true` when returning cached response
 
 **Error (400 Bad Request):**
 ```json
 {
   "statusCode": 400,
   "message": "Not enough stock for ingredient: light rum",
+  "error": "Bad Request",
+  "timestamp": "2026-04-08T10:30:00.000Z",
+  "path": "/cocktails/123/prepare",
   "details": {
     "ingredient": "light rum",
-    "required": 2,
-    "available": 1.5,
+    "required": "2",
+    "available": "1.5",
     "unit": "oz"
   }
 }
@@ -361,7 +356,10 @@ If the same `Idempotency-Key` is reused within 1 hour:
 ```json
 {
   "statusCode": 400,
-  "message": "Total volume (50.0 L) exceeds maximum allowed (10.0 L)"
+  "message": "Total volume (50.0 L) exceeds maximum allowed (10.0 L)",
+  "error": "Bad Request",
+  "timestamp": "2026-04-08T10:30:00.000Z",
+  "path": "/cocktails/123/prepare"
 }
 ```
 
@@ -381,9 +379,9 @@ The core business logic endpoint. Evaluates the user's current inventory against
 
   
 
-- **Query Parameters:** `limit`, `cursor`
+- **Query Parameters:** `limit`, `page`
 
-- **Response (200 OK):** List of fully prepare-able `Cocktail` objects.
+- **Response (200 OK):** List of fully prepare-able `Cocktail` objects with pagination metadata.
 
   
 
@@ -403,15 +401,111 @@ Adds or updates an ingredient in the user's inventory. Uses an `UPSERT` pattern 
 
 "quantity": "500",
 
-"unit": "ml",
+ "unit": "ml", // Must match INGREDIENTS.baseUnit for the given ingredientId
 
-"sourceCocktailId": "uuid-string" // Optional: allows adding private ingredients from public recipes (UC 10.8)
+ "sourceCocktailId": "uuid-string" // Optional: allows adding private ingredients from public recipes (UC 10.8)
 
-}
+ }
 
+ - **Response (200 OK):**
+ ```json
+ {
+   "id": "uuid-string",
+   "ingredientId": "uuid-string",
+   "quantity": "500",
+   "unit": "ml", // Derived from INGREDIENTS.baseUnit via JOIN
+   "ingredient": {
+     "id": "uuid-string",
+     "name": "Vodka",
+     "category": "spirit",
+     "baseUnit": "ml"
+   }
+  }
+  ```
+
+#### `POST /user-inventory/bulk` (Bulk Add Inventory Items)
+Adds or updates multiple ingredients in the user's inventory within a single all-or-nothing transaction.
+
+- **Request Body:**
+```json
+[
+  {
+    "ingredientId": "uuid-string-1",
+    "quantity": "500",
+    "unit": "ml"
+  },
+  {
+    "ingredientId": "uuid-string-2", 
+    "quantity": "2",
+    "unit": "oz"
+  }
+]
 ```
 
-  
+- **Validation:**
+  - Array must contain 1-100 items
+  - Each item must have valid `ingredientId`, `quantity` (positive number), and `unit` matching the ingredient's base unit
+  - All items validated before any database operations
+
+- **Response (200 OK):**
+```json
+{
+  "success": true,
+  "added": 2,
+  "updated": 0,
+  "failed": 0,
+  "items": [
+    {
+      "id": "uuid-string-1",
+      "ingredientId": "uuid-string-1",
+      "quantity": "500",
+      "unit": "ml",
+      "status": "added"
+    },
+    {
+      "id": "uuid-string-2",
+      "ingredientId": "uuid-string-2",
+      "quantity": "2",
+      "unit": "oz",
+      "status": "added"
+    }
+  ]
+}
+```
+
+- **Error (400 Bad Request):** Invalid input data (e.g., invalid unit, missing required fields)
+- **Error (401 Unauthorized):** User not authenticated
+- **Error (422 Unprocessable Entity):** Transaction rolled back due to validation error in one or more items
+
+#### `DELETE /user-inventory/bulk` (Bulk Delete Inventory Items)
+Deletes multiple inventory items within a single transaction.
+
+- **Request Body:**
+```json
+{
+  "inventoryIds": ["uuid-1", "uuid-2", "uuid-3"]
+}
+```
+
+- **Validation:**
+  - Array must contain 1-100 inventory item IDs
+  - All IDs must belong to the authenticated user
+  - Items used in recent preparations (within last 15 minutes) cannot be deleted
+
+- **Response (200 OK):**
+```json
+{
+  "success": true,
+  "deleted": 3,
+  "failed": 0,
+  "blockedByPreparations": []
+}
+```
+
+- **Error (400 Bad Request):** Invalid input data
+- **Error (401 Unauthorized):** User not authenticated
+- **Error (403 Forbidden):** Attempting to delete inventory items that don't belong to user
+- **Error (409 Conflict):** One or more items cannot be deleted due to recent preparations
 
 ---
 
@@ -514,7 +608,7 @@ Standard CRUD endpoints utilizing REST conventions:
 #### `GET /users/me/cocktails` (Fetch Authored Custom Cocktails)
 Fetches a paginated list of cocktails authored by the authenticated user.
 
-- **Query Parameters:** `limit`, `cursor`
+- **Query Parameters:** `limit`, `page`
 - **Response (200 OK):**
 ```json
 {
@@ -531,9 +625,13 @@ Fetches a paginated list of cocktails authored by the authenticated user.
       "createdAt": "2026-04-08T10:30:00.000Z"
     }
   ],
-  "nextCursor": "eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9",
-  "hasMore": false,
-  "limit": 10
+  "meta": {
+    "currentPage": 1,
+    "nextPage": null,
+    "itemsPerPage": 10,
+    "totalItems": 1,
+    "totalPages": 1
+  }
 }
 ```
 
@@ -548,7 +646,7 @@ Fetches the user's recent preparation logs, primarily used to populate the "Undo
     {
       "id": "prep-uuid-123",
       "cocktail_id": "cocktail-uuid-456",
-      "external_cocktail_id": "11000",
+      "external_cocktail_id": null,
       "cocktail_name": "Mojito",
       "servings": 2,
       "deducted_ingredients": [
@@ -562,11 +660,33 @@ Fetches the user's recent preparation logs, primarily used to populate the "Undo
       "created_at": "2026-04-08T10:30:00.000Z",
       "undone": false,
        "can_undo": true
+    },
+    {
+      "id": "prep-uuid-124",
+      "cocktail_id": null,
+      "external_cocktail_id": "11000",
+      "cocktail_name": "Mojito (External)",
+      "servings": 1,
+      "deducted_ingredients": [
+        {
+          "ingredient_id": "rum-uuid",
+          "ingredient_name": "Rum",
+          "amount": "2",
+          "unit": "oz"
+        }
+      ],
+      "created_at": "2026-04-08T10:25:00.000Z",
+      "undone": false,
+       "can_undo": true
     }
   ],
-  "nextCursor": "eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9",
-  "hasMore": false,
-  "limit": 10
+  "meta": {
+    "currentPage": 1,
+    "nextPage": 2,
+    "itemsPerPage": 2,
+    "totalItems": 10,
+    "totalPages": 5
+  }
 }
 ```
 
@@ -621,7 +741,7 @@ Fetches reported content for moderation review.
 **Query Parameters:**
 - `status`: Filter by status (`pending`, `reviewed`, `resolved`, `dismissed`)
 - `type`: Filter by content type (`cocktail`, `comment`, `user`)
-- `limit`, `cursor`: Standard pagination
+- `limit`, `page`: Standard pagination
 
 **Response (200 OK):**
 ```json
@@ -643,9 +763,13 @@ Fetches reported content for moderation review.
       }
     }
   ],
-  "nextCursor": "cursor-string",
-  "hasMore": true,
-  "limit": 20
+  "meta": {
+    "currentPage": 1,
+    "nextPage": 2,
+    "itemsPerPage": 20,
+    "totalItems": 100,
+    "totalPages": 5
+  }
 }
 ```
 
@@ -717,131 +841,88 @@ Updates the status of a reported content item.
 
 ## 📄 Pagination Implementation Guide
 
-### Cursor-based Pagination (Default for Chronological Sorting)
+### Page-based Pagination (Standard Implementation)
 
-For production applications with real-time data updates, cursor-based pagination prevents the "skip/offset" problem where new items added during pagination cause duplicates or missed items. **Note:** Unified search endpoints that combine local database results (UUIDs) with external API results (integer strings) use hybrid pagination: cursor-based for local results and array-index-based for cached external results.
+All list endpoints use traditional page/limit pagination for simplicity and consistency. To prevent deep pagination performance issues, page numbers are capped at 100 (allowing users to browse up to 1,000 results with default limit of 10).
 
-### Offset-based Pagination (For Dynamic Sorting)
+### Architectural Decision: Unified Cache-Slicing Pagination
+**Explicit Trade-off:** Because we cannot natively execute SQL `LIMIT/OFFSET` across a unified blend of PostgreSQL rows and third-party REST API responses, we explicitly abandon database-level pagination for the Unified Search endpoint. We mandate that the `CocktailAggregatorService` will fetch a bounded batch (e.g., Top 100) from both sources, combine them in memory, cache the unified array in Redis for 5 minutes, and apply `slice(offset, offset + limit)` strictly against the cached array. We trade database memory optimization for mathematical pagination integrity across disjointed data sources.
 
-Endpoints that sort by dynamically calculated fields (like `makeability` or `rating`) use offset-based pagination as a pragmatic MVP trade-off. This is because cursor-based pagination requires deterministic ordering, which is impossible with fields that can change between requests (e.g., makeability depends on current inventory, ratings change as users vote).
+### Architectural Decision: Hard-Capping Unified Search Depth
+**Explicit Trade-off:** Because we combine and cache local and external arrays in memory to support unified page-based pagination, we must enforce a hard bounds-limit on the initial data fetch to prevent Redis payload explosion. We explicitly mandate that Unified Search will only ever fetch and cache the Top 100 local and Top 100 external results per query. We trade deep database exploration (users will never be able to paginate past the 100th local result for a broad term) for the ability to synchronously merge, sort, and cache disparate data sources.
 
-**Architectural Decision:** We accept the risk of duplicates/misses during pagination for dynamic sorts in exchange for implementation simplicity. For Phase 2+, we may implement materialized views with refresh triggers to enable cursor-based pagination for these fields.
-
-**Implementation notes:**
-* Use `created_at` timestamp concatenated with `id` (e.g., `2026-04-08T10:30:00.000Z_uuid`).
-* *Note on UUIDs:* While UUIDv4 is random and not chronologically sortable, using it as a tie-breaker (`id < :cursorId`) for records with the exact same millisecond timestamp guarantees **deterministic pagination** and prevents skipping/duplicating records.
-
-**Senior Architectural Decision: Pagination Cursor Preservation for Exhausted Resources**
-**Explicit Trade-off:** When paginating through mixed local/external results, if local resources are exhausted while external resources remain, the local cursor components (`timestamp`, `id`) must be preserved as-is (or set to null if never existed) rather than resetting to `new Date()`. This prevents infinite pagination loops where each request generates a fresh timestamp, resetting the local pagination boundary. We trade the simplicity of always generating fresh timestamps for guaranteed pagination completion.
-
-**Request Format:**
-```
-GET /cocktails?limit=20&cursor=eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9
-```
+### Architectural Decision: Acceptance of Pagination Data Anomalies (Offset Shift)
+**Explicit Trade-off:** By strictly mandating standard page-based (offset) pagination and explicitly banning cursor-based pagination to maintain API simplicity, we inherently accept "Offset Shift" anomalies. If database rows are inserted or deleted by other users while a client is actively paginating through a list, the data offset will shift. We explicitly accept that users may occasionally see duplicate items on subsequent pages or miss items entirely during active data mutation. We trade strict pagination stability for universal REST API consistency and the eradication of complex base64 cursor state management.
 
 **Implementation Pattern for Unified Search:**
 ```typescript
-// Cursor encoding/decoding utilities for Unified Search
-private createCompositeCursor(timestamp: Date, id: string, externalOffset: number): string {
-  const cursorObj = {
-    t: timestamp.toISOString(),
-    id: id,
-    ext: externalOffset
-  };
-  return Buffer.from(JSON.stringify(cursorObj)).toString('base64');
-}
-
-private parseCompositeCursor(cursor: string): { timestamp: Date, id: string, externalOffset: number } {
-  const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
-  return {
-    timestamp: new Date(decoded.t),
-    id: decoded.id,
-    externalOffset: decoded.ext
-  };
-}
-
-// Unified search service method
-async unifiedSearch(limit: number, cursor?: string): Promise<PaginatedResponse<Cocktail>> {
-  let localCursor = null;
-  let externalOffset = 0;
+async unifiedSearch(limit: number, page: number = 1, query: string): Promise<PaginatedResponse<Cocktail>> {
+  const offset = (page - 1) * limit;
+  const cacheKey = `search_unified:${query}`;
   
-  // Parse composite cursor if provided
-  if (cursor) {
-    const parsed = this.parseCompositeCursor(cursor);
-    localCursor = { timestamp: parsed.timestamp, id: parsed.id };
-    externalOffset = parsed.externalOffset;
+  let combinedResults = await this.cacheManager.get<Cocktail[]>(cacheKey);
+  
+  if (!combinedResults) {
+    // Fetch bounded UNPAGINATED results (e.g., top 100) from both sources
+    const localResults = await this.getLocalCocktails(query, 100); 
+    const externalResults = await this.getExternalCocktails(query, 100);
+    
+    // Combine and sort
+    combinedResults = this.combineAndSortResults(localResults, externalResults);
+    
+    // Cache the entire array for 5 minutes
+    await this.cacheManager.set(cacheKey, combinedResults, 300);
   }
   
-  // Fetch local results with cursor pagination
-  const localResults = await this.getLocalCocktails(limit, localCursor);
+  // Apply page-based pagination to the cached array
+  const paginatedData = combinedResults.slice(offset, offset + limit);
+  const totalItems = combinedResults.length;
   
-  // Fetch external results with offset pagination
-  const externalResults = await this.getExternalCocktails(limit, externalOffset);
-  
-  // Combine and sort results
-  const combinedResults = this.combineAndSortResults(localResults, externalResults);
-  const data = combinedResults.slice(0, limit);
-  const hasMore = combinedResults.length > limit;
-  
-  // Generate next composite cursor
-  let nextCursor = null;
-  if (hasMore && data.length > 0) {
-    const lastItem = data[data.length - 1];
-    // Determine if last item was local or external to update appropriate cursor values
-    const isLocal = lastItem.source === 'local';
-    const nextExternalOffset = isLocal ? externalOffset : externalOffset + data.filter(r => r.source === 'external').length;
-    
-    // For local cursor: if last item is local, use its values; otherwise preserve existing cursor or use null
-    let nextLocalId = null;
-    let nextTimestamp = null;
-    
-    if (isLocal) {
-      nextLocalId = lastItem.id;
-      nextTimestamp = lastItem.createdAt;
-    } else if (localResults.length > 0) {
-      // We have local results but last item is external - use last local result
-      nextLocalId = localResults[localResults.length - 1].id;
-      nextTimestamp = localResults[localResults.length - 1].createdAt;
-    } else if (localCursor) {
-      // No local results in this page but we have a previous cursor - preserve it
-      nextLocalId = localCursor.id;
-      nextTimestamp = localCursor.timestamp;
+  return {
+    data: paginatedData,
+    meta: {
+      currentPage: page,
+      nextPage: page < Math.ceil(totalItems / limit) ? page + 1 : null,
+      itemsPerPage: limit,
+      totalItems,
+      totalPages: Math.ceil(totalItems / limit)
     }
-    // If none of the above, nextLocalId and nextTimestamp remain null
-    
-    nextCursor = this.createCompositeCursor(nextTimestamp, nextLocalId, nextExternalOffset);
-  }
-  
-  return {
-    data,
-    nextCursor,
-    hasMore,
-    limit
   };
 }
 
-// Cursor encoding/decoding utilities
-private createCursor(timestamp: Date, id: string): string {
-  return `${timestamp.toISOString()}_${id}`;
+// Example service method for fetching local cocktails (unpaginated for unified search)
+async getLocalCocktails(query: string, maxResults: number): Promise<Cocktail[]> {
+  return await this.cocktailRepository.find({
+    where: { 
+      name: ILike(`%${query}%`),
+      isDeleted: false 
+    },
+    order: { createdAt: 'DESC', id: 'DESC' },
+    take: maxResults,
+  });
 }
 
-private parseCursor(cursor: string): [Date, string] {
-  const [timestampStr, id] = cursor.split('_');
-  return [new Date(timestampStr), id];
+// Example service method for fetching external cocktails (unpaginated for unified search)
+async getExternalCocktails(query: string, maxResults: number): Promise<Cocktail[]> {
+  const externalResults = await this.externalApiService.searchCocktails(query);
+  // Return top N results from external API
+  return externalResults.slice(0, maxResults);
 }
+
 ```
 
-**Benefits:**
-- ✅ No duplicates when new items are added during pagination
-- ✅ Consistent ordering across all pages
-- ✅ Better performance for deep pagination (no OFFSET clause)
-- ✅ Works well with infinite scroll UI patterns
+**Benefits of Page-based Pagination:**
+- ✅ Simple and intuitive API for clients
+- ✅ Consistent implementation across all endpoints
+- ✅ Easy to implement pagination UI with page numbers
+- ✅ Predictable performance with page number caps
+- ✅ Compatible with traditional database queries using OFFSET/LIMIT
 
 **Implementation Status:**
-- Cursor-based pagination is the default for chronological sorting (`created_at DESC`)
-- Offset-based pagination is used for dynamic sorting (`makeability`, `rating`)
-- Frontend components detect pagination type from the `sort` parameter
-- API consistency is maintained through clear parameter documentation
+- Page-based pagination is used for all endpoints
+- Page number is capped at 100 to prevent performance issues
+- Frontend components use page numbers for navigation
+- API consistency is maintained through standardized response format
 
 ---
 

@@ -48,7 +48,8 @@ export class CocktailAggregatorService {
     userId?: string,
   ) {
     try {
-      const { limit = 10, offset = 0 } = paginationQuery;
+      const { limit = 10, page = 1 } = paginationQuery;
+      const offset = (page - 1) * limit;
 
       // Validate and sanitize inputs
       if (name && name.trim().length > 100) {
@@ -60,43 +61,21 @@ export class CocktailAggregatorService {
       // Generate cache key for this search
       const cacheKey = this.generateSearchCacheKey(sanitizedName, options, userId);
       
-      // Try to get pagination state from cache
-      let paginationState = await this.cacheManager.get<any>(`pagination:${cacheKey}`);
+      // Try to get cached results
+      let cachedResults = await this.cacheManager.get<any[]>(`search:${cacheKey}`);
       
-      if (!paginationState || offset === 0) {
-        // Cache miss or first page - fetch fresh data
-        paginationState = await this.fetchAndCacheSearchResults(
-          sanitizedName, options, userId, cacheKey
-        );
+      if (!cachedResults) {
+        // Cache miss - fetch fresh data
+        cachedResults = await this.fetchSearchResults(sanitizedName, options, userId);
+        // Cache results for 5 minutes
+        await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 300);
       }
 
-      // Apply pagination using cached state
-      const { unifiedList, lastId } = paginationState;
-      
-      // Use optimized pagination: if we have lastId, use cursor-based pagination
-      let paginatedList;
-      if (lastId && offset > 0) {
-        // Find position of lastId and slice from there
-        const lastIndex = unifiedList.findIndex(item => item.id === lastId);
-        if (lastIndex !== -1) {
-          paginatedList = unifiedList.slice(lastIndex + 1, lastIndex + 1 + limit);
-        } else {
-          // Fallback to offset pagination
-          paginatedList = unifiedList.slice(offset, offset + limit);
-        }
-      } else {
-        // First page or no lastId - use offset pagination
-        paginatedList = unifiedList.slice(offset, offset + limit);
-      }
-
-      // Update lastId in cache for next page
-      if (paginatedList.length > 0) {
-        const newLastId = paginatedList[paginatedList.length - 1].id;
-        await this.cacheManager.set(`pagination:${cacheKey}`, {
-          ...paginationState,
-          lastId: newLastId,
-        }, 300); // 5 minute TTL
-      }
+      // Apply pagination
+      const paginatedList = cachedResults.slice(offset, offset + limit);
+      const totalItems = cachedResults.length;
+      const totalPages = Math.ceil(totalItems / limit);
+      const hasNextPage = page < totalPages;
 
       // 7. Add metadata
       // Count local vs external cocktails in the paginated results
@@ -107,7 +86,7 @@ export class CocktailAggregatorService {
         sources: {
           local: localCount,
           external: externalCount,
-          total: paginationState.unifiedList.length,
+          total: totalItems,
         },
         filters: options.filters || {},
         sort: {
@@ -118,9 +97,13 @@ export class CocktailAggregatorService {
 
       return {
         data: paginatedList,
-        total: unifiedList.length,
-        limit,
-        offset,
+        meta: {
+          currentPage: page,
+          nextPage: hasNextPage ? page + 1 : null,
+          itemsPerPage: limit,
+          totalItems: totalItems,
+          totalPages: totalPages
+        },
         metadata,
       };
 
@@ -128,11 +111,16 @@ export class CocktailAggregatorService {
       this.logger.error('Enhanced search unified failed:', err);
       
       // Graceful degradation: return empty results with error info
+      const { limit = 10, page = 1 } = paginationQuery;
       return { 
         data: [], 
-        total: 0, 
-        limit: paginationQuery.limit || 10, 
-        offset: paginationQuery.offset || 0,
+        meta: {
+          currentPage: page,
+          nextPage: null,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0
+        },
         metadata: {
           error: 'Search failed',
           sources: { local: 0, external: 0, total: 0 },
@@ -465,12 +453,11 @@ export class CocktailAggregatorService {
     return keyParts.filter(part => part).join(':');
   }
 
-  private async fetchAndCacheSearchResults(
+  private async fetchSearchResults(
     name: string,
     options: SearchOptions,
-    userId?: string,
-    cacheKey?: string
-  ): Promise<{ unifiedList: any[]; lastId?: string }> {
+    userId?: string
+  ): Promise<any[]> {
     // 1. Fetch data from all sources in parallel
     const [localCocktails, externalCocktails] = await Promise.all([
       options.includeLocal !== false ? this.fetchLocalCocktails(name) : Promise.resolve([]),
@@ -497,22 +484,13 @@ export class CocktailAggregatorService {
     // 5. Sort results
     unifiedList = this.sortCocktails(unifiedList, options.sortBy, options.sortOrder);
 
-    // Cache the full results
-    if (cacheKey) {
-      await this.cacheManager.set(
-        `pagination:${cacheKey}`,
-        { unifiedList, lastId: undefined },
-        300 // 5 minute TTL
-      );
-    }
-
-    return { unifiedList };
+    return unifiedList;
   }
 
   private async fetchLocalCocktails(name: string): Promise<any[]> {
     try {
       // Use a high limit internally to allow filtering
-      const response = await this.localService.findAll({ limit: 10000, offset: 0 });
+      const response = await this.localService.findAll({ limit: 10000, page: 1 });
       const localCocktails = response.data;
       
       if (!name) {

@@ -1,50 +1,69 @@
-# ADR 0008: O(N×Page) DoS Risk in Makeability Pagination
+# ADR 0008: Page-based Pagination DoS Protection
 
 ## Status
 Accepted
 
 ## Context
-The makeability engine (ADR 0004) performs unit conversions in Node.js instead of PostgreSQL. When combined with offset-based pagination for dynamic sorting (`sort=makeability`), this creates a significant Denial of Service (DoS) vulnerability:
+With the migration to standardized page-based pagination across all endpoints, we must address Denial of Service (DoS) vulnerabilities inherent in offset-based pagination:
 
-**The Problem**: To serve page 5 (items 41-50) of makeable cocktails sorted by makeability:
-1. Backend queries database for candidate cocktails
-2. Performs in-memory unit conversion math on ALL results
-3. Sorts results by makeability score in memory  
-4. Discards first 40 items, returns items 41-50
+**The Problem**: Offset-based pagination (`OFFSET` in SQL) has O(N) complexity where N is the offset value. To serve page 100 (items 991-1000):
+1. Database must scan through first 990 records
+2. Discard them, then return items 991-1000
+3. Performance degrades linearly with page number
+4. Malicious users can request deep pages to exhaust database resources
 
 **The Attack Vector**: A malicious user requests `page=1000` (items 9,991-10,000):
-- Node.js must process ~10,000 cocktails in memory
-- Each cocktail requires complex unit conversions
-- Event loop blocked for seconds/minutes
-- Server becomes unresponsive to other requests
+- PostgreSQL must scan through ~10,000 records
+- Query execution time increases linearly
+- Database CPU and I/O resources exhausted
+- Legitimate users experience slow responses or timeouts
 
-This breaks the "early termination" optimization mentioned in UC 3.25 where the system could stop after finding `limit` makeable cocktails.
+**Makeability-Specific Risk**: The makeability engine performs in-memory unit conversions. Deep pagination would require processing thousands of cocktails in memory, blocking the Node.js event loop.
 
 ## Decision
-Implement **strict computational limits for makeability endpoints**:
+Implement **strict pagination limits across all endpoints** to prevent DoS attacks:
 
-1. **Maximum Iteration Depth**: Evaluate at most 200 candidate cocktails per request
-2. **Partial Results Allowed**: Return fewer than `limit` results if max iterations reached
-3. **Hard Page Limit**: Maximum `page=10` (100 items with default `limit=10`)
-4. **Maximum Offset**: Maximum `offset=100` regardless of page/limit combination
-5. **Early Termination**: Stop processing after finding `limit` makeable cocktails OR reaching max iterations
-6. **Early Rejection**: Return `400 Bad Request` for requests beyond limits
-7. **Clear Error Messages**: Explain the computational constraints to users
+1. **Global Page Limit**: Maximum `page=100` across all endpoints
+2. **Limit Validation**: `limit` parameter capped at 100
+3. **Early Rejection**: Return `400 Bad Request` for requests beyond limits
+4. **Clear Error Messages**: Explain pagination constraints to users
+5. **Consistent Implementation**: All endpoints use same validation rules
 
-**Critical Fix for Sparse Makeability DoS**: Even Page 1 requests must be bounded. If a user has 1ml of every ingredient, SQL returns all cocktails, but we only evaluate 200 before returning partial results.
+**Rationale**: Capping at page 100 (1,000 items with default limit of 10) provides reasonable browsing depth while preventing performance degradation. Users needing deeper results should use search filters.
 
 ### Implementation
 ```typescript
-// Makeability engine with iteration limits
+// Global pagination DTO with validation
+export class PaginationQueryDto {
+  @ApiPropertyOptional({ description: 'Number of items to return (default: 10, max: 100)', minimum: 1, maximum: 100, default: 10 })
+  @IsOptional()
+  @IsPositive()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  limit?: number = 10;
+
+  @ApiPropertyOptional({ description: 'Page number (default: 1, max: 100 to prevent database performance degradation)', minimum: 1, maximum: 100, default: 1 })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100, { message: 'Page number cannot exceed 100 to prevent database performance degradation.' })
+  @Type(() => Number)
+  page?: number = 1;
+}
+
+// Makeability engine with page-based pagination
 class MakeabilityEngine {
   private readonly MAX_ITERATIONS = 200;
   
   async findMakeableCocktails(
     userId: string,
     limit: number = 10,
-    offset: number = 0
-  ): Promise<{ cocktails: Cocktail[]; hasMore: boolean; iterations: number }> {
-    // 1. Get candidate cocktails from SQL (HAVING clause)
+    page: number = 1
+  ): Promise<{ data: Cocktail[]; meta: PaginationMeta }> {
+    const offset = (page - 1) * limit;
+    
+    // 1. Get candidate cocktails from SQL
     const candidates = await this.getCandidateCocktails(userId);
     
     // 2. Evaluate with iteration limit
@@ -53,7 +72,7 @@ class MakeabilityEngine {
     
     for (const cocktail of candidates) {
       if (iterations >= this.MAX_ITERATIONS) {
-        break; // Critical: Prevent DoS from sparse makeability
+        break; // Prevent DoS from sparse makeability
       }
       
       iterations++;
@@ -69,8 +88,8 @@ class MakeabilityEngine {
       }
     }
     
-    // 3. Check for pagination overshoot (sparse inventory edge case)
-    if (makeableCocktails.length > 0 && makeableCocktails.length <= offset) {
+    // 3. Check for pagination overshoot
+    if (iterations >= this.MAX_ITERATIONS && makeableCocktails.length > 0 && makeableCocktails.length <= offset) {
       throw new BadRequestException(
         'Pagination overshoot: Requested page exceeds available results due to computation limits.',
         'PAGINATION_OVERSHOOT'
@@ -81,63 +100,65 @@ class MakeabilityEngine {
     const paginated = makeableCocktails.slice(offset, offset + limit);
     
     // 5. Determine if there are more results
-    // hasMore = true if we didn't hit iteration limit AND have more candidates
-    const hasMore = iterations < this.MAX_ITERATIONS && 
-                   makeableCocktails.length >= limit + offset;
+    const hasMore = iterations < this.MAX_ITERATIONS && makeableCocktails.length >= limit + offset;
+    
+    const totalItems = makeableCocktails.length;
     
     return {
-      cocktails: paginated,
-      hasMore,
+      data: paginated,
+      meta: {
+        totalItems,
+        totalPages: Math.ceil(totalItems / limit),
+        hasMore
+      },
       iterations
     };
   }
 }
 
-// Pagination validation middleware
-function validateMakeabilityPagination(limit: number, page: number): void {
-  const maxPage = 10;
-  const maxOffset = 100;
+// Global pagination validation (applies to all endpoints)
+function validatePagination(limit: number, page: number): void {
+  const maxPage = 100;
+  const maxLimit = 100;
   
-  const offset = (page - 1) * limit;
-  
-  if (page > maxPage) {
+  if (limit > maxLimit) {
     throw new BadRequestException(
-      `Page ${page} exceeds maximum allowed page ${maxPage} for makeability sorting. ` +
-      `Due to in-memory computation constraints (ADR 0004), deep pagination is limited.`
+      `Limit ${limit} exceeds maximum allowed limit ${maxLimit}. ` +
+      `Please use a smaller limit value.`
     );
   }
   
-  if (offset > maxOffset) {
+  if (page > maxPage) {
     throw new BadRequestException(
-      `Offset ${offset} exceeds maximum allowed offset ${maxOffset} for makeability sorting. ` +
-      `Please use a smaller page number or contact support for bulk data needs.`
+      `Page ${page} exceeds maximum allowed page ${maxPage}. ` +
+      `Due to database performance constraints, deep pagination is limited. ` +
+      `Please use search filters to reduce result sets.`
     );
   }
 }
 
-// Makeability endpoint
+// Makeability endpoint with page-based pagination
 @Get('/user-inventory/makeable')
 async getMakeableCocktails(
   @Query('limit', new DefaultValuePipe(10), new ParseIntPipe({ min: 1, max: 100 })) limit: number,
-  @Query('page', new DefaultValuePipe(1), new ParseIntPipe({ min: 1 })) page: number,
+  @Query('page', new DefaultValuePipe(1), new ParseIntPipe({ min: 1, max: 100 })) page: number,
   @Query('sort') sort?: string
 ): Promise<PaginatedResponse<Cocktail>> {
   
-  // Only apply limits for makeability sorting
-  if (sort === 'makeability') {
-    validateMakeabilityPagination(limit, page);
-  }
+  // Apply global pagination validation
+  validatePagination(limit, page);
   
-  const offset = (page - 1) * limit;
-  const result = await this.makeabilityEngine.findMakeableCocktails(userId, limit, offset);
+  const result = await this.makeabilityEngine.findMakeableCocktails(userId, limit, page);
   
   return {
-    data: result.cocktails,
-    nextCursor: result.hasMore ? this.createCursor(page, limit) : null,
-    hasMore: result.hasMore,
-    limit,
-    // Include metadata about iteration limits
-    metadata: {
+    data: result.data,
+    meta: {
+      currentPage: page,
+      nextPage: result.meta.hasMore ? page + 1 : null,
+      itemsPerPage: limit,
+      totalItems: result.meta.totalItems,
+      totalPages: result.meta.totalPages,
+      // Include iteration limits for makeability within meta object
       iterations: result.iterations,
       maxIterations: this.makeabilityEngine.MAX_ITERATIONS,
       warning: result.iterations >= this.makeabilityEngine.MAX_ITERATIONS 
@@ -147,6 +168,9 @@ async getMakeableCocktails(
   };
 }
 ```
+
+### Architectural Decision: Standardized Page-based Pagination
+* **Explicit Trade-off:** All endpoints now use standardized page-based pagination with consistent response format. The `GET /user-inventory/makeable` endpoint returns the same `meta` object as all other paginated endpoints, including `currentPage`, `nextPage`, `itemsPerPage`, `totalItems`, and `totalPages`, with additional makeability-specific fields (`iterations`, `maxIterations`, `warning`) included within the `meta` object. We trade cursor-based pagination performance benefits for API consistency and simplicity across all endpoints.
 
 ## Consequences
 
@@ -164,13 +188,15 @@ async getMakeableCocktails(
 - **API Inconsistency**: Different pagination limits for different sort options
 - **Variable Page Sizes**: Pages may have varying numbers of results (not always `limit`)
 - **Sparse Inventory Data-Dropping**: Users with highly restrictive inventories (e.g., only Vodka and Lime) will experience data-dropping during pagination. Because the loop terminates at 200 iterations, the system only finds a limited number of makeable cocktails. Slicing at high offsets (e.g., offset=100) may return 0 results even if 50 valid makeable cocktails exist further down the database list, because the engine gives up computing.
-  - **Senior Architectural Decision: Pagination Data-Dropping for Sparse Inventories**
+  - **Architectural Decision: Pagination Data-Dropping for Sparse Inventories**
   - **Explicit Trade-off:** To protect against CPU DoS attacks, the in-memory Makeability Engine terminates after 200 evaluations. We explicitly accept that users with highly restrictive inventories will experience "data-dropping"—receiving false "end of results" indicators during pagination. We trade absolute data completeness for guaranteed server uptime, deferring the fix to Phase 4 (Database Materialized Views).
+  - **Architectural Decision: Chronological Bias in Makeability Discovery**
+  - **Explicit Trade-off:** Because the in-memory Makeability Engine halts after 200 iterations to protect the Node.js event loop, the system can only evaluate the 200 most recently created candidate cocktails supplied by the database. We explicitly accept a "Chronological Bias" where older, perfectly makeable cocktails may remain permanently undiscoverable for users with sparse inventories. We trade absolute discovery comprehensiveness for guaranteed server stability, deferring the fix to Phase 4 (Database Materialized Views).
 - **O(N) Redundant Computation**: Because we use offset-based pagination combined with in-memory filtering for Makeability, requesting Page 5 (offset=40) forces Node.js to recalculate the exact same unit conversion math for the first 40 items just to discard them.
-  - **Senior Architectural Decision: O(N) Redundant Computation on Deep Pagination**
+  - **Architectural Decision: O(N) Redundant Computation on Deep Pagination**
   - **Explicit Trade-off:** Because we use offset-based pagination combined with in-memory filtering for Makeability, we explicitly accept a CPU penalty where the backend must recalculate the unit-conversion math for all previous pages on every subsequent page request. We trade this O(N) redundant computational waste for the immediate delivery of MVP dynamic sorting, bounding the damage via the 200-iteration hard cap.
-  - **Senior Architectural Decision: Sparse Inventory Page Shifting**
-  - **Explicit Trade-off:** Because the Makeability Engine caps iterations at 200, deep offsets may exceed the total number of found cocktails, resulting in empty pages. We dictate that if `makeableCocktails.length > 0` but `makeableCocktails.length <= offset`, the backend will return a `400 Bad Request` with a specialized error code `PAGINATION_OVERSHOOT`. The Angular frontend will catch this and automatically reset the user to `page=1`, displaying a toast notification: "Result limits reached. Showing top available cocktails." We accept this pagination reset as a necessary UX compromise to accommodate the CPU limits.
+  - **Architectural Decision: Hard Stop on Pagination Overshoot**
+  - **Explicit Trade-off:** Because the Makeability Engine caps iterations at 200, deep offsets may exceed the total number of found cocktails. We dictate that if the engine hits the 200-iteration limit and cannot fill the requested page, it returns a `400 Bad Request: PAGINATION_OVERSHOOT`. Instead of automatically resetting the user to Page 1 (which creates an infinite UI trap), the Angular frontend will catch this error, instantly **disable the "Next Page" button**, and display a toast: *"Computation limit reached. Please use search filters to refine your inventory results."* We trade deep-pagination exploration for guaranteed event-loop safety and a predictable UX dead-end.
 
 ## Alternatives Considered
 
@@ -218,11 +244,12 @@ export class MakeabilityService {
         } else if (error.code === 'PAGINATION_OVERSHOOT') {
           // Handle sparse inventory pagination overshoot
           this.ui.showToast(
-            'Result limits reached. Showing top available cocktails.',
-            'info'
+            'Computation limit reached. Please use search filters to refine your inventory results.',
+            'warning'
           );
-          // Automatically reset to page 1
-          return this.getMakeableCocktails(1, limit);
+          // Disable next page button instead of resetting to page 1
+          this.ui.disableNextPageButton();
+          return [];
         }
       }
       throw error;
@@ -278,15 +305,15 @@ GET /user-inventory/makeable?category=tequila&sort=makeability&page=1
 
 ### 2. Export Functionality (Future)
 ```typescript
-// Background job for full results
+// Synchronous export with same 200-iteration limit
 POST /user-inventory/makeable/export
-// Returns CSV via email after processing
+// Returns truncated CSV immediately (no background processing)
 ```
 
 ### 3. Alternative Sort Options
 ```typescript
-// Use cursor-based pagination with chronological sort
-GET /user-inventory/makeable?sort=relevance&cursor=...
+// Use page-based pagination with chronological sort
+GET /user-inventory/makeable?sort=relevance&page=1&limit=10
 ```
 
 ## Related Decisions
@@ -296,5 +323,8 @@ GET /user-inventory/makeable?sort=relevance&cursor=...
 
 ## Evolution Plan
 1. **Phase 2**: Implement filtering UI to help users reduce result sets
-2. **Phase 3**: Add background export functionality for power users
+2. **Phase 3**: Add synchronous export functionality with same computational limits
 3. **Phase 4**: Migrate to PostgreSQL materialized views (per ADR 0004) to remove limits
+
+## Architectural Decision: Hard Data Caps on Export Portability
+**Explicit Trade-off:** Because asynchronous background jobs and message queues are forbidden, we cannot process or stream massive Makeable Cocktail CSV exports offline. Users attempting to export their "Makeable" list are strictly bound by the exact same synchronous 200-iteration computational limit as the UI. We explicitly accept that power users with massive inventories will only ever be able to export truncated, partial data sets. We trade comprehensive GDPR/Data portability for absolute adherence to the zero-concurrency mandate.

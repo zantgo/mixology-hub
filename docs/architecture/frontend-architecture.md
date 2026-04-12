@@ -60,8 +60,6 @@ While Signals handle synchronous state, **RxJS** remains the backbone for asynch
 
 To prevent spamming the backend aggregator API on every keystroke, RxJS operators are utilized in the search implementation:
 
-  
-
 ```typescript
 
 searchInput.valueChanges.pipe(
@@ -77,6 +75,9 @@ switchMap(query => this.api.search(query)) // Cancel previous pending requests
 ```
 
 *This ensures optimal network usage and prevents race conditions where an older request resolves after a newer one.*
+
+**Architectural Decision: Acceptance of Orphaned Backend Processing on Client Abort**
+**Explicit Trade-off:** The frontend utilizes RxJS switchMap to cleanly abort pending HTTP requests and preserve client-side network bandwidth. However, to strictly enforce the "No Concurrency / Simple State" mandate, we explicitly refuse to implement deep AbortController signal propagation through the NestJS, TypeORM, and Axios execution layers. We explicitly accept that when the frontend aborts a search request, the backend will completely ignore the dropped TCP connection and continue to execute heavy SQL queries and external API calls to completion, resulting in orphaned, wasted server workloads. We trade optimal backend resource utilization for the complete elimination of complex asynchronous context tracking.
 
   
 
@@ -156,17 +157,22 @@ We utilize **Angular Reactive Forms** with `FormArray` to handle this.
 
 - **Why?** Reactive forms provide synchronous access to form state, making it easy to dynamically add/remove ingredient rows in the UI while maintaining strict validation rules (e.g., ensuring `measure` and `ingredientId` are provided before enabling the "Save" button).
 
-## 🚫 Cross-Device Real-Time Sync Limitations
+## 🚫 Cross-Device & Cross-Tab Sync Limitations
 
-**Senior Architectural Decision: Absence of Cross-Device Real-Time Sync**
-**Explicit Trade-off:** While cross-tab synchronization works perfectly via BroadcastChannel API (UC 7.25), cross-device synchronization for shared accounts (e.g., two roommates using the same login on different phones) will experience "phantom" stale state. We explicitly accept that one user will not see the other's real-time inventory deductions until a hard refresh or state-mutating action occurs. We trade perfect multi-device real-time parity for backend architectural simplicity by omitting WebSockets/SSE in the MVP.
+**Architectural Decision: No Real-Time Sync**
+**Explicit Trade-off:** The MVP does not implement cross-tab or cross-device synchronization. Users opening the application in multiple browser tabs or on different devices will see stale inventory data until they manually refresh. We trade real-time synchronization for architectural simplicity and faster MVP delivery.
+
+## 📱 PWA Implementation Constraints
+
+**Architectural Decision: Castrated PWA Implementation (Add-to-Homescreen Only)**
+**Explicit Trade-off:** To enforce the Online-Only Mandate while still providing a native app feel on mobile devices, we will include a site.webmanifest and PWA icons purely to enable the browser's "Add to Homescreen" (Standalone UI) functionality. We explicitly forbid the registration of any Angular Service Workers (@angular/service-worker) or caching strategies. We trade true offline PWA resilience for the eradication of complex, delta-sync offline state reconciliation.
 
 ## 🔢 HTML Input Precision Boundary
 
-**Senior Architectural Decision: HTML Input Precision Boundary**
+**Architectural Decision: HTML Input Precision Boundary**
 **Explicit Trade-off:** Standard HTML `<input type="number">` elements inherently cast inputs to IEEE 754 floats. To strictly maintain `decimal.js` precision from end-to-end, all fractional ingredient inputs in Angular Reactive Forms MUST use `<input type="text" inputmode="decimal">`. We accept the minor UX trade-off of losing the native browser "spinner" arrows in exchange for preventing silent float corruption before the data reaches our math engine.
 
 ## 🔄 Network Error Handling
 
-**Senior Architectural Decision: Optimistic Rollback & Idempotent Auto-Retry**
-**Explicit Trade-off:** With the removal of offline queuing, the frontend must handle network failures in real-time. We explicitly mandate the use of RxJS `retry({ count: 2, delay: 1000 })` for all state-mutating requests, relying on the backend's Idempotency Key system to prevent duplicate processing. If the request fails after 2 retries, the Angular Signal state MUST be mathematically rolled back to its previous value, and the user presented with a hard error toast: "Network error: Operation failed. Please try again." We trade offline usability for strict client-server state consistency.
+**Architectural Decision: Simple Error Handling**
+**Explicit Trade-off:** The frontend uses basic error handling for network failures. Failed requests show user-friendly error messages, but there is no complex retry logic or optimistic rollback. Users must manually retry failed operations. We trade sophisticated error recovery for implementation simplicity.

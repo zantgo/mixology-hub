@@ -15,11 +15,15 @@ The AI recipe generation endpoint (`POST /ai`) accepts free-text user input that
 
 **Architectural Trade-off:** We use a permissive character whitelist that allows common recipe punctuation (slashes, apostrophes, ampersands, parentheses) to avoid corrupting legitimate cocktail inputs like "1/2 oz Jack Daniel's & Cola". Security is enforced through strict JSON schema validation, payload size bounding, and keyword filtering rather than aggressive character stripping.
 
+**Architectural Decision: Asymmetric Input Length Bounds for Strict Inventory AI Mode**
+* **Explicit Trade-off:** We acknowledge that Strict Inventory AI Mode (UC 5.8) requires injecting potentially massive user inventory lists into LLM prompts, while regular AI generation must enforce strict input length limits for security. We implement asymmetric bounds: 500 characters for regular AI prompts vs. 2000 characters for Strict Inventory Mode. We trade uniform security policy enforcement for the functional requirement of inventory-aware recipe generation, accepting that Strict Inventory Mode is inherently more vulnerable to prompt injection attacks due to longer input windows.
+
 **Before constructing the prompt:**
 ```typescript
-function sanitizeUserInput(input: string): string {
-  // 1. Length limiting (prevent resource exhaustion)
-  const truncated = input.slice(0, MAX_INPUT_LENGTH);
+function sanitizeUserInput(input: string, isStrictInventoryMode: boolean = false): string {
+  // 1. Asymmetric length limiting based on mode
+  const MAX_LENGTH = isStrictInventoryMode ? 2000 : 500;
+  const truncated = input.slice(0, MAX_LENGTH);
   
   // 2. Character whitelisting (allow only safe characters)
   // Allow common recipe punctuation: slashes (/), apostrophes ('), ampersands (&), parentheses

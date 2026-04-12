@@ -2,7 +2,7 @@
 
 **Example TDD for Idempotent Favorites (UC 6.2):**
 ```typescript
-describe('Favorites Service - Idempotent Operations', () => {
+describe('Favorites Service - Database Constraint Collision Handling', () => {
   it('should handle duplicate favorite requests gracefully', async () => {
     const favoritesService = new FavoritesService();
     
@@ -152,10 +152,11 @@ describe('Favorites Service - Paginated & Batched Hydration', () => {
     });
     
     expect(result.data).toHaveLength(10);
-    expect(result.total).toBe(50);
-    expect(result.hasMore).toBe(true);
-    expect(result.page).toBe(1);
-    expect(result.limit).toBe(10);
+    expect(result.meta.totalItems).toBe(50);
+    expect(result.meta.totalPages).toBe(5);
+    expect(result.meta.currentPage).toBe(1);
+    expect(result.meta.itemsPerPage).toBe(10);
+    expect(result.meta.nextPage).toBe(2);
   });
 
   it('should batch external API calls to avoid overwhelming providers', async () => {

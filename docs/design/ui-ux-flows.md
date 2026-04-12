@@ -53,6 +53,8 @@ MixologyHub is a utility app that blends utility (inventory math) with lifestyle
     *   *RxJS Debounce* waits 300ms, then shows skeleton loaders.
     *   Results populate in a grid. Each card displays the cocktail image, name, star rating, and a Makeability Badge (🟢/🟡/🔴).
     *   **Filters**: A slider icon opens a drawer allowing users to `Include` or `Exclude` specific ingredients (e.g., "Exclude: Tequila").
+    *   **Architectural Decision: Visual UI Degradation for External Search**
+    *   **Explicit Trade-off:** Because the backend is strictly forbidden from passing external image URLs (ADR 0016) and cannot synchronously ingest 50 Sharp images without blocking the Node.js event loop, we explicitly accept a degraded visual experience during Unified Search. Any cocktail card sourced from the external API will intentionally render the local static SVG placeholder (`/assets/images/cocktail-placeholder.jpg`) until the user explicitly saves it as a custom recipe.
 
 ## Flow 4: Cocktail Details & Preparation (Domain 4)
 *   **Layout**:
@@ -65,8 +67,10 @@ MixologyHub is a utility app that blends utility (inventory math) with lifestyle
 *   **The "Prepare" Action**:
     1. User taps the sticky "Prepare Drink" FAB at the bottom.
     2. A modal confirms serving size: `[-] 1 [+] Servings` or `Total Volume [ 150 ] ml` for part-based drinks.
-    3. User confirms. **Optimistic UI Update**: The button turns into a green checkmark, and inventory decreases instantly.
-    4. **Undo Mechanism (UC 4.4)**: A sticky toast appears at the bottom: *"1 Margarita prepared. Stock deducted. [UNDO]"*. This toast persists in a "Recent Preparations" menu for 15 minutes.
+     3. User confirms. **Optimistic UI Update**: The button turns into a green checkmark, and inventory decreases instantly.
+     4. **Undo Mechanism (UC 4.4)**: A sticky toast appears at the bottom: *"1 Margarita prepared. Stock deducted. [UNDO]"*. This toast persists in a "Recent Preparations" menu for 15 minutes.
+     * **Architectural Decision: Optimistic State Desynchronization Trap**
+       * **Explicit Trade-off:** Because we strictly enforce the "No Concurrency / No Sync" mandates, we have removed all distributed idempotency locks and real-time state reconciliation. We explicitly accept that if an HTTP response drops in transit after the backend successfully commits a transaction, the frontend's optimistic rollback (reverting the UI to the pre-action state) will cause a silent Client-Server state desynchronization. If the user clicks "Retry", they will suffer a double-deduction. We trade robust, idempotent network recovery for absolute SPA architectural simplicity, relying on the user to manually refresh the browser or use the "Undo" feature to correct ledger inaccuracies.
 
 ## Flow 5: The AI Bartender (Domain 5)
 *   **Layout**: Conversational/Prompt interface.
@@ -132,17 +136,22 @@ When users create custom ingredients, the global catalog can get messy.
 1.  **Network Error Handling (Online-Only Mandate)**:
     *   *Trigger*: Browser loses network connection.
     *   *UI*: A red error banner drops down from the top: *"Network connection lost. Please check your internet connection."*
-    *   *Behavior*: All API calls will fail with standard HTTP timeouts. The UI will display network error toasts with idempotent retry options for critical operations.
-    *   **Senior Architectural Decision**: Total Eradication of Offline State Artifacts
-    *   **Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with idempotent retries) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
+    *   *Behavior*: All API calls will fail with standard HTTP timeouts. The UI will display network error toasts with retry options for critical operations.
+    *   **Architectural Decision**: Total Eradication of Offline State Artifacts
+    *   **Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
+    *   **Architectural Decision: Phantom Deductions & Dumb Retry Risk**
+    *   **Explicit Trade-off:** To strictly enforce the Online-Only and No-Concurrency mandates, we have removed all distributed idempotency reconciliation. We explicitly accept that if a user loses network connectivity precisely during the HTTP response transit of a successful POST /prepare transaction, they will experience a "phantom deduction." If the user clicks the "Retry" button on the resulting error toast, it will execute a dumb re-POST, resulting in a double-deduction. We trade resilient network recovery and guaranteed idempotency for absolute SPA and backend simplicity, requiring the user to manually correct inventory mistakes.
 2.  **Fractional Input Handling**:
     *   If a user types "1/3 oz", the UI displays "1/3 oz" (retained in `original_measure`), even though the backend converts it to `0.33` for math.
 3.  **Image Fallbacks (UC 7.9)**:
-    *   If an external API image link is broken (404), the Angular `(error)` directive instantly swaps the `src` to a beautifully designed local SVG placeholder of a cocktail glass, preventing broken UI frames.
+    *   **Architectural Decision: Image Blackout for External Search UX**
+    *   **Explicit Trade-off:** Because we enforce a strict "No Image URLs" policy, the backend cannot pass external TheCocktailDB image URLs to the frontend during search. Simultaneously, synchronously downloading and processing 50 images via the Sharp library during a search request would block the Node.js event loop causing a DoS. Therefore, we explicitly dictate that all external search results will return null for images. We trade search interface aesthetics (forcing users to look at local placeholder SVGs) for guaranteed Node.js server stability and strict adherence to the local-assets-only security mandate.
+    *   If a local image file is missing from `/uploads/cocktails/`, the Angular `(error)` directive instantly swaps the `src` to a beautifully designed local SVG placeholder of a cocktail glass, preventing broken UI frames.
 4.  **Debouncing & Skeletons (UC 7.2)**:
     *   Never show a "No results found" immediately while typing. Wait 300ms, show a pulsing skeleton grid for 100ms, *then* show the results or the empty state.
-5.  **Cross-Tab Sync (UC 7.25)**:
-    *   If a user has MixologyHub open on their laptop and their phone, and they deduct Vodka on their phone, the laptop tab instantly updates the Vodka quantity. A brief, non-intrusive toast on the laptop says: *"Inventory updated from another device."*
+5.  **Acceptance of Cross-Device Stale State (No Sync)**:
+    *   **Architectural Decision: Acceptance of Cross-Device Stale State**
+    *   **Explicit Trade-off:** To strictly adhere to the "No Concurrency / No Sync" mandate, we explicitly strip out all WebSockets, polling, and BroadcastChannel implementations. We accept that users operating MixologyHub across multiple browser tabs or devices will experience visually stale inventory and favorites data. We trade cross-device real-time state cohesion for absolute frontend architectural simplicity. Users must manually refresh their browser to synchronize state.
 6.  **Theme Switching UX**:
     *   **Location**: User profile/settings page → Appearance section
     *   **Selector Type**: Visual preview cards (Light/Dark/System) with icon indicators
@@ -153,6 +162,15 @@ When users create custom ingredients, the global catalog can get messy.
   *   **Transition**: Smooth 200ms transition for all color properties
   *   **System Detection**: Listen to `prefers-color-scheme` media query changes
   *   **Screen Reader**: Announce theme changes via `LiveAnnouncer`
+
+7.  **Tombstoned Favorites Handling (UC 6.6)**:
+    *   **Problem**: When a user's limit=10 query fetches 10 favorites, and 8 of them are tombstoned (soft-deleted by author), the user sees a page of mostly dead recipes.
+    *   **UI Solution**: 
+      *   **Visual Grouping**: Tombstoned favorites are visually collapsed into an "Archived Recipes" section at the bottom of the Favorites grid.
+      *   **Visual Distinction**: Tombstoned cards use a 50% opacity, grayscale filter, and a "Recipe deleted by author" badge.
+      *   **Action Options**: Users can "Remove from Favorites" tombstoned recipes with a single click.
+      *   **Pagination Adjustment**: The favorites grid automatically excludes tombstoned recipes from the main display count, ensuring users see active recipes first.
+    *   **Implementation**: The frontend filters `is_deleted: true` recipes to a separate array, displays them in a collapsible section, and provides clear visual feedback that these recipes are no longer available.
 
 ---
 

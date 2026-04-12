@@ -72,12 +72,12 @@ describe('UnitConverterService - Density Math', () => {
     
     // Cocktail requires 50g of Honey
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'honey-123', amount: 50, unit: 'g' }
+      { ingredientId: 'honey-123', amount: new Decimal('50'), unit: 'g' }
     ]);
     
     // User has 100ml of Honey
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'honey-123', quantity: 100, unit: 'ml' }
+      { ingredientId: 'honey-123', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     // Mock ingredient with density

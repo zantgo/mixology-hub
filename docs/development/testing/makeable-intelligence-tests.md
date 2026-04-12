@@ -23,11 +23,12 @@ describe('UnitConverterService - Incompatible Units', () => {
 describe('MakeableCocktailsService - Optional Ingredients', () => {
   it('should include cocktails when only optional ingredients are missing', async () => {
     const makeableService = new MakeableCocktailsService();
+    const Decimal = require('decimal.js');
     
-    // User has Gin and Tonic, but no Lime
+    // User has Gin and Tonic, but no Lime (using decimal.js for all inventory operations)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'gin', quantity: 1000 },
-      { ingredientId: 'tonic', quantity: 1000 }
+      { ingredientId: 'gin', quantity: new Decimal('1000') },
+      { ingredientId: 'tonic', quantity: new Decimal('1000') }
     ]);
     
     const makeable = await makeableService.getMakeableCocktails('user123');
@@ -39,10 +40,11 @@ describe('MakeableCocktailsService - Optional Ingredients', () => {
 
   it('should exclude cocktails when required ingredients are missing', async () => {
     const makeableService = new MakeableCocktailsService();
+    const Decimal = require('decimal.js');
     
-    // User has Lime but no Gin (required)
+    // User has Lime but no Gin (required) - using decimal.js
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'lime', quantity: 100 }
+      { ingredientId: 'lime', quantity: new Decimal('100') }
     ]);
     
     const makeable = await makeableService.getMakeableCocktails('user123');
@@ -57,10 +59,11 @@ describe('MakeableCocktailsService - Optional Ingredients', () => {
 describe('MakeableCocktailsService - Missing 1 Ingredient', () => {
   it('should flag cocktails that are missing exactly one ingredient', async () => {
     const makeableService = new MakeableCocktailsService();
+    const Decimal = require('decimal.js');
     
-    // User has Tequila but no Lime
+    // User has Tequila but no Lime (using decimal.js)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'tequila', quantity: 500 }
+      { ingredientId: 'tequila', quantity: new Decimal('500') }
     ]);
     
     const results = await makeableService.getAlmostMakeableCocktails('user123');
@@ -75,7 +78,7 @@ describe('MakeableCocktailsService - Missing 1 Ingredient', () => {
     
     // User has only Tequila (missing Triple Sec AND Lime)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'tequila', quantity: 500 }
+      { ingredientId: 'tequila', quantity: new Decimal('500') }
     ]);
     
     const results = await makeableService.getAlmostMakeableCocktails('user123');
@@ -95,18 +98,18 @@ describe('MakeableCocktailsService - Serving Size Scaling', () => {
     
     // User has 200ml of vodka
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 200 }
+      { ingredientId: 'vodka', quantity: new Decimal('200') }
     ]);
     
     // Mock cocktail requires 50ml per serving
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml' }
+      { ingredientId: 'vodka', amount: new Decimal('50'), unit: 'ml' }
     ]);
     
     // Check makeability for 4 servings (requires 200ml total)
     const result = await makeableService.checkMakeable('cocktail123', 4);
     expect(result.isMakeable).toBe(true);
-    expect(result.requiredAmounts).toEqual([{ ingredientId: 'vodka', amount: 200 }]);
+    expect(result.requiredAmounts).toEqual([{ ingredientId: 'vodka', amount: new Decimal('200') }]);
   });
 
   it('should fail makeability check when scaled requirements exceed inventory', async () => {
@@ -114,18 +117,18 @@ describe('MakeableCocktailsService - Serving Size Scaling', () => {
     
     // User has only 150ml of vodka
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 150 }
+      { ingredientId: 'vodka', quantity: new Decimal('150') }
     ]);
     
     // Cocktail requires 50ml per serving
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml' }
+      { ingredientId: 'vodka', amount: new Decimal('50'), unit: 'ml' }
     ]);
     
     // 4 servings requires 200ml, but user only has 150ml
     const result = await makeableService.checkMakeable('cocktail123', 4);
     expect(result.isMakeable).toBe(false);
-    expect(result.missingAmounts).toEqual([{ ingredientId: 'vodka', amount: 50 }]);
+    expect(result.missingAmounts).toEqual([{ ingredientId: 'vodka', amount: new Decimal('50') }]);
   });
 });
 
@@ -137,12 +140,12 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     
     // User has 4oz of Vodka
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 4, unit: 'oz' }
+      { ingredientId: 'vodka', quantity: new Decimal('4'), unit: 'oz' }
     ]);
     
     // Martini requires 2oz Vodka per serving
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 2, unit: 'oz' }
+      { ingredientId: 'vodka', amount: new Decimal('2'), unit: 'oz' }
     ]);
     
     // Check makeability for 1 serving (requires 2oz, has 4oz) - Makeable
@@ -163,14 +166,14 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     
     // User has limited ingredients
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'gin', quantity: 3, unit: 'oz' },
-      { ingredientId: 'vermouth', quantity: 1, unit: 'oz' }
+      { ingredientId: 'gin', quantity: new Decimal('3'), unit: 'oz' },
+      { ingredientId: 'vermouth', quantity: new Decimal('1'), unit: 'oz' }
     ]);
     
     // Martini requires 2oz Gin, 0.5oz Vermouth per serving
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'gin', amount: 2, unit: 'oz' },
-      { ingredientId: 'vermouth', amount: 0.5, unit: 'oz' }
+      { ingredientId: 'gin', amount: new Decimal('2'), unit: 'oz' },
+      { ingredientId: 'vermouth', amount: new Decimal('0.5'), unit: 'oz' }
     ]);
     
     // Check 2 servings (requires 4oz Gin, 1oz Vermouth)
@@ -188,18 +191,18 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     
     // User inventory
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'rum', quantity: 8, unit: 'oz' },
-      { ingredientId: 'lime_juice', quantity: 4, unit: 'oz' },
-      { ingredientId: 'simple_syrup', quantity: 2, unit: 'oz' },
-      { ingredientId: 'mint', quantity: 10, unit: 'leaves' }
+      { ingredientId: 'rum', quantity: new Decimal('8'), unit: 'oz' },
+      { ingredientId: 'lime_juice', quantity: new Decimal('4'), unit: 'oz' },
+      { ingredientId: 'simple_syrup', quantity: new Decimal('2'), unit: 'oz' },
+      { ingredientId: 'mint', quantity: new Decimal('10'), unit: 'leaves' }
     ]);
     
     // Mojito requires per serving: 2oz Rum, 1oz Lime, 0.5oz Simple, 5 Mint leaves
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'rum', amount: 2, unit: 'oz' },
-      { ingredientId: 'lime_juice', amount: 1, unit: 'oz' },
-      { ingredientId: 'simple_syrup', amount: 0.5, unit: 'oz' },
-      { ingredientId: 'mint', amount: 5, unit: 'leaves' }
+      { ingredientId: 'rum', amount: new Decimal('2'), unit: 'oz' },
+      { ingredientId: 'lime_juice', amount: new Decimal('1'), unit: 'oz' },
+      { ingredientId: 'simple_syrup', amount: new Decimal('0.5'), unit: 'oz' },
+      { ingredientId: 'mint', amount: new Decimal('5'), unit: 'leaves' }
     ]);
     
     // Test different serving sizes
@@ -222,12 +225,12 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     
     // Mock inventory that can change
     let mockInventory = [
-      { ingredientId: 'vodka', quantity: 4, unit: 'oz' }
+      { ingredientId: 'vodka', quantity: new Decimal('4'), unit: 'oz' }
     ];
     
     jest.spyOn(makeableService, 'getUserInventory').mockImplementation(async () => mockInventory);
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 2, unit: 'oz' }
+      { ingredientId: 'vodka', amount: new Decimal('2'), unit: 'oz' }
     ]);
     
     // Initially: 4oz vodka, 3 servings requires 6oz - Almost Makeable
@@ -235,7 +238,7 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     expect(initialResult.category).toBe('almost_makeable');
     
     // User adds 2oz vodka (now 6oz total)
-    mockInventory = [{ ingredientId: 'vodka', quantity: 6, unit: 'oz' }];
+    mockInventory = [{ ingredientId: 'vodka', quantity: new Decimal('6'), unit: 'oz' }];
     
     // Now: 6oz vodka, 3 servings requires 6oz - Makeable
     const updatedResult = await makeableService.checkMakeable('martini_id', 3);
@@ -246,16 +249,16 @@ describe('MakeableCocktailsService - Scaling-Induced Almost Makeable', () => {
     const makeableService = new MakeableCocktailsService();
     
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'tequila', quantity: 6, unit: 'oz' },
-      { ingredientId: 'triple_sec', quantity: 3, unit: 'oz' },
-      { ingredientId: 'lime_juice', quantity: 2, unit: 'oz' }
+      { ingredientId: 'tequila', quantity: new Decimal('6'), unit: 'oz' },
+      { ingredientId: 'triple_sec', quantity: new Decimal('3'), unit: 'oz' },
+      { ingredientId: 'lime_juice', quantity: new Decimal('2'), unit: 'oz' }
     ]);
     
     // Margarita requires per serving: 2oz Tequila, 1oz Triple Sec, 1oz Lime
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'tequila', amount: 2, unit: 'oz' },
-      { ingredientId: 'triple_sec', amount: 1, unit: 'oz' },
-      { ingredientId: 'lime_juice', amount: 1, unit: 'oz' }
+      { ingredientId: 'tequila', amount: new Decimal('2'), unit: 'oz' },
+      { ingredientId: 'triple_sec', amount: new Decimal('1'), unit: 'oz' },
+      { ingredientId: 'lime_juice', amount: new Decimal('1'), unit: 'oz' }
     ]);
     
     const results = await Promise.all([
@@ -306,8 +309,8 @@ describe('MeasureParserService - Ratio/Part-based Measurements', () => {
     
     // Cocktail uses part-based measurements
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'campari', amount: 1, unit: 'part' },
-      { ingredientId: 'gin', amount: 1, unit: 'part' }
+      { ingredientId: 'campari', amount: new Decimal('1'), unit: 'part' },
+      { ingredientId: 'gin', amount: new Decimal('1'), unit: 'part' }
     ]);
     
     const result = await makeableService.checkMakeable('negroni_id', 1);
@@ -327,13 +330,13 @@ describe('MakeableCocktailsService - Synonym Aggregation', () => {
     
     // Cocktail requires 60ml of 'orange liqueur'
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'orange_liqueur', amount: 60, unit: 'ml' }
+      { ingredientId: 'orange_liqueur', amount: new Decimal('60'), unit: 'ml' }
     ]);
     
     // User has 30ml Triple Sec and 40ml Cointreau
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'triple_sec', quantity: 30 },
-      { ingredientId: 'cointreau', quantity: 40 }
+      { ingredientId: 'triple_sec', quantity: new Decimal('30') },
+      { ingredientId: 'cointreau', quantity: new Decimal('40') }
     ]);
     
     // Mock the synonym resolver
@@ -351,13 +354,13 @@ describe('MakeableCocktailsService - Synonym Aggregation', () => {
     
     // Cocktail requires 50ml of 'whiskey'
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'whiskey', amount: 50, unit: 'ml' }
+      { ingredientId: 'whiskey', amount: new Decimal('50'), unit: 'ml' }
     ]);
     
     // User has 30ml Bourbon and 25ml Rye (both whiskey synonyms)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'bourbon', quantity: 30 },
-      { ingredientId: 'rye', quantity: 25 }
+      { ingredientId: 'bourbon', quantity: new Decimal('30') },
+      { ingredientId: 'rye', quantity: new Decimal('25') }
     ]);
     
     jest.spyOn(makeableService.ingredientService, 'resolveBaseIngredient')
@@ -378,12 +381,12 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     
     // Cocktail requires generic "Whiskey"
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'whiskey', amount: 60, unit: 'ml' }
+      { ingredientId: 'whiskey', amount: new Decimal('60'), unit: 'ml' }
     ]);
     
     // User has Bourbon (a type of Whiskey)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'bourbon', quantity: 100, unit: 'ml' }
+      { ingredientId: 'bourbon', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     // Mock hierarchy resolution
@@ -408,12 +411,12 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     
     // Cocktail requires "Spirit"
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'spirit', amount: 50, unit: 'ml' }
+      { ingredientId: 'spirit', amount: new Decimal('50'), unit: 'ml' }
     ]);
     
     // User has Vodka (Spirit → Clear Spirit → Vodka)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100, unit: 'ml' }
+      { ingredientId: 'vodka', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     jest.spyOn(makeableService.ingredientService, 'resolveHierarchy')
@@ -432,12 +435,12 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     
     // Cocktail requires specific "Bourbon"
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'bourbon', amount: 60, unit: 'ml' }
+      { ingredientId: 'bourbon', amount: new Decimal('60'), unit: 'ml' }
     ]);
     
     // User only has generic "Whiskey"
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'whiskey', quantity: 100, unit: 'ml' }
+      { ingredientId: 'whiskey', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     jest.spyOn(makeableService.ingredientService, 'resolveHierarchy')
@@ -457,13 +460,13 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     
     // Cocktail requires "Orange Liqueur"
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'orange_liqueur', amount: 30, unit: 'ml' }
+      { ingredientId: 'orange_liqueur', amount: new Decimal('30'), unit: 'ml' }
     ]);
     
     // User has Cointreau (synonym) and Grand Marnier (hierarchical: orange_liqueur → brandy_based → grand_marnier)
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'cointreau', quantity: 20, unit: 'ml' },
-      { ingredientId: 'grand_marnier', quantity: 20, unit: 'ml' }
+      { ingredientId: 'cointreau', quantity: new Decimal('20'), unit: 'ml' },
+      { ingredientId: 'grand_marnier', quantity: new Decimal('20'), unit: 'ml' }
     ]);
     
     // Mock both synonym and hierarchy resolution
@@ -487,13 +490,13 @@ describe('MakeableCocktailsService - Hierarchical Ingredient Satisfaction', () =
     
     // Cocktail requires "Whiskey"
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'whiskey', amount: 60, unit: 'ml' }
+      { ingredientId: 'whiskey', amount: new Decimal('60'), unit: 'ml' }
     ]);
     
     // User has both generic Whiskey AND specific Bourbon
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'whiskey', quantity: 30, unit: 'ml' },
-      { ingredientId: 'bourbon', quantity: 40, unit: 'ml' }
+      { ingredientId: 'whiskey', quantity: new Decimal('30'), unit: 'ml' },
+      { ingredientId: 'bourbon', quantity: new Decimal('40'), unit: 'ml' }
     ]);
     
     jest.spyOn(makeableService.ingredientService, 'resolveHierarchy')
@@ -520,15 +523,15 @@ describe('MakeableCocktailsService - Garnish Handling', () => {
     
     // Cocktail requires Vodka, Lime Juice, and Mint Sprig (garnish)
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml', is_optional: false },
-      { ingredientId: 'lime_juice', amount: 25, unit: 'ml', is_optional: false },
-      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', is_optional: true, type: 'garnish' }
+      { ingredientId: 'vodka', amount: new Decimal('50'), unit: 'ml', is_optional: false },
+      { ingredientId: 'lime_juice', amount: new Decimal('25'), unit: 'ml', is_optional: false },
+      { ingredientId: 'mint_sprig', amount: new Decimal('1'), unit: 'piece', is_optional: true, type: 'garnish' }
     ]);
     
     // User has vodka and lime juice, no mint
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100 },
-      { ingredientId: 'lime_juice', quantity: 50 }
+      { ingredientId: 'vodka', quantity: new Decimal('100') },
+      { ingredientId: 'lime_juice', quantity: new Decimal('50') }
     ]);
     
     const result = await makeableService.checkMakeable('mojito_id', 1);
@@ -542,12 +545,12 @@ describe('MakeableCocktailsService - Garnish Handling', () => {
     const makeableService = new MakeableCocktailsService();
     
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'vodka', amount: 50, unit: 'ml' },
-      { ingredientId: 'olive', amount: 1, unit: 'piece', type: 'garnish' }
+      { ingredientId: 'vodka', amount: new Decimal('50'), unit: 'ml' },
+      { ingredientId: 'olive', amount: new Decimal('1'), unit: 'piece', type: 'garnish' }
     ]);
     
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100 }
+      { ingredientId: 'vodka', quantity: new Decimal('100') }
     ]);
     
     const result = await makeableService.getMakeableCocktails('user123');
@@ -563,7 +566,7 @@ describe('MakeableCocktailsService - Garnish Handling', () => {
     
     // Cocktail that's ONLY garnish (e.g., "Mint Sprig on Ice")
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'mint_sprig', amount: 1, unit: 'piece', type: 'garnish' }
+      { ingredientId: 'mint_sprig', amount: new Decimal('1'), unit: 'piece', type: 'garnish' }
     ]);
     
     const result = await makeableService.getMakeableCocktails('user123');
@@ -758,12 +761,12 @@ describe('UnitConverterService - Density Math', () => {
     
     // Cocktail requires 50g of Honey
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'honey', amount: 50, unit: 'g' }
+      { ingredientId: 'honey', amount: new Decimal('50'), unit: 'g' }
     ]);
     
     // User has 100ml of Honey
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'honey', quantity: 100, unit: 'ml' }
+      { ingredientId: 'honey', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     // Mock density lookup
@@ -781,12 +784,12 @@ describe('UnitConverterService - Density Math', () => {
     
     // Cocktail requires 200g of Honey
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'honey', amount: 200, unit: 'g' }
+      { ingredientId: 'honey', amount: new Decimal('200'), unit: 'g' }
     ]);
     
     // User has 100ml of Honey
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'honey', quantity: 100, unit: 'ml' }
+      { ingredientId: 'honey', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     jest.spyOn(makeableService.ingredientService, 'getDensity')

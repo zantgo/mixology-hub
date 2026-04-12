@@ -16,7 +16,7 @@ describe('Ingredient Entity', () => {
     });
     await ingredientRepository.save(ingredient);
     
-    expect(ingredient.normalizedName).toBe('VODKA');
+    expect(ingredient.normalizedName).toBe('vodka');
   });
 
   it('should map to the same ingredient ID when different users create a custom ingredient with the same name', async () => {
@@ -31,8 +31,8 @@ describe('Ingredient Entity', () => {
     
     // Both users should be mapped to the exact same database row (UUID)
     expect(result1.id).toBe(result2.id);
-    expect(result1.normalizedName).toBe('SECRET SAUCE');
-    expect(result2.normalizedName).toBe('SECRET SAUCE');
+    expect(result1.normalizedName).toBe('secret sauce');
+    expect(result2.normalizedName).toBe('secret sauce');
     expect(result1.isGlobal).toBe(false);
     expect(result2.isGlobal).toBe(false);
   });
@@ -41,13 +41,13 @@ describe('Ingredient Entity', () => {
     const ingredient1 = ingredientRepository.create({
       name: 'Vodka',
       isGlobal: true,
-      normalizedName: 'VODKA',
+      normalizedName: 'vodka',
     });
     
     const ingredient2 = ingredientRepository.create({
       name: 'Vodka',
       isGlobal: true,
-      normalizedName: 'VODKA',
+      normalizedName: 'vodka',
     });
     
     await ingredientRepository.save(ingredient1);
@@ -95,8 +95,9 @@ describe('Cocktail Entity', () => {
 ```typescript
 describe('CocktailIngredient Precision', () => {
   it('should store fractional amounts with 4 decimal places', async () => {
+    const Decimal = require('decimal.js');
     const ingredient = cocktailIngredientRepository.create({
-      amount: 0.3333, // 1/3
+      amount: new Decimal('0.3333'), // 1/3
       unit: 'oz',
     });
     await cocktailIngredientRepository.save(ingredient);
@@ -120,7 +121,7 @@ describe('CocktailIngredient Precision', () => {
 
 ### 2. Network Error Handling Tests (Online-Only Mandate)
 
-**Senior Architectural Decision**: Total Eradication of Offline State Artifacts
+**Architectural Decision**: Total Eradication of Offline State Artifacts
 **Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with idempotent retries) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
 
 #### 2.1 Network Error Handling
@@ -135,21 +136,19 @@ describe('Network Error Handling', () => {
     expect(response.error).toBe('Network Error');
   });
 
-  it('should support idempotent retry for critical operations', async () => {
-    const idempotencyKey = `idempotency:v2:${userId}:cocktail:prepare:${uuidv4()}`;
-    
+  it('should allow manual retry after network error', async () => {
     // First attempt fails with network error
     jest.spyOn(httpService, 'post').mockRejectedValueOnce(new Error('Network Error'));
     
     try {
-      await prepareCocktail(userId, cocktailId, idempotencyKey);
+      await prepareCocktail(userId, cocktailId);
     } catch (error) {
       expect(error.message).toBe('Network Error');
     }
 
-    // Retry with same idempotency key should succeed
+    // Manual retry should succeed
     jest.spyOn(httpService, 'post').mockResolvedValueOnce({ status: 200 });
-    const retryResponse = await prepareCocktail(userId, cocktailId, idempotencyKey);
+    const retryResponse = await prepareCocktail(userId, cocktailId);
     expect(retryResponse.status).toBe(200);
   });
 
@@ -160,56 +159,51 @@ describe('Network Error Handling', () => {
 });
 ```
 
-### 3. Redis Pub/Sub Tests (Token Salt Bottleneck Fix)
+### 3. Database-Only Token Salt Version Tests (Removal of Redis Pub/Sub)
 
-#### 3.1 Token Salt Version Management
+#### 3.1 Token Salt Version Management (Database-Only)
 ```typescript
-describe('RedisPubSubService', () => {
-  let redisPubSubService: RedisPubSubService;
-  let mockRedisClient: any;
+describe('TokenSaltService', () => {
+  let tokenSaltService: TokenSaltService;
+  let mockSystemSettingsRepo: any;
 
   beforeEach(async () => {
-    redisPubSubService = module.get<RedisPubSubService>(RedisPubSubService);
+    tokenSaltService = module.get<TokenSaltService>(TokenSaltService);
     
-    // Mock Redis client methods
-    mockRedisClient = {
-      get: jest.fn().mockResolvedValue('5'),
-      incr: jest.fn().mockResolvedValue(6),
-      publish: jest.fn().mockResolvedValue(1),
-      subscribe: jest.fn().mockResolvedValue(undefined),
-      quit: jest.fn().mockResolvedValue(undefined),
-      connect: jest.fn().mockResolvedValue(undefined),
+    // Mock SystemSettings repository
+    mockSystemSettingsRepo = {
+      findOne: jest.fn().mockResolvedValue({ 
+        key: 'global_token_salt_version', 
+        value: '5' 
+      }),
+      upsert: jest.fn().mockResolvedValue({ 
+        key: 'global_token_salt_version', 
+        value: '6' 
+      }),
     };
   });
 
-  it('should increment and broadcast token salt version', async () => {
-    const newVersion = await redisPubSubService.incrementTokenSaltVersion('admin-123');
+  it('should increment token salt version in database', async () => {
+    const newVersion = await tokenSaltService.incrementTokenSaltVersion('admin-123');
     
     expect(newVersion).toBe(6);
-    expect(mockRedisClient.incr).toHaveBeenCalledWith('global_token_salt_version');
-    expect(mockRedisClient.publish).toHaveBeenCalledWith(
-      RedisChannel.TOKEN_SALT_UPDATE,
-      expect.stringContaining('"saltVersion":6')
+    expect(mockSystemSettingsRepo.upsert).toHaveBeenCalledWith(
+      { key: 'global_token_salt_version', value: '6' },
+      { conflictPaths: ['key'] }
     );
   });
 
-  it('should update local cache on token salt update message', async () => {
-    const updateMessage = JSON.stringify({
-      saltVersion: 7,
-      timestamp: new Date().toISOString(),
-      initiatedBy: 'admin-123',
+  it('should get current token salt version from database', async () => {
+    const currentVersion = await tokenSaltService.getCurrentTokenSaltVersion();
+    expect(currentVersion).toBe(5);
+    expect(mockSystemSettingsRepo.findOne).toHaveBeenCalledWith({
+      where: { key: 'global_token_salt_version' }
     });
-
-    // Simulate receiving pub/sub message
-    await redisPubSubService['handleTokenSaltUpdate'](updateMessage);
-    
-    const currentVersion = await redisPubSubService.getCurrentTokenSaltVersion();
-    expect(currentVersion).toBe(7);
   });
 });
 ```
 
-### 4. Rating Service Tests (External Cocktail Auto-Forking)
+### 4. Rating Service Tests (External Cocktail Ratings)
 
 #### 4.1 Rating External Cocktails
 ```typescript
@@ -217,14 +211,16 @@ describe('RatingService', () => {
   let ratingService: RatingService;
   let externalCocktailService: ExternalCocktailService;
   let cocktailRepository: Repository<Cocktail>;
+  let externalCocktailRatingsRepository: Repository<ExternalCocktailRating>;
 
   beforeEach(async () => {
     ratingService = module.get<RatingService>(RatingService);
     externalCocktailService = module.get<ExternalCocktailService>(ExternalCocktailService);
     cocktailRepository = module.get(getRepositoryToken(Cocktail));
+    externalCocktailRatingsRepository = module.get(getRepositoryToken(ExternalCocktailRating));
   });
 
-  it('should auto-fork external cocktail when rating', async () => {
+  it('should store external cocktail rating without auto-forking', async () => {
     const user = await createTestUser();
     const externalCocktailId = '11000'; // Mojito from TheCocktailDB
     
@@ -234,26 +230,32 @@ describe('RatingService', () => {
       name: 'Mojito',
       description: 'Classic Cuban cocktail',
       instructions: 'Mix ingredients...',
-      imageFull: '/uploads/cocktails/ext-11000-full.webp',
-      imageThumb: '/uploads/cocktails/ext-11000-thumb.webp',
+      imageFull: null,
+      imageThumb: null,
     });
 
     const ratingDto: RatingDto = { score: 5 };
     
-    // This should trigger auto-forking
+    // This should store rating in EXTERNAL_COCKTAIL_RATINGS table
     const result = await ratingService.rateCocktail(user, externalCocktailId, ratingDto);
     
     expect(result.userRating).toBe(5);
     
-    // Check that cocktail was forked locally
+    // Check that rating was stored in EXTERNAL_COCKTAIL_RATINGS table
+    const externalRating = await externalCocktailRatingsRepository.findOne({
+      where: { external_cocktail_id: externalCocktailId, user_id: user.id },
+    });
+    
+    expect(externalRating).toBeDefined();
+    expect(externalRating.score).toBe(5);
+    expect(externalRating.external_cocktail_id).toBe(externalCocktailId);
+    
+    // Verify NO local fork was created
     const forkedCocktail = await cocktailRepository.findOne({
       where: { external_id: externalCocktailId, user: { id: user.id } },
     });
     
-    expect(forkedCocktail).toBeDefined();
-    expect(forkedCocktail.name).toBe('Mojito');
-    expect(forkedCocktail.source).toBe('api');
-    expect(forkedCocktail.is_public).toBe(false); // Private to user who forked it
+    expect(forkedCocktail).toBeNull();
   });
 
   it('should not allow rating non-existent external cocktail', async () => {
@@ -285,7 +287,7 @@ describe('CocktailAggregatorService Pagination', () => {
 
   it('should cache search results for pagination', async () => {
     const searchTerm = 'margarita';
-    const paginationQuery: PaginationQueryDto = { limit: 10, offset: 0 };
+    const paginationQuery: PaginationQueryDto = { limit: 10, page: 1 };
     
     // First search - should cache results
     const result1 = await aggregatorService.searchUnified(
@@ -296,40 +298,39 @@ describe('CocktailAggregatorService Pagination', () => {
     
     expect(result1.data.length).toBeGreaterThan(0);
     
-    // Check that results were cached
-    const cacheKey = aggregatorService['generateSearchCacheKey'](
-      searchTerm,
-      { includeExternal: true, includeLocal: true },
-      undefined
-    );
+    // Check that results were cached (new unified search cache format)
+    const cacheKey = `search_unified:${searchTerm}`;
     
-    const cached = await cacheManager.get(`pagination:${cacheKey}`);
+    const cached = await cacheManager.get(cacheKey);
     expect(cached).toBeDefined();
-    expect(cached.unifiedList.length).toBe(result1.total);
+    expect(Array.isArray(cached)).toBe(true); // Should be a flat array, not an object wrapper
+    expect(cached.length).toBeGreaterThan(0);
   });
 
-  it('should use cursor-like pagination for subsequent pages', async () => {
+  it('should use page-based pagination for subsequent pages', async () => {
     const searchTerm = 'margarita';
     
     // Page 1
     const result1 = await aggregatorService.searchUnified(
       searchTerm,
-      { limit: 5, offset: 0 },
+      { page: 1, limit: 5 },
       { includeExternal: true, includeLocal: true }
     );
     
     expect(result1.data.length).toBe(5);
-    const lastIdPage1 = result1.data[result1.data.length - 1].id;
+    expect(result1.meta.currentPage).toBe(1);
+    expect(result1.meta.nextPage).toBe(2);
     
-    // Page 2 - should use cached results with lastId
+    // Page 2
     const result2 = await aggregatorService.searchUnified(
       searchTerm,
-      { limit: 5, offset: 5 },
+      { page: 2, limit: 5 },
       { includeExternal: true, includeLocal: true }
     );
     
     expect(result2.data.length).toBe(5);
-    expect(result2.data[0].id).not.toBe(lastIdPage1); // Should be next set of results
+    expect(result2.meta.currentPage).toBe(2);
+    expect(result2.data[0].id).not.toBe(result1.data[0].id); // Should be next set of results
   });
 
   it('should handle cache invalidation on data changes', async () => {
@@ -343,17 +344,17 @@ describe('CocktailAggregatorService Pagination', () => {
     // Prime cache
     await aggregatorService.searchUnified(
       searchTerm,
-      { limit: 10, offset: 0 },
+      { limit: 10, page: 1 },
       { includeExternal: true, includeLocal: true }
     );
     
     // Simulate data change that should invalidate cache
-    await cacheManager.del(`pagination:${cacheKey}`);
+    await cacheManager.del(cacheKey);
     
     // Subsequent search should fetch fresh data
     const result = await aggregatorService.searchUnified(
       searchTerm,
-      { limit: 10, offset: 0 },
+      { limit: 10, page: 1 },
       { includeExternal: true, includeLocal: true }
     );
     
@@ -367,9 +368,8 @@ describe('CocktailAggregatorService Pagination', () => {
 #### 6.1 End-to-End Network Resilience Tests
 ```typescript
 describe('End-to-End Network Resilience', () => {
-  it('should handle network failures gracefully with idempotent retries', async () => {
+  it('should allow manual retry after network failure', async () => {
     const user = await createTestUser();
-    const idempotencyKey = `idempotency:v2:${user.id}:cocktail:prepare:${uuidv4()}`;
     
     // Simulate intermittent network failure
     let attemptCount = 0;
@@ -383,13 +383,13 @@ describe('End-to-End Network Resilience', () => {
 
     // First attempt fails
     try {
-      await prepareCocktail(user.id, 'mojito', idempotencyKey);
+      await prepareCocktail(user.id, 'mojito');
     } catch (error) {
       expect(error.message).toBe('Network Error');
     }
 
-    // Retry with same idempotency key succeeds
-    const result = await prepareCocktail(user.id, 'mojito', idempotencyKey);
+    // Manual retry succeeds
+    const result = await prepareCocktail(user.id, 'mojito');
     expect(result.status).toBe(200);
     expect(result.data.success).toBe(true);
   });
@@ -446,7 +446,7 @@ npm run test:cov -- --testPathPattern="architectural"
 | Network Error Handling | 85% | HTTP timeout handling, idempotent retries, error UI |
 | Redis Pub/Sub | 85% | Token salt updates, cache invalidation |
 | Rating Service | 90% | Auto-forking, validation, error handling |
-| Pagination Logic | 85% | Caching, cursor-based pagination, cache invalidation |
+| Pagination Logic | 85% | Caching, page-based pagination, cache invalidation |
 
 ## 🔧 Test Data Setup
 
@@ -466,12 +466,12 @@ export const createTestIngredient = async (options: {
   isGlobal?: boolean;
   createdBy?: string;
 }): Promise<Ingredient> => {
-  return ingredientRepository.create({
-    name: options.name,
-    isGlobal: options.isGlobal ?? true,
-    normalizedName: options.name.toUpperCase().trim(),
-    createdBy: options.createdBy,
-  });
+    return ingredientRepository.create({
+      name: options.name,
+      isGlobal: options.isGlobal ?? true,
+      normalizedName: options.name.toLowerCase().trim(),
+      createdBy: options.createdBy,
+    });
 };
 ```
 

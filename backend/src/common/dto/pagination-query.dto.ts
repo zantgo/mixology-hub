@@ -11,15 +11,11 @@ export class PaginationQueryDto {
   @Type(() => Number)
   limit?: number = 10;
 
-  @ApiPropertyOptional({ description: 'Number of items to skip (for offset-based pagination)', minimum: 0, default: 0 })
+  @ApiPropertyOptional({ description: 'Page number (default: 1, max: 100 to prevent database performance degradation)', minimum: 1, maximum: 100, default: 1 })
   @IsOptional()
   @IsNumber()
-  @Min(0)
+  @Min(1)
+  @Max(100, { message: 'Page number cannot exceed 100 to prevent database performance degradation.' })
   @Type(() => Number)
-  offset?: number = 0;
-
-  @ApiPropertyOptional({ description: 'Opaque cursor string for cursor-based pagination' })
-  @IsOptional()
-  @IsString()
-  cursor?: string;
+  page?: number = 1;
 }

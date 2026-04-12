@@ -23,3 +23,11 @@ export interface Cocktail {
   ingredients: CocktailIngredient[];
   createdAt: Date;
 }
+
+export interface PaginationMeta {
+  currentPage: number;
+  nextPage: number | null;
+  itemsPerPage: number;
+  totalItems: number;
+  totalPages: number;
+}

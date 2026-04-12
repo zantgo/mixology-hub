@@ -3,6 +3,9 @@
 ## Overview
 Observability in MixologyHub is designed as a three-pillar approach: **Logs, Metrics, and Traces**. The system is instrumented to provide comprehensive visibility into application health, performance, and business metrics.
 
+### Architectural Decision: Observability Telemetry Exemption from No-Concurrency Mandate
+**Explicit Trade-off:** While we strictly ban asynchronous eventing and message queues for business logic, we explicitly exempt standard APM/Observability agents (e.g., OpenTelemetry) from the "No Background Promises" mandate. We accept that these libraries run autonomous background batch-flush loops inside the Node.js process to dispatch metrics. We trade absolute single-threaded purity for essential production visibility and metric aggregation.
+
 ## Current Implementation
 
 ### 1. Structured Logging
@@ -106,7 +109,7 @@ const responseTimeHistogram = meter.createHistogram('http_response_time_ms', {
 - Eviction rate
 - Network I/O
 
-### 2. Distributed Tracing
+### 2. Monolith Request Tracing
 
 ```typescript
 // OpenTelemetry tracing
@@ -142,7 +145,7 @@ async function generateCocktail(ingredients: string[]) {
 - HTTP headers for cross-service tracing
 - Database query correlation
 - External API call tracing
-- Async operation tracing
+- Request lifecycle tracing
 
 ### 3. Log Aggregation & Analysis
 
@@ -239,7 +242,7 @@ async function generateCocktail(ingredients: string[]) {
 - ⬜ External API monitoring
 
 ### Phase 3: Production Observability
-- ⬜ Distributed tracing
+- ⬜ Monolithic request tracing
 - ⬜ Log aggregation pipeline
 - ⬜ Alerting configuration
 - ⬜ Dashboard creation

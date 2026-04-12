@@ -30,18 +30,29 @@ describe('InputSanitizerService - XSS Prevention', () => {
   });
 });
 
-**Example structure for CSRF protection tests (if using HTTP-Only cookies):**
+**Example structure for CSRF protection tests (Refresh Token endpoint only):**
 ```typescript
-describe('CSRF Protection', () => {
-  it('should block POST requests missing the X-CSRF-Token header', async () => {
+describe('CSRF Protection - Refresh Token Endpoint', () => {
+  it('should block POST /auth/refresh requests missing the X-CSRF-Token header', async () => {
     const response = await request(app.getHttpServer())
-      .post('/api/cocktails/123/prepare')
-      .set('Cookie', ['Authentication=valid_jwt_token'])
+      .post('/auth/refresh')
+      .set('Cookie', ['refresh_token=valid_refresh_token'])
       // Intentionally omitting CSRF header
       .send();
       
     expect(response.status).toBe(403);
     expect(response.body.message).toContain('CSRF token mismatch');
+  });
+  
+  it('should allow POST /auth/refresh with valid CSRF token', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Cookie', ['refresh_token=valid_refresh_token'])
+      .set('X-CSRF-Token', 'valid_csrf_token')
+      .send();
+      
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('access_token');
   });
 });
 ```

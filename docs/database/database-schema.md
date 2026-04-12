@@ -84,11 +84,13 @@ USERS ||--o{ REFRESH_TOKENS : "has_sessions"
 
  base_unit_type baseUnit "Strictly typed for math engine routing"
 
-   decimal(5,4) density DEFAULT 1.0 "Used for Mass <-> Volume. CHECK (density >= 0.1)"
+    decimal(5,4) density DEFAULT 1.0 "Used for Mass <-> Volume. CHECK (density >= 0.1)"
 
-   uuid created_by FK "nullable: true, ON DELETE SET NULL"
+    string category "nullable: true, enum: 'spirit', 'mixer', 'garnish', 'other'"
 
-  timestamp created_at
+    uuid created_by FK "nullable: true, ON DELETE SET NULL"
+
+   timestamp created_at
 
   }
  
@@ -108,8 +110,8 @@ USERS ||--o{ REFRESH_TOKENS : "has_sessions"
   
 
 INGREDIENT_RELATIONS {
-  uuid parent_id FK "ON DELETE CASCADE" -- ADD THIS
-  uuid child_id FK "ON DELETE CASCADE"  -- ADD THIS
+  uuid parent_id FK "ON DELETE CASCADE"
+  uuid child_id FK "ON DELETE CASCADE"
   string relationship_type "enum: 'synonym', 'is_a'"
 }
 
@@ -197,13 +199,18 @@ INGREDIENT_RELATIONS {
 
  timestamp created_at
 
-   -- Ensure a favorite always points to something
-   CHECK (cocktail_id IS NOT NULL OR external_cocktail_id IS NOT NULL)
-    -- Prevent duplicate favorites using Partial Unique Indexes (Postgres standard for nullable unique pairs)
+    -- Ensure a favorite always points to something (exclusive OR - XOR)
+    CHECK (
+      (cocktail_id IS NOT NULL AND external_cocktail_id IS NULL) OR 
+      (cocktail_id IS NULL AND external_cocktail_id IS NOT NULL)
+    )
+    -- Architectural Decision: XOR Constraint for Polymorphic Relations
+    -- Explicit Trade-off: An OR operator allows both columns to be populated simultaneously, which would cause the hydration layer (UC 6.4) to fail when attempting to join local data while concurrently fetching external data for the exact same favorite row. We enforce XOR to maintain strict polymorphic integrity.
+     -- Prevent duplicate favorites using Partial Unique Indexes (Postgres standard for nullable unique pairs)
     CREATE UNIQUE INDEX idx_fav_local ON favorites(user_id, cocktail_id) WHERE cocktail_id IS NOT NULL;
     CREATE UNIQUE INDEX idx_fav_external ON favorites(user_id, external_cocktail_id) WHERE external_cocktail_id IS NOT NULL;
 
-   -- Senior Architectural Decision: Silent Wiping of Favorites vs. User Experience
+   -- Architectural Decision: Silent Wiping of Favorites vs. User Experience
    -- Explicit Trade-off: When users delete their account, all their favorites are silently deleted via ON DELETE CASCADE.
    -- This provides clean data hygiene but violates user expectations of "exportable data" and GDPR "right to data portability".
    -- We accept this trade-off because implementing a favorites export feature would require:
@@ -236,12 +243,13 @@ COCKTAIL_RATINGS {
 
 EXTERNAL_COCKTAIL_RATINGS {
   uuid id PK
-  uuid user_id FK "ON DELETE CASCADE" -- ADD THIS
+  uuid user_id FK "ON DELETE CASCADE"
   string external_id "The external API ID (e.g., '11000' from TheCocktailDB)"
   decimal score
   timestamp created_at
   timestamp updated_at
   UNIQUE(user_id, external_id) "Prevent duplicate ratings per user per external cocktail"
+  INDEX idx_external_ratings_id (external_id) "For efficient GROUP BY external_id queries during rating aggregation"
 }
 
 PREPARATION_LOGS {
@@ -252,10 +260,8 @@ PREPARATION_LOGS {
   string cocktail_name_snapshot "Snapshot of the cocktail name at time of prep to prevent amnesia if original is deleted"
   integer servings
   jsonb deducted_ingredients "Stores exact IDs, amounts, units deducted"
-  string inventory_status "enum: 'pending', 'deducted', 'failed_insufficient', 'failed_other' DEFAULT 'pending'"
-  text inventory_error "nullable: true, details if inventory deduction failed"
-  timestamp created_at "Used for the 15-minute undo window"
   boolean undone DEFAULT false
+  timestamp created_at "Used for the 15-minute undo window"
 }
 
  REFRESH_TOKENS {
@@ -265,7 +271,6 @@ PREPARATION_LOGS {
   string hashed_token "bcrypt hash of the current refresh token"
   boolean is_revoked DEFAULT false
   timestamp expires_at
-  timestamp rotated_at "nullable: true, Used for 5-second grace period fallback"
   timestamp created_at
  }
 
@@ -293,12 +298,11 @@ REPORTED_CONTENT {
    uuid id PK
   uuid user_id FK "ON DELETE CASCADE"
    date quota_date "Date for which quota is tracked (YYYY-MM-DD)"
-   integer usage_count DEFAULT 0 "Atomic counter for daily AI generations"
+    integer usage_count DEFAULT 0 "Standard counter for daily AI generations"
    timestamp last_updated_at
    UNIQUE(user_id, quota_date) "One row per user per day"
-   -- DEPRECATED: AI quota enforcement moved to Redis for atomic INCR operations (UC 5.25)
-   -- This table remains for historical analytics but is not the source of truth
-   -- Frontend queries GET /ai/quota which reads from Redis, not this table
+    -- SIMPLIFIED: AI quota enforcement uses simple database counters
+    -- Frontend queries GET /ai/quota which reads from this table
  }
 
  SYSTEM_SETTINGS {
@@ -463,11 +467,11 @@ The global `ingredients` table is initially populated via a migration or seeder 
 
 2. **Concurrency Control for `PREPARATION_LOGS`:**
 
-- The `undone` column in `PREPARATION_LOGS` must be protected with database-level locking during undo operations to ensure idempotency (UC 4.19).
+- The `undone` column in `PREPARATION_LOGS` is checked during undo operations to prevent duplicate undo (UC 4.19).
 
-- Implementation uses `SELECT ... FOR UPDATE` or application-level distributed locks (Redis) when checking and updating the `undone` flag.
+- Implementation uses basic database constraints to prevent duplicate undo operations.
 
-- Prevents duplicate inventory restoration from concurrent undo requests.
+- In MVP, concurrent undo requests may result in duplicate inventory restoration that users must manually correct.
 
 2. **Eager Loading Optimization:**
 
@@ -479,6 +483,7 @@ The global `ingredients` table is initially populated via a migration or seeder 
 
 **Example Entity Configuration:**
 ```typescript
+import { Decimal } from 'decimal.js';
 import { ColumnNumericTransformer } from '../utils/column-numeric.transformer';
 
 @Entity()
@@ -486,34 +491,38 @@ export class UserInventory {
   @Column({
     type: 'decimal',
     precision: 10,
-    scale: 2,
+    scale: 4, // 4 decimal places to match recipe precision
     transformer: new ColumnNumericTransformer(), // Critical for math operations
   })
-  quantity: number;
+  quantity: Decimal;
 
   @Column({
     type: 'decimal',
-    precision: 8,
-    scale: 2,
+    precision: 10,
+    scale: 4, // 4 decimal places for fractional measurements
     transformer: new ColumnNumericTransformer(),
+    nullable: true // Allows qualitative amounts like 'dash' or 'rinse'
   })
-  amount: number;
+  amount: Decimal;
 }
 
-// ColumnNumericTransformer implementation:
+// ColumnNumericTransformer implementation (see typeorm-decimal-transformers.md for full implementation):
 export class ColumnNumericTransformer {
-  to(data: number): number {
-    return data;
+  to(data: Decimal | number): string | null {
+    if (data === null || data === undefined) return null;
+    return data.toString();
   }
   
-  from(data: string): number {
+  from(data: string): Decimal | null {
     if (data === null || data === undefined) return null;
-    return parseFloat(data);
+    return new Decimal(data); // Returns Decimal instance, not parseFloat()
   }
 }
 ```
 
-**Why this matters:** The `UnitConverterService` performs precise mathematical calculations for inventory management. String values would cause `NaN` errors or incorrect conversions, potentially allowing users to prepare cocktails they don't have ingredients for.
+**Note:** The full `ColumnNumericTransformer` implementation is documented in `typeorm-decimal-transformers.md`. This file is the sole source of truth for decimal transformer implementations.
+
+**Why this matters:** The `UnitConverterService` performs precise mathematical calculations for inventory management using `decimal.js` to prevent IEEE 754 floating-point errors. The transformer must return `Decimal` instances, not native JavaScript numbers via `parseFloat()`. String values would cause `NaN` errors or incorrect conversions, potentially allowing users to prepare cocktails they don't have ingredients for.
 
 ## 🔍 PostgreSQL Extensions for Advanced Features
 

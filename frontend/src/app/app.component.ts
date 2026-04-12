@@ -57,7 +57,7 @@ export class AppComponent implements OnInit {
 
   loadUsers() {
     this.userService.getUsers().subscribe({
-      next: (data) => this.users.set(data),
+      next: (response) => this.users.set(response.data),
       error: (err) => console.error('Error fetching users', err)
     });
   }

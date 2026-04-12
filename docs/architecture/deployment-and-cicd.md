@@ -27,15 +27,24 @@ This document outlines the production deployment strategy for MixologyHub, movin
 
 #### 2. Backend Deployment
 ```
-[ NestJS Build ] → [ Node.js Container ] → [ Container Orchestration ]
+[ NestJS Build ] → [ Node.js Container ] → [ Stateful Virtual Machine ]
        ↓                    ↓                          ↓
-   JavaScript      Multi-stage build         AWS ECS / Google Cloud Run
+   JavaScript      Multi-stage build         AWS EC2 / DigitalOcean
 ```
 
 **Options:**
-- **AWS ECS Fargate**: Serverless containers, auto-scaling
-- **Google Cloud Run**: Fully managed, scales to zero
-- **Kubernetes (EKS/GKE)**: Full control, higher complexity
+- **AWS EC2 / Elastic Beanstalk (EC2 Mode)**: Persistent VMs with EBS volumes
+- **DigitalOcean Droplets**: Standard persistent VMs
+- **Any standard VPS**: Ensures /uploads/ directory survives restarts
+
+### Architectural Decision: Stateful Monolith Deployment Mandate (Rejection of Serverless)
+**Explicit Trade-off:** Because the "No Image URLs" mandate forces us to store processed .webp files directly on the local Node.js file system (`/uploads/cocktails/`), we explicitly reject ephemeral, scale-to-zero serverless orchestration (e.g., AWS ECS Fargate, Google Cloud Run). The application MUST be deployed on a stateful, persistent Virtual Machine (e.g., AWS EC2, DigitalOcean Droplet) with persistent block storage attached. We trade cloud-native serverless auto-scaling for absolute adherence to the local-asset-only security policy.
+
+### Architectural Decision: Single-VM Vertical Scaling Mandate
+**Explicit Trade-off:** Because we enforce the "No Image URLs" mandate by storing assets on the local file system (`/uploads/cocktails/`), we explicitly forbid multi-VM horizontal scaling (e.g., deploying across multiple EC2 instances behind an AWS ALB without a shared EFS volume). To adhere to the "No Distributed State" mandate (which forbids shared network drives), the application MUST be scaled vertically on a single Virtual Machine, utilizing only the native Node.js cluster module to span multiple CPU cores across a shared physical disk. We trade cloud-native horizontal load balancing for absolute architectural simplicity and secure local asset storage.
+
+### Architectural Decision: Abandonment of Blue-Green Deployments for Asset Persistence
+**Explicit Trade-off:** Because we enforce the "No Image URLs" mandate by storing assets strictly on the local file system (`/uploads/`), we explicitly abandon immutable infrastructure patterns like Blue-Green deployments. We mandate that CI/CD pipelines execute In-Place Rolling Restarts (via PM2 or Docker Compose) against persistent host-volume mounts. We trade zero-downtime deployment purity for the absolute guarantee of local asset persistence without utilizing distributed storage.
 
 #### 3. Database (Production)
 ```
@@ -150,7 +159,7 @@ jobs:
 #### 3. Production Deployment
 - **Trigger**: Successful staging deployment
 - **Actions**:
-  - Blue-green deployment
+  - In-Place Rolling Restarts
   - Database migrations (with rollback plan)
   - Smoke tests
   - Monitoring verification
@@ -207,7 +216,7 @@ jobs:
 - Regular review of unused resources
 
 ### Serverless Options
-- Consider Lambda for async tasks
+- Use CDN edge-caching for local /uploads/ image delivery to reduce Node.js bandwidth costs
 - Use S3 for static assets
 - Implement caching aggressively
 - Schedule non-essential tasks during off-peak

@@ -3,6 +3,9 @@
 ## Status
 Deprecated (Replaced by Native Uploads - ADR 0016)
 
+### Architectural Decision: Voiding of Proxy Mandates
+**Explicit Trade-off:** With the adoption of Native File Uploads (ADR 0016), all trade-offs documented in this file regarding proxy URL hydration, event-loop saturation, and raw URL preservation are explicitly voided. We trade historical rule preservation for current architectural clarity.
+
 ## Context
 The system accepts user-submitted image URLs for custom cocktails (UC 2.7) with SSRF prevention (ADR 0007, UC 13.5). The current implementation has a client-side security vulnerability:
 
@@ -109,8 +112,8 @@ export class ImageProxyService {
   }
 }
 
-**Senior Architectural Decision: NGINX Trust Proxy Configuration**
-**Explicit Trade-off:** Because the Image Proxy is unauthenticated and relies heavily on IP-based rate limiting to prevent abuse, the NestJS application MUST be explicitly configured to trust the reverse proxy (`app.set('trust proxy', 1)`). This ensures NestJS reads the `X-Forwarded-For` header instead of the internal Docker/NGINX IP. We explicitly accept the risk of IP spoofing (if NGINX is misconfigured) to ensure our image proxy rate limiter doesn't accidentally ban the entire user base.
+**⚠️ DEPRECATED: NGINX Trust Proxy Configuration (No Longer Needed)**
+**ARCHITECTURAL NOTE:** This entire ADR and all its implementation details are **DEPRECATED** and should be **IGNORED**. With the adoption of Native File Uploads (ADR 0016), there is no image proxy, no external URL fetching, and therefore no need for NGINX trust proxy configuration. All images are stored locally as `/uploads/cocktails/{uuid}-full.webp` and served directly by NestJS static file serving.
 
 #### 3. Frontend Image Component
 ```typescript
@@ -194,35 +197,35 @@ export class ImageService {
 - **Single Point of Failure**: Proxy service becomes critical infrastructure
 
 ### Architectural Trade-off: Node.js Event Loop OOM vs. IP Privacy
-**Senior Architectural Decision: Event Loop Saturation vs. IP Privacy**
+**Architectural Decision: Event Loop Saturation vs. IP Privacy**
 **Explicit Trade-off:** By proxying binary image data (up to 5MB per image) through the single-threaded Node.js NestJS backend rather than a dedicated CDN/Nginx layer, we introduce a severe memory and event-loop bottleneck. If 100 users open the app simultaneously loading 10 cocktail images each (1,000 concurrent proxy requests × 5MB = 5GB RAM), this will cause Out Of Memory (OOM) crashes. We explicitly accept this architectural flaw for MVP to guarantee SSRF and IP Leakage protection without adding infrastructure complexity.
 
 **Mitigation:** **Phase 2 MUST offload this** to a dedicated Nginx reverse proxy layer, AWS CloudFront, or Serverless Edge function (e.g., Cloudflare Workers).
 
 ### Architectural Trade-off: Bandwidth Cost Shifting vs. Client Privacy
-**Senior Architectural Decision: Infrastructure Bandwidth Costs vs. User Privacy**
+**Architectural Decision: Infrastructure Bandwidth Costs vs. User Privacy**
 **Explicit Trade-off:** By proxying all external images through our backend infrastructure, we shift bandwidth costs from users' mobile data plans to our cloud infrastructure bill. A single cocktail detail page with 5 high-resolution images (5 × 2MB = 10MB) costs us $0.001 in egress fees per view. At 10,000 daily views, this adds $10/day ($300/month) to infrastructure costs. We explicitly accept this cost shift to guarantee user privacy and prevent IP leakage tracking.
 
 **Mitigation:** Implement aggressive caching (24-hour TTL), image optimization (WebP conversion, resizing), and CDN integration to reduce bandwidth costs by 70-90%.
 
 ### Architectural Trade-off: In-Memory Buffering for Image Proxy Security
-**Senior Architectural Decision: In-Memory Buffering for Image Proxy Security**
+**Architectural Decision: In-Memory Buffering for Image Proxy Security**
 **Explicit Trade-off:** We retract the requirement to use pure `StreamableFile` piping. To fulfill the security requirement of validating image byte-headers and caching external images (preventing massive external bandwidth costs), we explicitly accept that the NestJS backend must hold up to 5MB image buffers in memory per request. We trade Node.js event-loop and memory safety under high load for strict SSRF content validation and reduced outbound bandwidth.
 
 ### Architectural Trade-off: Server-Side Proxy URL Hydration
-**Senior Architectural Decision: Server-Side Proxy URL Hydration**
+**Architectural Decision: Server-Side Proxy URL Hydration**
 **Explicit Trade-off:** The frontend cannot securely generate HMAC signatures for the Image Proxy. We explicitly mandate that the Backend Aggregator and Cocktail Services must rewrite all `image_url` fields in the outgoing DTOs to their pre-hashed proxy equivalents (`/api/images/proxy?url=...&hash=...`) before the JSON leaves the server. The frontend `SecureImageComponent` will treat the URL as opaque. We trade backend processing overhead for absolute security guarantee that proxy URLs are correctly signed.
 
 ### Architectural Trade-off: Bounded Disk/External Caching for Binary Assets
-**Senior Architectural Decision: Bounded Disk/External Caching for Binary Assets**
+**Architectural Decision: Bounded Disk/External Caching for Binary Assets**
 **Explicit Trade-off:** Caching large binary buffers (up to 5MB each) in the V8 heap will cause fatal OOM crashes. We explicitly mandate that the Image Proxy cache must either be severely bounded (e.g., max 50 items / 250MB hard limit) OR offloaded entirely to a file-system cache or dedicated Redis cluster configured for eviction. We accept higher latency on cache misses to protect Node.js event loop stability.
 
 ### Architectural Trade-off: Raw URL Preservation vs DTO Mutation
-**Senior Architectural Decision: Raw URL Preservation vs DTO Mutation**
+**Architectural Decision: Raw URL Preservation vs DTO Mutation**
 **Explicit Trade-off:** To prevent "double-proxying" data corruption when users edit existing cocktails (UC 2.8), the database `image_url` column MUST ALWAYS hold the raw, unproxied external URL. We explicitly dictate that the backend proxy-rewrite logic must only occur on a virtual `proxyImageUrl` field injected during DTO serialization. The original `image_url` field will remain untouched in the payload so that Angular Reactive Forms populate with the raw URL, not the proxy route. We trade a slightly larger JSON payload (sending two URL fields) for absolute data mutation safety.
 
 ### Architectural Trade-off: Unauthenticated Image Proxy Access
-**Senior Architectural Decision: Unauthenticated Image Proxy via In-Memory Auth Limitation**
+**Architectural Decision: Unauthenticated Image Proxy via In-Memory Auth Limitation**
 **Explicit Trade-off:** We acknowledge that our JWT Access Tokens are strictly stored in volatile browser memory (not localStorage or cookies) to prevent XSS (UC 9.4). Because standard HTML `<img src="...">` tags cannot access memory-bound variables to attach Authorization headers, the `GET /api/images/proxy` endpoint must remain completely public and unauthenticated. We explicitly trade granular, user-authenticated proxy rate-limiting for XSS protection, relying entirely on pre-signed HMAC URL hashes and IP-based rate limiting to prevent proxy abuse.
 
 ## Mitigation Strategies
@@ -374,9 +377,10 @@ export class MonitoredImageProxyService extends ImageProxyService {
 </div>
 ```
 
-### 2. Loading States
+### 2. Loading States (Deprecated - Replaced by Native Uploads)
 ```typescript
-// Show loading indicator while proxy fetches
+// DEPRECATED: This shows the old image proxy implementation
+// Current implementation uses native file uploads (ADR 0016)
 @Component({
   template: `
     <div class="image-container">
@@ -384,11 +388,14 @@ export class MonitoredImageProxyService extends ImageProxyService {
         <mat-spinner diameter="30"></mat-spinner>
         <span>Loading securely...</span>
       </div>
-      <app-secure-image
-        [originalUrl]="imageUrl"
+      <!-- DEPRECATED: app-secure-image component no longer exists -->
+      <!-- Current implementation uses standard img tag with local paths -->
+      <img 
+        [src]="cocktail.imageThumb || '/assets/images/cocktail-placeholder.jpg'"
+        [alt]="cocktail.name"
         (load)="loading = false"
         (error)="onError()"
-      ></app-secure-image>
+      />
     </div>
   `
 })

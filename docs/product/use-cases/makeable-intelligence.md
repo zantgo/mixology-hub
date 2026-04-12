@@ -22,6 +22,8 @@
 * **Then** the `MeasureParserService` evaluates `"A pinch"` as an amount of `null`.
 * **And** the math engine safely bypasses the strict numeric deduction for Salt.
 * **And** the Tequila is successfully mathematically deducted.
+* **Architectural Decision: Acceptance of Infinite Qualitative Inventory with Rinse Exception**
+  * **Explicit Trade-off:** Because we cannot programmatically define the exact volumetric displacement of a "dash" or a "pinch" across all ingredients, we explicitly accept that qualitative units (dash, pinch) will experience zero automated inventory depletion, with the explicit exception of a rinse. We trade perfect algorithmic ledgering for the flexibility to parse human-written recipes, while enforcing a hardcoded 3ml deduction for rinses to prevent PostgreSQL CHECK (quantity >= 0) violations. Users must manually decrement their bottles of bitters, salt, or citrus peels.
 
 **UC 3.4: Rejecting Incompatible Unit Conversions**
 * **Given** the user's inventory has `500 ml` of "Honey".
@@ -66,9 +68,12 @@
 **UC 3.9: Ratio/Part-based Measurements**
 * **Given** a cocktail recipe uses "parts" (e.g., 1 part Gin, 1 part Campari).
 * **When** the system evaluates makeability without a `totalVolumeMl` parameter.
-* **Then** it flags the cocktail as `requiresUserInput` to prompt the user for their desired total volume.
-* **Senior Architectural Decision: Volumetric Bias for Ratio-Based Cocktails**
+* **Then** for background evaluations (Home Dashboard), it uses `USER_PROFILES.default_part_size` (default: 30ml) multiplied by total parts.
+* **And** for interactive evaluations, it flags the cocktail as `requiresUserInput` to prompt the user for their desired total volume.
+* **Architectural Decision: Volumetric Bias for Ratio-Based Cocktails**
   * **Explicit Trade-off:** We explicitly accept a volumetric bias in our ratio math engine. When users input a `totalVolumeMl` for part-based drinks, the engine will blindly distribute that liquid volume across all parts, reverse-converting to mass for non-liquid ingredients using their density column. We trade strict culinary accuracy for simplified algorithmic distribution, accepting that part-based drinks heavily featuring solids/powders may calculate unpalatable ratios.
+* **Architectural Decision: Default Volume Assumption for Ratio Makeability**
+  * **Explicit Trade-off:** If the Makeability Engine strictly requires a user-provided `totalVolumeMl` to evaluate ratio-based cocktails, those cocktails will automatically fail background evaluations and disappear from the Home Dashboard. We explicitly mandate that when the engine evaluates a part-based recipe without a user volume parameter, it will blindly inject the `USER_PROFILES.default_part_size` (default: 30ml / 1oz) multiplied by the total parts to execute the boolean makeability check. We trade strict contextual accuracy for ensuring classic ratio drinks (like Negronis and Margaritas) remain discoverable in the UI.
 
 **UC 3.10: Synonym Aggregation for Makeability**
 * **Given** a user has 30ml "Triple Sec" and 40ml "Cointreau" (synonyms for Orange Liqueur).
@@ -123,7 +128,7 @@
 * **And** queries the Redis synonym cache to find canonical ingredient relationships.
 * **And** passes the resolved UUIDs to the Makeability Math Engine for calculation.
 * **And** caches the string-to-UUID mappings to optimize subsequent evaluations.
-* **Clarification on Makeability Sorting:** External API cocktails with unparseable NLP measurements (e.g., "top up", "1 part", "to taste") are excluded from strict makeability percentage sorting (`sort=makeability`). They appear in unified search results but maintain a default position in the sort order, as their makeability score cannot be reliably calculated without precise volume measurements.
+* **Clarification on Makeability Sorting:** When `sort=makeability` is applied to Unified Search, the CocktailAggregatorService automatically drops all External API results, returning ONLY Local Database cocktails. This prevents live NLP parsing of 50+ API results during sorting, protecting the Node.js event loop from unpredictable computational spikes.
 
 **UC 3.22: Aggregating Specific Children to satisfy a Generic Parent**
 * **Given** a cocktail requires `4 oz` of generic "Whiskey".
@@ -140,6 +145,8 @@
 * **Then** the validation pipe rejects the request with `400 Bad Request`.
 * **And** prevents integer overflow or massive decimal calculations in the Math Engine.
 * **And** provides user-friendly error: "Total volume cannot exceed 10 liters (10,000 ml)."
+* **Architectural Decision: Bounding Minimum Part Values**
+  * **Explicit Trade-off:** To prevent mathematical explosions (division by microscopically small floats) during part-to-volume ratio conversions, we explicitly mandate that any ingredient utilizing the part unit must have a minimum amount of 0.5. Custom recipes submitted with parts smaller than 0.5 will be rejected by the DTO validation layer with a 400 Bad Request. We trade extreme micro-ratio flexibility for guaranteed math-engine stability.
 
 **UC 3.24: Mass-to-Volume Density Conversion**
 * **Given** a recipe requires `50 g` of "Honey" and the user's inventory has `100 ml` of Honey.
@@ -155,7 +162,8 @@
  * **When** the SQL `HAVING` clause returns 5,000 potentially makeable cocktails.
  * **Then** the Math Engine evaluates cocktails sequentially with a hard cap of 200 iterations (ADR 0008 DoS protection).
  * **And** evaluates until either: (1) `limit` makeable cocktails are found, OR (2) 200 iterations reached.
- * **And** returns partial results if iteration cap reached (may return fewer than `limit` cocktails).
- * **Performance & Security:** Uses offset-based pagination (not cursor-based) because cursor-based pagination is mathematically impossible when relying on dynamically computed in-memory scores without embedding the entire score state into the cursor.
- * **Hard Limits:** Maximum `page=10`, maximum `offset=100` regardless of page/limit combination (ADR 0008).
+ * **And** if the 200-iteration cap is reached before finding `limit` makeable cocktails, returns `400 Bad Request: PAGINATION_OVERSHOOT` to prevent deep pagination DoS attacks (ADR 0008).
+  * **Performance & Security:** Uses offset-based pagination (not cursor-based) because cursor-based pagination is mathematically impossible when relying on dynamically computed in-memory scores without embedding the entire score state into the cursor.
+  * **Hard Limits:** Global maximum `page=100` (capped at 1,000 items with default limit=10). Makeability computation limited to 200 iterations, which may restrict effective pagination depth based on inventory sparsity (ADR 0008).
+  * **Chronological Bias:** Because the engine evaluates cocktails in database order (typically `created_at DESC`), it can only discover the 200 most recently added cocktails. Older, perfectly makeable cocktails may remain permanently undiscoverable for users with sparse inventories.
  * **Future Optimization:** For production-scale deployments, consider PostgreSQL materialized views or stored procedures to move unit conversion logic to database layer, enabling native `LIMIT 10` in SQL rather than in-memory evaluation (see Backend Architecture performance section).

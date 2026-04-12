@@ -5,7 +5,7 @@ This directory contains API documentation and testing resources for MixologyHub.
 ## 📚 API Specification
 
 - [REST API Specification](./api-spec.md) - Complete API documentation with examples
-- [Pagination Implementation](./api-spec.md#-pagination-implementation-guide) - Cursor-based pagination details
+- [Pagination Implementation](./api-spec.md#-pagination-implementation-guide) - Page-based pagination details
 - [Error Response Reference](./api-spec.md#-global-error-response-reference) - Standard error formats
 
 ## 🧪 Testing Resources
@@ -70,7 +70,7 @@ The Postman collection is organized by API resource:
 #### Error Testing
 1. Prepare cocktail without ingredients (400)
 2. AI prompt injection attempt (400)
-3. Invalid pagination cursor (400)
+3. Invalid pagination page number (400)
 
 #### Performance Testing
 1. Large result sets with pagination
@@ -110,9 +110,13 @@ Accept: application/json
 ```json
 {
   "data": { ... },
-  "nextCursor": "timestamp_uuid",
-  "hasMore": true,
-  "limit": 10
+  "meta": {
+    "currentPage": 1,
+    "nextPage": 2,
+    "itemsPerPage": 10,
+    "totalItems": 150,
+    "totalPages": 15
+  }
 }
 ```
 
@@ -128,9 +132,10 @@ Accept: application/json
 ```
 
 #### Pagination
-- **Cursor-based**: `?limit=10&cursor=timestamp_uuid`
+- **Page-based**: `?limit=10&page=1`
 - **Default limit**: 10 items
 - **Max limit**: 100 items
+- **Max page**: 100 (prevents deep pagination DoS)
 - **Ordering**: `created_at DESC, id DESC`
 
 ## 🧪 Automated Testing
@@ -252,7 +257,7 @@ Response:
 - LLM prompt injection protection
 
 ### Scaling
-- Horizontal scaling with load balancer
+- Single-VM Vertical Scaling (utilizing Node.js cluster module across CPU cores)
 - Database connection pooling
 - Redis caching layer
 - CDN for static assets

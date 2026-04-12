@@ -449,11 +449,28 @@ export class CocktailFormComponent {
     description: new FormControl('', [
       Validators.maxLength(500)
     ]),
-    servings: new FormControl(1, [
-      Validators.required,
-      Validators.min(1),
-      Validators.max(20)
-    ])
+  servings: new FormControl(1, [
+    Validators.required,
+    Validators.min(1),
+    Validators.max(20)
+  ]),
+  // Cross-field validation for part-based recipes
+  ingredients: new FormArray([], [
+    Validators.required,
+    Validators.minLength(1),
+    // Custom validator for part-based recipes
+    (formArray: AbstractControl) => {
+      const ingredients = formArray as FormArray;
+      for (const control of ingredients.controls) {
+        const unit = control.get('unit')?.value;
+        const amount = control.get('amount')?.value;
+        if (unit === 'part' && amount < 0.5) {
+          return { minPartValue: true };
+        }
+      }
+      return null;
+    }
+  ])
   });
 
   // Track field interaction state
@@ -536,6 +553,14 @@ export class CocktailFormComponent {
     <div class="help-text" id="name-help">
       Enter a descriptive name for your cocktail (3-100 characters)
     </div>
+  </div>
+  
+  <!-- Part-based recipe validation note -->
+  <div class="form-error" 
+       [class.show]="cocktailForm.get('ingredients')?.errors?.['minPartValue']" 
+       role="alert">
+    <app-icon name="alert-circle"></app-icon>
+    <span>When using "parts" as unit, each ingredient must have at least 0.5 parts to prevent math engine crashes.</span>
   </div>
 </form>
 ```

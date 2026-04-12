@@ -19,7 +19,7 @@
 * **And** stores the result with 4 decimal places (0.3333) in `decimal(10,4)` database storage for accurate scaling.
 * **And** preserves the unit "oz" for later unit conversion.
 * **Note:** With 4 decimal places, scaling 1/3 oz to 10,000 servings yields 3333.3333 oz (accurate), not 3300.00 oz (truncated).
-* **Senior Architectural Decision: Acceptance of Fractional Truncation Drift**
+* **Architectural Decision: Acceptance of Fractional Truncation Drift**
   * **Explicit Trade-off:** By storing recipe fractions as `decimal(10,4)` in PostgreSQL, we permanently truncate recurring decimals (e.g., 1/3 becomes 0.3333). We explicitly accept that scaling a recipe to massive batch sizes (e.g., 10,000 servings) will result in a maximum precision drift of ±0.5 oz of total liquid. We trade absolute mathematical perfection (which would require storing numerators and denominators as separate database columns) for database schema simplicity and standard `decimal.js` interoperability.
 
 **UC 1.4: Depleting inventory to zero**
@@ -36,7 +36,7 @@
 * **When** the request reaches the backend.
 * **Then** the `UnitConverterService` intercepts the input and normalizes it to the system base unit (`1000 ml`).
 * **And** it is stored in the database strictly as `1000` with the unit implicitly defined by the ingredient's `baseUnit` field.
-* **Senior Architectural Decision: Elimination of Redundant Unit Column**
+* **Architectural Decision: Elimination of Redundant Unit Column**
   * **Explicit Trade-off:** The `USER_INVENTORY` table originally contained a redundant `unit` column that duplicated information available via the `INGREDIENTS.baseUnit` foreign key relationship. We explicitly remove this column to enforce data normalization and prevent potential inconsistencies. All inventory quantities are stored in their base unit form, with the unit type determined by joining to the `INGREDIENTS` table. We trade a minor performance cost (additional join) for absolute data consistency and elimination of update anomalies.
 
 **UC 1.6: Manual deletion of an ingredient**
@@ -57,6 +57,8 @@
 * **Then** a new record is created in the `Ingredients` catalog flagged with `created_by = user_id` and `is_global = false`.
 * **And** it is immediately linked to the `user_inventory` table with the specified quantity.
 * **And** it only appears in search results and recipe creation for this specific user.
+* **Architectural Decision: Acceptance of Orphaned Private "Ghost" Ingredients**
+  * **Explicit Trade-off:** Custom ingredients created by users are flagged `is_global = false`. If a user deletes their account, `ON DELETE SET NULL` anonymizes the creator to protect relational integrity. However, because the ingredient is not global, no other user can query or view it. We explicitly accept that the database will permanently accumulate these private, ownerless "ghost ingredients." We trade minor database storage bloat for the absolute prevention of cascading relational failures on custom recipes.
 
 **UC 1.9: Ingredient Name Normalization & Deduplication**
 * **Given** the global catalog already contains "Vodka".
@@ -81,14 +83,14 @@
 **UC 1.12: Inventory Pagination & Sorting**
 * **Given** a power-user has added 500 unique ingredients to their inventory.
 * **When** they request `GET /user-inventory`.
-* **Then** the API applies cursor-based pagination (just like Cocktails).
+* **Then** the API applies page-based pagination (just like all other endpoints).
 * **And** the results are sorted alphabetically by ingredient name or by recently updated.
 
 **UC 1.13: Upper Boundary / Overflow Prevention**
 * **Given** a user attempts to add `99999999999 ml` of Vodka to their inventory.
 * **When** the request hits the API.
 * **Then** the global validation pipe rejects the payload.
-* **And** enforces a reasonable maximum limit (e.g., `max: 100000`) to prevent PostgreSQL `decimal(10,2)` overflow errors.
+* **And** enforces a reasonable maximum limit (e.g., `max: 100000`) to prevent PostgreSQL `decimal(10,4)` overflow errors.
 
 **UC 1.14: Adding "Count-Based" or Qualitative Inventory Items**
 * **Given** a user wants to add "Lemons" or "Mint Leaves" to their inventory.
@@ -123,7 +125,7 @@
  * **Then** the system returns `403 Forbidden` - only administrators can rename custom ingredients.
  * **Rationale**: Custom ingredients are shared across users by name (UC 10.5). Allowing User B to rename "Secret Syrup" to "Poison" would affect User A's inventory and recipes.
  * **Admin Workflow**: Administrators can rename custom ingredients via admin panel, which updates the display name across all cocktails and inventory entries using this ingredient.
- * **Senior Architectural Decision: Ingredient Ownership vs. Shared Catalog**
+ * **Architectural Decision: Ingredient Ownership vs. Shared Catalog**
    * **Explicit Trade-off:** Users cannot rename their own custom ingredients because ingredients are shared globally by name. This prevents User A from maliciously renaming "Vodka" to "Poison" affecting all users. However, it creates a poor user experience where users cannot fix typos in their own ingredient names without admin assistance. We accept this trade-off for data integrity over user convenience.
 
 **UC 1.19: Locking `baseUnit` for In-Use Ingredients**
@@ -139,9 +141,9 @@
  * **When** the DELETE request is executed.
  * **Then** the database safely cascades the deletion to remove it from all `user_inventory` rows.
  * **And** sets the `ingredient_id` to `NULL` (or softly tombstones it) in `cocktail_ingredients` so existing custom recipes do not completely break, but flag the missing ingredient.
- * **Senior Architectural Decision: Orphaned Ingredient Math Degradation**
+ * **Architectural Decision: Orphaned Ingredient Math Degradation**
    * **Explicit Trade-off:** When an Admin hard-deletes an ingredient, the relational link is severed, and the math engine can no longer deduce the `baseUnit`. We explicitly mandate that any cocktail containing an ingredient where `ingredient_id IS NULL` is immediately and silently filtered out of the "Makeable Cocktails" SQL query. We trade historical recipe preservation for math engine stability; recipes with deleted ingredients are permanently classified as "Unmakeable."
- * **Senior Architectural Decision: Recipe UI Degradation on Admin Hard Deletes**
+ * **Architectural Decision: Recipe UI Degradation on Admin Hard Deletes**
    * **Explicit Trade-off:** We explicitly accept that when an Administrator hard-deletes a global ingredient, any custom recipes relying on that ingredient will permanently lose the ingredient's name reference, rendering it as an blank or "Unknown Ingredient" in the UI. We trade strict relational database normalization (refusing to duplicate string names into the COCKTAIL_INGREDIENTS pivot table) for this rare, edge-case UI degradation. If an author wants to fix their recipe, they must edit it and assign a new ingredient.
 
 **UC 1.20a: User Cannot Delete Custom Ingredients**
@@ -170,10 +172,10 @@
 * **And** updates all `cocktail_ingredients` rows containing A to point to B.
 * **And** safely handles collisions (if a user already had both A and B in their inventory, it sums the quantities).
 * **And** safely deletes ingredient A.
-* **Senior Architectural Decision: Strict Base-Unit Isolation on Ingredient Merges**
+* **Architectural Decision: Strict Base-Unit Isolation on Ingredient Merges**
   * **Explicit Trade-off:** We explicitly forbid Administrators from merging two ingredients that have differing `baseUnit` types (e.g., merging a Volume into a Count). To protect the mathematical integrity of historical `user_inventory` and `cocktail_ingredients` data, the Admin UI will throw a `409 Conflict: Incompatible Base Units`. We trade administrative convenience (forcing admins to manually delete the erroneous ingredient rather than merging it) for the guarantee that the `UnitConverterService` math engine will never crash on corrupted cross-unit sums.
   * **Note:** With the removal of offline sync functionality, there are no pending operations to fail when ingredients are merged.
-* **Senior Architectural Decision: JSONB Log Corruption Tolerance on Admin Merges**
+* **Architectural Decision: JSONB Log Corruption Tolerance on Admin Merges**
   * **Explicit Trade-off:** We explicitly accept that Admin taxonomy merges are instantly destructive to active 15-minute preparation undo windows. We trade the complexity of executing deep JSONB schema-migration queries (which would require parsing and updating thousands of JSON text blobs upon every ingredient merge) for simple, fast Admin moderation. Users attempting to undo a drink containing an ingredient that was merged mid-flight will receive a generic 500 error, and the undo action will fail.
 
 **UC 1.24: Admin Taxonomy & Synonym CRUD**
@@ -181,7 +183,7 @@
 * **When** an Admin submits a `POST /admin/ingredients/synonyms` payload mapping "Curaçao" to the base ingredient "Orange Liqueur".
 * **Then** the relationship is saved in the database.
 * **And** the makeability engine instantly allows users with "Curaçao" to make "Orange Liqueur" based drinks without requiring a server restart.
-* **Senior Architectural Decision: Strict Hierarchical Base Unit Isomorphism**
+* **Architectural Decision: Strict Hierarchical Base Unit Isomorphism**
   * **Explicit Trade-off:** We explicitly forbid Administrators from creating is_a hierarchical relationships between ingredients that possess different baseUnit types (e.g., mapping a Mass ingredient as a child of a Volume ingredient). The `POST /admin/ingredients/synonyms` validation pipe will intercept this and throw a `409 Conflict: Hierarchical Base Unit Mismatch`. We accept that this prevents certain creative taxonomy mappings, prioritizing absolute mathematical safety during dynamic inventory aggregation.
 
 **UC 1.25: Bulk Delete Inventory Items**
@@ -232,6 +234,11 @@
 **UC 1.31: Global Ingredient Update Cascade**
 * **Given** an Admin corrects a typo on a global ingredient (e.g., "Wihskey" → "Whiskey").
 * **When** the update commits.
-* **Then** the system asynchronously flushes the Redis search cache for any cocktails containing that ingredient.
-* **And** triggers a background job to update any user-created cocktails that reference the old ingredient name.
+* **Then** the system flushes the Redis search cache for any cocktails containing that ingredient.
+* **And** synchronously updates any user-created cocktails that reference the old ingredient name.
 * **And** ensures search results reflect the corrected name immediately.
+* **Architectural Decision: Synchronous Taxonomy Cascades**
+  * **Explicit Trade-off:** Because we have eradicated distributed background workers to maintain a zero-concurrency architecture, cascading string-name updates for global ingredients cannot be queued. We explicitly mandate that updating a global ingredient name will execute a synchronous, blocking SQL UPDATE against all reliant user-created cocktails. We accept that for heavily used ingredients, this may exceed reverse-proxy timeouts (e.g., 504 Gateway Timeout) during Admin operations. We trade administrative UI responsiveness for architectural simplicity.
+
+* **Architectural Decision: Nuclear Cache Flushing on Taxonomy Edits**
+  * **Explicit Trade-off:** Because Redis search caches are keyed by user search queries (e.g., search_unified:margarita), it is impossible to surgically identify which cached arrays contain a specific ingredient ID when an Admin updates the global taxonomy. We explicitly mandate that any Admin update to an Ingredient's name or baseUnit MUST execute a nuclear FLUSHALL or wildcard DEL search_unified:* across the Redis cache. We trade momentary system-wide cache-miss latency for absolute data consistency without complex cache-tagging architecture.

@@ -53,7 +53,7 @@ announceCritical(message: string) {
 <!-- Cocktail card with proper semantics -->
 <article class="cocktail-card" role="article" aria-labelledby="cocktail-title-123">
   <div class="card-image" role="img" aria-label="Photo of Margarita cocktail">
-    <img [src]="cocktail.imageThumb || fallbackPath" alt="Margarita cocktail with salt rim and lime wedge">
+    <img [src]="cocktail.imageThumb || '/assets/images/cocktail-placeholder.jpg'" alt="Margarita cocktail with salt rim and lime wedge">
     <button class="favorite-btn" 
             [attr.aria-label]="isFavorite ? 'Remove from favorites' : 'Add to favorites'"
             [attr.aria-pressed]="isFavorite">
@@ -110,7 +110,7 @@ announceCritical(message: string) {
     <input type="text" #firstInput>
     
     <!-- Tab sequence continues naturally -->
-    <input type="number">
+    <input type="text" inputmode="decimal" aria-label="Measurement amount">
     <select>
       <option>ml</option>
       <option>oz</option>

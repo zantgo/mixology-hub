@@ -41,7 +41,7 @@
 **UC 7.7: Infinite Scrolling / Load More Data**
  * **Given** the user has loaded the first page of the Unified Search results.
  * **When** the user scrolls to the bottom of the list (or clicks "Load More").
- * **Then** the Angular UI triggers the API with the `cursor` parameter from the previous response.
+ * **Then** the Angular UI triggers the API with the `page` parameter incremented from the previous response.
  * **And** the Signals/RxJS streams append the new results to the *existing* array without flashing or resetting the UI.
 
 **UC 7.8: User-Preferred Measurement System (Localization)**
@@ -62,6 +62,8 @@
 * **When** the backend returns a `500 Server Error` or network drops.
 * **Then** the UI Signal catches the error and instantly *reverts* the inventory quantities back to their previous state.
 * **And** displays an error toast.
+* **Architectural Decision: Optimistic State Desynchronization Trap**
+  * **Explicit Trade-off:** Because we strictly enforce the "No Concurrency / No Sync" mandates, we have removed all distributed idempotency locks and real-time state reconciliation. We explicitly accept that if an HTTP response drops in transit after the backend successfully commits a transaction, the frontend's optimistic rollback (reverting the UI to the pre-action state) will cause a silent Client-Server state desynchronization. If the user clicks "Retry", they will suffer a double-deduction. We trade robust, idempotent network recovery for absolute SPA architectural simplicity, relying on the user to manually refresh the browser or use the "Undo" feature to correct ledger inaccuracies.
 
 **UC 7.11: Screen Reader Accessibility for Dynamic Forms**
 * **Given** a visually impaired user is using a screen reader on the custom cocktail form.
@@ -112,15 +114,12 @@
 * **And** allows selecting which ingredient becomes the canonical version.
 * **And** shows a preview of affected cocktails and user inventories before committing the merge.
 
-**UC 7.19: Refresh Token Race Condition with Cross-Tab Sync**
- * **Given** multiple concurrent HTTP requests fail with 401 Unauthorized across browser tabs.
+**UC 7.19: SIMPLIFIED - Basic Token Refresh Handling**
+ * **Given** multiple HTTP requests fail with 401 Unauthorized.
  * **When** the Angular HTTP Interceptor catches them.
- * **Then** it intercepts and queues all subsequent requests using an RxJS `BehaviorSubject<boolean>` (isRefreshing lock).
- * **And** uses `BroadcastChannel` API to synchronize refresh state across tabs, ensuring only one tab makes the refresh call.
- * **And** makes exactly ONE call to `/auth/refresh` across all tabs.
- * **And** upon success, broadcasts the new access token to all tabs via `BroadcastChannel`.
- * **And** releases the queue and replays all pending requests with the new Access Token.
- * **And** works with backend grace period (UC 9.15) to prevent token family revocation from race conditions.
+ * **Then** basic token refresh logic is applied.
+ * **Architectural Decision: Trading Seamless Multi-Tab UX for SPA Simplicity**
+   * **Explicit Trade-off:** We explicitly strip out cross-tab synchronization, `BroadcastChannel`, and race condition prevention mechanisms. We trade seamless multi-tab user experience for strict Single Page Application architectural simplicity. Users must manually refresh browser tabs to synchronize state across sessions.
 
 **UC 7.20: Density Conversion Boundary UI**
 * **Given** a user selects an ingredient defined by Mass (g).
@@ -139,21 +138,17 @@
 * **And** when the user navigates back to the AI Bartender view, the generated recipe is preserved and rendered instead of being lost.
 * **And** the recipe remains available for 1 hour or until the user generates a new one.
 
-**UC 7.25: Cross-Tab State Synchronization**
+**UC 7.25: SIMPLIFIED - No Cross-Tab Synchronization**
  * **Given** a user has MixologyHub open in Tab A and Tab B.
  * **When** the user clicks "Prepare Drink" in Tab A, deducting 50ml of Vodka.
- * **Then** the Angular application uses `BroadcastChannel API` or listens to `window.addEventListener('storage')` for `localStorage` changes.
- * **And** instantly updates the Angular Signal in Tab B to reflect the new inventory state without requiring a manual refresh.
- * **And** displays a subtle notification in Tab B: "Inventory updated from another tab".
- * **Implementation:** Uses a shared service that publishes state changes to `BroadcastChannel` and subscribes to receive updates from other tabs.
- * **Senior Architectural Decision: In-Memory Access Tokens (XSS Mitigation)**
-   * **Explicit Trade-off:** With the removal of offline queuing requirements, we no longer need persistent access to JWTs during network loss. We explicitly mandate moving the JWT Access Token out of localStorage and into strict browser memory (Angular Service closure). The Refresh Token will remain in a secure HttpOnly cookie. If a user opens a new browser tab, the application will silently hit the `/auth/refresh` endpoint to pull a fresh in-memory Access Token. We trade the slight latency of a silent background refresh on new-tab initialization for the absolute elimination of XSS token theft vulnerabilities.
+ * **Then** Tab B does not automatically update.
+ * **Architectural Decision: Trading Seamless Multi-Tab UX for SPA Simplicity**
+   * **Explicit Trade-off:** We explicitly strip out cross-tab synchronization, `BroadcastChannel`, and race condition prevention mechanisms. We trade seamless multi-tab user experience for strict Single Page Application architectural simplicity. Users must manually refresh browser tabs to synchronize state across sessions.
 
-**UC 7.26: Network Error Handling with Optimistic Rollback**
+**UC 7.26: SIMPLIFIED - Network Error Handling**
  * **Given** a user clicks "Prepare Drink" and the UI optimistically deducts 50ml of Vodka.
  * **And** the network drops *while* the request is in-flight to the server.
  * **When** the frontend times out, it rolls back the UI to the previous state (Vodka +50ml).
- * **But** the backend successfully received and processed the request before the client disconnected.
- * **Then** when the request eventually fails, the frontend uses RxJS `retry({ count: 2, delay: 1000 })` to attempt automatic retry.
- * **And** if retries fail, shows error toast: "Network error: Preparation failed. Please try again."
- * **And** maintains strict client-server state consistency through idempotent retry mechanism.
+ * **Then** shows error toast: "Network error: Preparation failed. Please try again."
+ * **Architectural Decision: Trading Resilient Networking for SPA Simplicity**
+   * **Explicit Trade-off:** We explicitly strip out automatic retry logic and idempotency mechanisms for network error handling. We trade resilient networking with automatic recovery for strict Single Page Application architectural simplicity. Users must manually retry failed operations.

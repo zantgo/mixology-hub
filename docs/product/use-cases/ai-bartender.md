@@ -51,14 +51,23 @@
  * **And** injects the inventory list into the LLM system prompt (e.g., "Only use these ingredients: Vodka, Orange Juice").
  * **And** generates a recipe guaranteed to be 100% makeable immediately.
  * **Frontend Validation:** The "Strict Inventory" toggle/button should be disabled if the user's inventory does not contain at least one liquid/spirit base (`baseUnit = 'ml'`). Allowing generation with only "Salt" or "Mint" will cause the LLM to hallucinate non-consumable recipes.
- * **Senior Architectural Decision: LLM Non-Determinism vs. Strict Inventory Constraints**
+ * **Architectural Decision: LLM Non-Determinism vs. Strict Inventory Constraints**
    * **Explicit Trade-off:** We explicitly acknowledge that we cannot mathematically force an LLM to adhere 100% to a strict inventory list without hallucinations. We dictate that the backend will silently validate the AI's output against the user's inventory. If the LLM hallucinates an unowned ingredient, the backend will swallow the output and trigger up to 2 automated retries. If it still fails, the UI will throw a soft error asking the user to try again. We trade guaranteed immediate makeability for increased API token expenditure and occasional UX friction.
+  * **Architectural Decision: Aggressive HTTP Timeouts on Synchronous AI Retries**
+    * **Explicit Trade-off:** Because we have removed all asynchronous background queuing to simplify the architecture, automated LLM hallucination retries must execute synchronously within the active HTTP request. We explicitly accept that requiring multiple sequential LLM generations may exceed standard reverse-proxy timeout thresholds (e.g., 30 seconds), resulting in a 504 Gateway Timeout presented to the user. We trade robust, guaranteed AI recipe generation for the complete elimination of background job architecture.
+  * **Architectural Decision: Context Window Truncation for Strict Inventory AI**
+    * **Explicit Trade-off:** We acknowledge that injecting massive user inventories into an LLM prompt will exceed standard AI token context limits, causing generation failures. We explicitly mandate that the AI Adapter will truncate injected inventory lists to a maximum of 100 items (prioritizing base spirits and highest available quantities). We trade absolute inventory-awareness for guaranteed LLM prompt stability and cost control.
+  * **Architectural Decision: Asymmetric Input Length Bounds for Strict Inventory AI Mode**
+    * **Explicit Trade-off:** We implement asymmetric input length bounds: 500 characters for regular AI prompts vs. 4000 characters for Strict Inventory Mode. This acknowledges that Strict Inventory Mode requires injecting potentially massive user inventory lists (up to 100 items), while regular AI generation must enforce strict input limits for security. We trade uniform security policy enforcement for the functional requirement of inventory-aware recipe generation, accepting that Strict Inventory Mode is inherently more vulnerable to prompt injection attacks due to longer input windows.
 
 **UC 5.9: Payload Size / Token Limitation Defense**
-* **Given** a user submits an ingredient list exceeding 500 characters or 20 ingredients.
+* **Given** a user submits an ingredient list.
 * **When** the `POST /ai/generate` endpoint receives the request.
-* **Then** the input validation layer rejects the request before calling the LLM.
-* **And** returns a `400 Bad Request` with a clear message about character/ingredient limits.
+* **Then** the input validation layer enforces mode-specific length limits:
+  * Maximum 500 characters for standard prompt generation.
+  * Maximum 4000 characters for Strict Inventory Mode.
+* **And** rejects requests exceeding these bounds before calling the LLM.
+* **And** returns a `400 Bad Request` with a clear message about character limits.
 * **And** prevents excessive token consumption and API costs.
 
 **UC 5.10: Handling Hallucinated Ingredients on Save**
@@ -93,11 +102,11 @@
  * **Given** the AI generates a recipe with a completely unknown ingredient ("Unicorn Tears").
  * **When** the system attempts to auto-create this ingredient during the `save-as-cocktail` transaction.
  * **Then** the NLP/MeasureParser infers the `baseUnit` from the generated measure (e.g., "oz" or "ml" infers a volume `baseUnit: 'ml'`, "pinch" infers `baseUnit: 'g'`).
- * **And** if inference fails, it assigns a safe default (e.g., `baseUnit: 'count'`).
- * **Senior Architectural Decision: AI Ingredient Unit Permanence Risk**
-   * **Explicit Trade-off:** We accept the risk that AI-hallucinated ingredients may be assigned an incorrect baseUnit (e.g., defaulting a liquid to `count`) which permanently locks the ingredient schema due to UC 1.19. We trade absolute database perfection for a seamless AI save-to-catalog UX.
+ * **And** if inference fails, it assigns a safe default of `baseUnit: 'ml'` to enable meaningful unit conversions with the default density of 1.0.
+  * **Architectural Decision: AI Ingredient Unit Permanence Risk**
+    * **Explicit Trade-off:** We accept the risk that AI-hallucinated ingredients may be assigned an incorrect baseUnit (e.g., defaulting a solid to `ml`) which permanently locks the ingredient schema due to UC 1.19. However, we default to `baseUnit: 'ml'` (not `count`) to enable meaningful unit conversions with the default density of 1.0. We trade absolute database perfection for a seamless AI save-to-catalog UX with functional unit conversion support.
    * **Mitigation:** Administrators have a bypass override (UC 1.19 tests) to forcibly fix miscategorized AI ingredients, and the UnitConverterService will gracefully fail makeability checks rather than crash if units clash.
- * **Senior Architectural Decision: Default Density for AI Entities**
+ * **Architectural Decision: Default Density for AI Entities**
    * **Explicit Trade-off:** Because we cannot algorithmically deduce the specific gravity/density of AI-hallucinated ingredients on the fly, all auto-created AI ingredients will default to a density of 1.0. We explicitly accept that mass-to-volume unit conversions for these ingredients will be mathematically inaccurate, prioritizing frictionless AI recipe saving over absolute scientific precision.
  * **And** prevents PostgreSQL `NOT NULL` constraint violation while maintaining database integrity.
 
@@ -116,14 +125,18 @@
 * **Then** the API returns a `404 Not Found` or `410 Gone`.
 * **And** the UI displays a message: "This AI recipe has expired. Please generate a new one." rather than throwing a generic 500 error.
 * **And** logs the expiration event for debugging user behavior patterns.
+* **Architectural Decision: Ephemeral AI Audit Trails on Moderation**
+  * **Explicit Trade-off:** The nightly cron job deletes AI_RECIPES where cocktail_id IS NULL to prevent JSONB storage bloat. If an Administrator hard-deletes an offensive AI-generated public cocktail, the relational cascade will set the AI Recipe's foreign key to NULL, marking it for deletion by the cron job. We explicitly accept the destruction of the original LLM prompt audit trail upon Admin hard-deletion. We trade long-term forensic LLM auditing for aggressive database storage reclamation.
 
 **UC 5.17: AI Daily Generation Quota**
 * **Given** an authenticated user.
 * **When** they attempt to generate their 21st AI recipe within a 24-hour UTC window.
 * **Then** the backend rejects the request.
 * **And** returns a `429 Too Many Requests` or `402 Payment Required` stating: "Daily AI generation limit reached. Please try again tomorrow."
-* **Senior Architectural Decision: AI Quota Bypass for Mock Environments**
+* **Architectural Decision: AI Quota Bypass for Mock Environments**
   * **Explicit Trade-off:** To prevent CI/CD pipelines and local development from being blocked by the 20/day AI generation limit, the AI Quota Enforcer MUST be explicitly bypassed when `ENABLE_MOCK_AUTH=true` is active. We accept that developers operating under Mock Auth have unbounded access to the AI endpoint. Because the AI Adapter is already pointed at a local WireMock server during tests (per E2E guidelines), this bypass carries zero financial risk while ensuring developer velocity and pipeline stability.
+* **Architectural Decision: Calendar-Day Quota Reset over Rolling Windows**
+  * **Explicit Trade-off:** We explicitly reject the complexity of calculating rolling 24-hour timestamp windows for AI generation limits. The USER_AI_QUOTAS database table relies entirely on a strict YYYY-MM-DD string. We accept the edge case where a user can theoretically generate 40 recipes within a 2-minute span if they cross the midnight UTC threshold. We trade granular time-based quota throttling for highly performant, index-friendly date string matching.
 
 **UC 5.18: AI Recipe Stylistic Modifiers**
 * **Given** a user inputs ingredients "Rum, Lime" AND a stylistic modifier "Make it a frozen tiki drink".
@@ -137,22 +150,13 @@
 * **Then** the system assigns a specific "AI Generated" default placeholder to the `image_full` and `image_thumb` fields.
 * **And** the frontend visually distinguishes it from standard user-created cocktails.
 
-**UC 5.20: Fetching AI Daily Quota Status**
+**UC 5.20: SIMPLIFIED - Fetching AI Daily Quota Status**
  * **Given** an authenticated user who has generated 15 recipes today.
  * **When** the frontend initializes the AI Bartender view and calls `GET /ai/quota`.
- * **Then** the backend queries the Redis `ai_quota:{user_id}:{date}` key for today's usage count (Redis is source of truth for atomic enforcement - UC 5.25).
+ * **Then** the backend queries the `USER_AI_QUOTAS` PostgreSQL table for today's usage count.
  * **And** returns `{ "used": 15, "limit": 20, "remaining": 5, "resets_at": "ISO_DATE" }`.
  * **And** the frontend actively disables the "Generate" button if `remaining === 0`.
- * **Senior Architectural Decision: Redis as Source of Truth for AI Quotas**
-   * **Explicit Trade-off:** AI quota enforcement uses Redis INCR for atomicity (UC 5.25), making Redis the source of truth. The `USER_AI_QUOTAS` PostgreSQL table becomes a deprecated read replica. We accept this Redis dependency because:
-     1. **Atomicity Requirement:** Redis INCR provides race-condition-free quota enforcement
-     2. **Performance:** Redis is faster for high-frequency quota checks
-     3. **Fail-Closed:** ADR 0005 requires AI requests to fail if Redis is down
-     4. **Simplified Architecture:** Single source of truth avoids sync issues
-  * **Senior Architectural Decision: Volatile Quota Persistence**
-    * **Explicit Trade-off:** By making Redis the absolute source of truth for AI generation quotas (to prevent race conditions), we explicitly accept that Redis outages or LRU evictions will reset all user quotas to 0 for the day. We trade the risk of temporary financial abuse (users getting extra AI generations) for the high-performance, lock-free atomicity that Redis provides.
-  * **Senior Architectural Decision: Strict Redis Logical DB Segregation for Financial Constraints**
-    * **Explicit Trade-off:** Volatile caching (search results) and persistent state (AI quotas, Idempotency keys, Rate limits) MUST NEVER share the same Redis memory space. We explicitly mandate the use of separate Redis Logical Databases (`DB 0` with `allkeys-lru` and `DB 1` with `noeviction`). If memory reaches 100% on DB 1, the system will reject new AI generation requests (Fail Closed) rather than evicting existing quota keys. We trade absolute app availability for strict financial bounds against LLM abuse.
+ * **Note**: Basic quota system without atomic enforcement.
 
 **UC 5.21: AI Generation respecting User Unit Preferences**
 * **Given** a user has their profile `unit_system` set to `metric`.
@@ -166,28 +170,27 @@
 * **Then** the HTTP client automatically aborts the connection once the byte limit is exceeded.
 * **And** prevents `JSON.parse()` from executing on massive strings, protecting the Node.js event loop from crashing.
 
-**UC 5.23: Concurrent AI Generation Lock (Debounce)**
+**UC 5.23: SIMPLIFIED - Basic AI Generation Rate Limiting**
 * **Given** an authenticated user clicks "Generate" three times rapidly.
 * **When** the `POST /ai/generate` endpoint receives the concurrent requests.
-* **Then** the backend utilizes a Redis distributed lock (or in-memory lock) keyed to the `user_id`.
-* **And** processes the first request.
-* **And** rejects the subsequent two requests immediately with a `429 Too Many Requests` or `409 Conflict` before hitting the LLM provider.
-* **And** prevents duplicate expensive LLM calls from double-clicks or network retries.
+* **Then** basic rate limiting may be applied.
+* **Architectural Decision: Acceptance of Rate Limit Bypass via Concurrent Requests**
+  * **Explicit Trade-off:** We explicitly reject Redis distributed locks and complex debouncing mechanisms for AI rate limiting. We accept that rapid, simultaneous HTTP requests could bypass basic API rate limits. We trade absolute rate limit enforcement for simplified backend architecture and elimination of distributed locking overhead.
 
-**UC 5.24: AI Quota Deletion Loophole Prevented by Architecture**
-* **Given** a user generates an AI recipe, consuming 1 quota slot in the Redis `INCR` counter.
-* **When** the transient recipe is deleted from the PostgreSQL database (manually or via Cron).
-* **Then** the daily quota remains consumed.
-* **And** because the system relies strictly on the event-based Redis `INCR` counter (UC 5.20) rather than counting active rows in PostgreSQL, the loophole is inherently closed.
-* **And** prevents users from bypassing the 20/day limit by deleting their own recipes.
+**UC 5.24: SIMPLIFIED - Basic AI Quota Tracking**
+* **Given** a user generates an AI recipe.
+* **When** the recipe is saved or deleted.
+* **Then** quota is tracked via simple database counters.
+* **Architectural Decision: Acceptance of Rate Limit Bypass via Concurrent Requests**
+  * **Explicit Trade-off:** We explicitly reject Redis distributed locks and complex debouncing mechanisms for AI rate limiting. We accept that rapid, simultaneous HTTP requests could bypass basic API rate limits. We trade absolute rate limit enforcement for simplified backend architecture and elimination of distributed locking overhead.
 
-**UC 5.25: Atomic AI Quota Enforcement (Race Condition)**
+**UC 5.25: SIMPLIFIED - Basic AI Quota Enforcement**
 * **Given** a user has exactly 1 generation left in their daily quota.
-* **When** they maliciously send 5 concurrent `POST /ai/generate` requests simultaneously.
-* **Then** the backend utilizes an atomic Redis `INCR` counter (or a database row-level lock) to evaluate the quota.
-* **And** exactly 1 request succeeds.
-* **And** the remaining 4 requests are rejected instantly with `429 Too Many Requests` before hitting the LLM API.
-* **And** prevents quota bypass through race conditions that could cost excessive LLM API fees.
+* **When** they send multiple `POST /ai/generate` requests.
+* **Then** basic quota checking is performed.
+* **Note**: No atomic Redis `INCR` counters or race condition prevention. Basic quota system only.
+* **Architectural Decision: Fail-Open Concurrent Quota Bypass**
+  * **Explicit Trade-off:** Because we stripped out Redis Distributed Locks and Atomic INCR counters for MVP simplification, the `USER_AI_QUOTAS` table relies on basic SQL SELECT followed by UPDATE. We explicitly accept a race condition where a malicious user firing 10 concurrent HTTP requests could read a usage count of 19, allowing all 10 requests to pass the validation gate and bypass the 20/day limit. We trade absolute financial quota lockdown for backend architectural simplicity, accepting the minor token cost of this exploit.
 
 **UC 5.26: AI Entity Resolution (Ingredient Mapping)**
  * **Context:** The AI generates strings (e.g., "Fresh squeezed lime"). Your math engine needs UUIDs.
@@ -197,7 +200,7 @@
  * **And** only creates a new custom ingredient if the similarity score to existing global ingredients is below a reasonable threshold (e.g., < 0.35 similarity for AI-generated text).
  * **And** prevents ingredient duplication by fuzzy-matching AI-generated strings to existing global catalog entries.
  * **Database Implementation:** Uses PostgreSQL's `pg_trgm` extension with `CREATE EXTENSION IF NOT EXISTS pg_trgm;` for efficient trigram similarity matching. For AI-generated text, uses a lower threshold (`similarity() > 0.35`) to account for verbose descriptions vs. short catalog names. Falls back to PostgreSQL Full Text Search (tsvector) with Levenshtein distance for edge cases.
- * **Senior Architectural Decision: Multilingual AI Ingredient Fragmentation**
+ * **Architectural Decision: Multilingual AI Ingredient Fragmentation**
    * **Explicit Trade-off:** We explicitly accept that allowing users to prompt the AI in non-English languages (UC 5.12) will cause the `pg_trgm` fuzzy-matching algorithm to fail against our English-only global catalog. This will result in database taxonomy fragmentation, as the system will automatically create localized custom duplicates (e.g., creating a custom "Jugo de Limón" rather than linking to the global "Lime Juice" UUID). We trade strict database taxonomy purity for an unrestricted, globally accessible AI UX, deferring translation mapping pipelines to Phase 4.
 
 **UC 5.27: AI Quota Evasion via Account Deletion (Explicit Trade-off)**

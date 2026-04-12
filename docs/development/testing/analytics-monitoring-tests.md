@@ -1,15 +1,15 @@
 # Analytics & Monitoring Tests
 
-**Example TDD for Non-blocking Analytics Execution (Domain 13):**
+**Example TDD for Synchronous Analytics Execution (Domain 13):**
 ```typescript
-describe('Analytics & Monitoring - Non-blocking execution', () => {
-  it('should fire and forget analytics events without delaying HTTP response', async () => {
+describe('Analytics & Monitoring - Synchronous execution', () => {
+  it('should execute analytics logging synchronously, delaying HTTP response', async () => {
     const analyticsService = new AnalyticsService();
     const cocktailService = new CocktailService(analyticsService);
     
-    // Mock analytics to take 2 seconds (simulate slow external datadog/newrelic)
+    // Mock analytics to take 500ms (simulate database INSERT)
     jest.spyOn(analyticsService, 'trackEvent').mockImplementation(() => 
-      new Promise(resolve => setTimeout(resolve, 2000))
+      new Promise(resolve => setTimeout(resolve, 500))
     );
     
     const startTime = Date.now();
@@ -19,9 +19,10 @@ describe('Analytics & Monitoring - Non-blocking execution', () => {
     
     const duration = Date.now() - startTime;
     
-    // Ensure the prepare method finishes in ~10ms, NOT 2000ms
-    // Proving the analytics logging is detached from the request lifecycle
-    expect(duration).toBeLessThan(100); 
+    // Ensure the prepare method takes ~500ms
+    // Proving the analytics logging is synchronous within the request lifecycle
+    expect(duration).toBeGreaterThan(450);
+    expect(duration).toBeLessThan(550);
   });
 });
 ```

@@ -4,7 +4,7 @@
 Deprecated (Replaced by Native Uploads - ADR 0016)
 
 ## Context
-**Update:** This ADR has been superseded by [ADR 0011](./0011-client-ip-leakage-external-images.md). We no longer maintain "Zero Server-Side Fetching" as stated below. Instead, we have implemented a secure image proxy to prevent client IP leakage while maintaining SSRF protection through controlled outbound requests.
+**Update:** This ADR has been completely voided by [ADR 0016 (Native File Uploads)](./0016-local-image-processing-via-sharp.md). We explicitly trade the ability for users to link external images for absolute SSRF immunity. Because the system no longer accepts URLs, both SSRF prevention and Link Rot validation are no longer applicable threat vectors.
 
 The system accepts user-submitted image URLs for custom cocktails (UC 2.7). There are two competing security and user experience concerns:
 

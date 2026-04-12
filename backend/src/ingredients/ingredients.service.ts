@@ -28,12 +28,26 @@ export class IngredientsService {
   }
 
   async findAll(paginationQuery: PaginationQueryDto) {
-    const { limit = 10, offset = 0 } = paginationQuery;
+    const { limit = 10, page = 1 } = paginationQuery;
+    const offset = (page - 1) * limit;
     const [data, total] = await this.ingredientRepository.findAndCount({
       skip: offset,
       take: limit,
     });
-    return { data, total, limit, offset };
+    
+    const totalPages = Math.ceil(total / limit);
+    const hasNextPage = page < totalPages;
+    
+    return { 
+      data, 
+      meta: {
+        currentPage: page,
+        nextPage: hasNextPage ? page + 1 : null,
+        itemsPerPage: limit,
+        totalItems: total,
+        totalPages
+      }
+    };
   }
 
   async findOne(id: string) {

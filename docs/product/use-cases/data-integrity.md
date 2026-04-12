@@ -3,7 +3,7 @@
 **UC 10.1: Decimal Precision Preservation**
 * **Given** a recipe requires `1/3 oz` of an ingredient (0.333... recurring decimal).
 * **When** the `MeasureParserService` processes the measurement.
-* **Then** it rounds to 2 decimal places (0.33) for database storage.
+* **Then** it rounds to 4 decimal places (0.3333) for database storage to align with the PostgreSQL decimal(10,4) schema.
 * **And** maintains a separate `original_measure` field preserving the human-readable `"1/3 oz"` for display.
 
 **UC 10.2: Unit Conversion Edge Cases**
@@ -27,18 +27,20 @@
 * **And** the `is_deleted` flag is set to `true` (Soft Delete).
 * **And** User B's Favorites list flags it as "Recipe deleted by author" but doesn't crash.
 
-**UC 10.5: Concurrent Custom Ingredient Creation (Upsert/Locking)**
-* **Given** two users concurrently trigger the creation of a custom ingredient named "Local Bitters".
+**UC 10.5: SIMPLIFIED - Basic Custom Ingredient Creation**
+* **Given** two users trigger the creation of a custom ingredient named "Local Bitters".
 * **When** the backend attempts to insert both records.
 * **Then** a database-level `UNIQUE(normalized_name)` constraint catches the collision.
-* **And** TypeORM handles the `ON CONFLICT DO NOTHING` (or returns the ID of the first inserted row).
-* **And** both users successfully add the *same* ingredient ID to their inventory without a 500 Server Error.
+* **And** the second request may fail or return the existing ingredient ID.
+* **Note**: No complex concurrent upsert/locking logic. Basic database constraints handle duplicates.
 
 **UC 10.6: Orphaned Custom Ingredient Integrity on Account Deletion**
 * **Given** User A created a custom ingredient ("My Secret Syrup") and used it in a Public Cocktail.
 * **When** User A deletes their account (GDPR request).
 * **Then** the custom ingredient record is NOT deleted, ensuring the Public Cocktail's relational integrity does not break.
 * **And** the custom ingredient's `created_by` foreign key is safely set to `NULL` (anonymized).
+* **Architectural Decision: Acceptance of Orphaned Ghost Ingredients**
+  * **Explicit Trade-off:** When a user invokes GDPR account deletion, we rely on `ON DELETE SET NULL` to anonymize their custom ingredients to protect any public recipes that might rely on them. However, if the ingredient was private (`is_global = false`), it becomes permanently orphaned and invisible to the system. We explicitly accept the permanent accumulation of these "ghost ingredients" in the database, trading minor storage bloat for the absolute prevention of cascading relational integrity failures.
 
 
 
@@ -48,15 +50,14 @@
 * **Then** the custom ingredient remains `is_global: false` (not in the global search catalog).
 * **But** the system grants "Read-Only context visibility" to User B when viewing that specific recipe.
 * **And** allows User B to add that specific ingredient to their inventory directly from the recipe page so they can prepare it.
+* **Architectural Decision: Asymmetric Ingredient Catalog Visibility**
+  * **Explicit Trade-off:** We explicitly accept that users can possess inventory of private "Ghost" ingredients (acquired by clicking "Add to Inventory" from another user's public recipe) that they are subsequently banned from using as primary ingredients in their own newly authored recipes. The ingredient catalog search will strictly filter by `is_global = true` OR `created_by = current_user`. We trade flawless user ingredient sharing for strict database privacy scoping.
 
-**UC 10.9: Concurrent Custom Cocktail Modification & Preparation**
-* **Given** User A is preparing a cocktail (transaction started).
+**UC 10.9: SIMPLIFIED - No Special Transaction Isolation**
+* **Given** User A is preparing a cocktail.
 * **And** User B concurrently submits an edit to that exact cocktail's ingredients.
 * **When** both transactions attempt to commit.
-* **Then** the preparation transaction uses `REPEATABLE READ` isolation level to prevent phantom reads during inventory validation.
-* **And** the edit transaction uses `READ COMMITTED` isolation level (PostgreSQL default) for non-inventory operations.
-* **And** the preparation transaction strictly uses the ingredient snapshot from the moment the transaction began.
-* **And** the edit transaction succeeds independently, updating the cocktail for future preparations.
-* **And** prevents data corruption by ensuring each transaction operates on a consistent snapshot.
-* **Architectural Decision:** Inventory deduction transactions require stricter isolation (`REPEATABLE READ` or `SERIALIZABLE`) to prevent race conditions, while non-inventory operations can use the default `READ COMMITTED`.
-* **Implementation:** Uses PostgreSQL's MVCC (Multi-Version Concurrency Control) to maintain consistency without explicit locking.
+* **Then** both use default `READ COMMITTED` isolation level.
+* **And** no special isolation levels or phantom read prevention is implemented.
+* **Architectural Decision: Acceptance of READ COMMITTED Race Conditions**
+  * **Explicit Trade-off:** We explicitly reject the use of advanced transaction isolation levels (REPEATABLE READ, SERIALIZABLE) and row-level locking (SELECT FOR UPDATE). We accept potential data inconsistencies from concurrent modifications in exchange for maximum database throughput and elimination of transaction deadlocks. We trade absolute data consistency for simplified database operations.

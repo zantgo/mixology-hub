@@ -16,7 +16,9 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}",
-              "host": ["{{base_url}}"]
+              "host": [
+                "{{base_url}}"
+              ]
             },
             "description": "Set your base URL variable (default: http://localhost:3000)"
           }
@@ -33,8 +35,12 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/cocktails?limit=10&name=margarita",
-              "host": ["{{base_url}}"],
-              "path": ["cocktails"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cocktails"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -48,7 +54,7 @@
                 }
               ]
             },
-            "description": "Search cocktails by name with cursor-based pagination. Note: Cocktail ID 11000 represents an external TheCocktailDB string ID, while user inventory uses UUIDs."
+            "description": "Search cocktails by name with page-based pagination. Note: Cocktail ID 11000 represents an external TheCocktailDB string ID, while user inventory uses UUIDs."
           },
           "response": [
             {
@@ -58,8 +64,12 @@
                 "header": [],
                 "url": {
                   "raw": "{{base_url}}/cocktails?limit=10&name=margarita",
-                  "host": ["{{base_url}}"],
-                  "path": ["cocktails"],
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "cocktails"
+                  ],
                   "query": [
                     {
                       "key": "limit",
@@ -82,7 +92,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"imageFull\": \"/uploads/cocktails/ext-11000-full.webp\",\n      \"imageThumb\": \"/uploads/cocktails/ext-11000-thumb.webp\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": true,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"source\": \"api\",\n      \"is_public\": true,\n      \"imageFull\": null,\n      \"imageThumb\": null,\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } },\n        { \"measure\": \"1 oz\", \"ingredient\": { \"name\": \"lime juice\" } }\n      ]\n    }\n  ],\n  \"meta\": {\n    \"currentPage\": 1,\n    \"nextPage\": null,\n    \"itemsPerPage\": 10,\n    \"totalItems\": 1,\n    \"totalPages\": 1\n  }\n}"
             }
           ]
         },
@@ -107,8 +117,14 @@
             },
             "url": {
               "raw": "{{base_url}}/cocktails/11000/prepare",
-              "host": ["{{base_url}}"],
-              "path": ["cocktails", "11000", "prepare"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "cocktails",
+                "11000",
+                "prepare"
+              ]
             },
             "description": "Prepare a cocktail (deducts ingredients from inventory)"
           },
@@ -129,8 +145,14 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/cocktails/11000/prepare",
-                  "host": ["{{base_url}}"],
-                  "path": ["cocktails", "11000", "prepare"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "cocktails",
+                    "11000",
+                    "prepare"
+                  ]
                 }
               },
               "status": "OK",
@@ -161,8 +183,14 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/cocktails/11000/prepare",
-                  "host": ["{{base_url}}"],
-                  "path": ["cocktails", "11000", "prepare"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "cocktails",
+                    "11000",
+                    "prepare"
+                  ]
                 }
               },
               "status": "Bad Request",
@@ -191,8 +219,13 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/user-inventory/makeable?limit=10",
-              "host": ["{{base_url}}"],
-              "path": ["user-inventory", "makeable"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "user-inventory",
+                "makeable"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -211,8 +244,13 @@
                 "header": [],
                 "url": {
                   "raw": "{{base_url}}/user-inventory/makeable?limit=10",
-                  "host": ["{{base_url}}"],
-                  "path": ["user-inventory", "makeable"],
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "user-inventory",
+                    "makeable"
+                  ],
                   "query": [
                     {
                       "key": "limit",
@@ -231,7 +269,7 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"imageFull\": \"/uploads/cocktails/ext-11000-full.webp\",\n      \"imageThumb\": \"/uploads/cocktails/ext-11000-thumb.webp\",\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"nextCursor\": \"eyJ0IjoiMjAyNi0wNC0wOFQxMDozMDowMC4wMDBaIiwiaWQiOiJhYmMxMjMiLCJleHQiOjh9\",\n  \"hasMore\": false,\n  \"limit\": 10\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"11000\",\n      \"name\": \"Margarita\",\n      \"imageFull\": null,\n      \"imageThumb\": null,\n      \"ingredients\": [\n        { \"measure\": \"2 oz\", \"ingredient\": { \"name\": \"tequila\" } }\n      ]\n    }\n  ],\n  \"meta\": {\n    \"currentPage\": 1,\n    \"nextPage\": null,\n    \"itemsPerPage\": 10,\n    \"totalItems\": 1,\n    \"totalPages\": 1\n  }\n}"
             }
           ]
         },
@@ -256,8 +294,12 @@
             },
             "url": {
               "raw": "{{base_url}}/user-inventory",
-              "host": ["{{base_url}}"],
-              "path": ["user-inventory"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "user-inventory"
+              ]
             },
             "description": "Add or update ingredient in user inventory"
           },
@@ -278,8 +320,12 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/user-inventory",
-                  "host": ["{{base_url}}"],
-                  "path": ["user-inventory"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "user-inventory"
+                  ]
                 }
               },
               "status": "OK",
@@ -322,8 +368,12 @@
             },
             "url": {
               "raw": "{{base_url}}/ai",
-              "host": ["{{base_url}}"],
-              "path": ["ai"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai"
+              ]
             },
             "description": "Generate a cocktail recipe using AI"
           },
@@ -344,8 +394,12 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/ai",
-                  "host": ["{{base_url}}"],
-                  "path": ["ai"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "ai"
+                  ]
                 }
               },
               "status": "Created",
@@ -376,8 +430,12 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/ai",
-                  "host": ["{{base_url}}"],
-                  "path": ["ai"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "ai"
+                  ]
                 }
               },
               "status": "Bad Request",
@@ -415,8 +473,14 @@
             },
             "url": {
               "raw": "{{base_url}}/ai/123e4567-e89b-12d3-a456-426614174002/save-as-cocktail",
-              "host": ["{{base_url}}"],
-              "path": ["ai", "123e4567-e89b-12d3-a456-426614174002", "save-as-cocktail"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ai",
+                "123e4567-e89b-12d3-a456-426614174002",
+                "save-as-cocktail"
+              ]
             },
             "description": "Save AI-generated recipe as permanent cocktail"
           },
@@ -437,8 +501,14 @@
                 },
                 "url": {
                   "raw": "{{base_url}}/ai/123e4567-e89b-12d3-a456-426614174002/save-as-cocktail",
-                  "host": ["{{base_url}}"],
-                  "path": ["ai", "123e4567-e89b-12d3-a456-426614174002", "save-as-cocktail"]
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "ai",
+                    "123e4567-e89b-12d3-a456-426614174002",
+                    "save-as-cocktail"
+                  ]
                 }
               },
               "status": "Created",
@@ -467,8 +537,12 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/ingredients?limit=20",
-              "host": ["{{base_url}}"],
-              "path": ["ingredients"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ingredients"
+              ],
               "query": [
                 {
                   "key": "limit",
@@ -501,8 +575,12 @@
             },
             "url": {
               "raw": "{{base_url}}/favorites",
-              "host": ["{{base_url}}"],
-              "path": ["favorites"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "favorites"
+              ]
             },
             "description": "Save a cocktail to favorites"
           }

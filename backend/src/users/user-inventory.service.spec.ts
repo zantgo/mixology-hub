@@ -528,10 +528,10 @@ describe('UserInventoryService', () => {
     it('should return empty array when inventory is empty', async () => {
       jest.spyOn(service, 'getInventory').mockResolvedValue([]);
 
-      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, offset: 0 });
+      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, page: 1 });
 
       expect(result.data).toEqual([]);
-      expect(result.total).toBe(0);
+      expect(result.meta.totalItems).toBe(0);
     });
 
     it('should filter cocktails by makeability', async () => {
@@ -564,7 +564,7 @@ describe('UserInventoryService', () => {
         isSubstitution: false,
       });
 
-      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, offset: 0 });
+      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, page: 1 });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].name).toBe('Vodka Martini');

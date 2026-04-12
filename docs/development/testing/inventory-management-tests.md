@@ -34,19 +34,21 @@ describe('MeasureParserService - recurring decimals', () => {
 describe('Inventory Service - Zero Quantity Handling', () => {
   it('should handle inventory depletion to zero', async () => {
     const inventoryService = new UserInventoryService();
+    const Decimal = require('decimal.js');
     
-    // Mock starting with 50ml
+    // Mock starting with 50ml (using decimal.js)
     jest.spyOn(inventoryService, 'getInventoryQuantity')
-      .mockResolvedValue(50);
+      .mockResolvedValue(new Decimal('50'));
     
     // Prepare drink requiring 50ml (exact amount)
-    await inventoryService.prepareCocktail('cocktail123', 50);
+    await inventoryService.prepareCocktail('cocktail123', new Decimal('50'));
     
-    // Verify inventory is now 0 or row is deleted
+    // Verify inventory is now 0 (row must be preserved for Shopping List UX)
     const remaining = await inventoryService.getInventoryQuantity('user123', 'vodka');
     
-    // Business rule: either 0 or null/undefined (row deleted)
-    expect(remaining === 0 || remaining === null || remaining === undefined).toBe(true);
+    // Business rule: row must be preserved with quantity = 0 (UC 1.4)
+    expect(remaining).toBeDefined();
+    expect(remaining.equals(new Decimal('0'))).toBe(true);
   });
 
   it('should not show cocktails requiring depleted ingredients', async () => {
@@ -54,7 +56,7 @@ describe('Inventory Service - Zero Quantity Handling', () => {
     
     // Mock user has 0ml of vodka
     jest.spyOn(makeableService, 'getUserInventory')
-      .mockResolvedValue([{ ingredientId: 'vodka', quantity: 0 }]);
+      .mockResolvedValue([{ ingredientId: 'vodka', quantity: new Decimal('0') }]);
     
     const makeable = await makeableService.getMakeableCocktails('user123');
     const vodkaCocktails = makeable.filter(c => 
@@ -135,12 +137,12 @@ describe('UserInventoryService - Inventory Read with Joins', () => {
         where: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([
           {
-            quantity: 500,
+            quantity: new Decimal('500'),
             ingredient: {
               id: 'vodka',
               name: 'Vodka',
               category: 'spirit',
-              imageUrl: '/images/vodka.jpg'
+
             }
           }
         ])
@@ -152,7 +154,7 @@ describe('UserInventoryService - Inventory Read with Joins', () => {
     const result = await inventoryService.getUserInventoryWithDetails('user123');
     
     expect(result).toHaveLength(1);
-    expect(result[0]).toHaveProperty('quantity', 500);
+    expect(result[0].quantity.equals(new Decimal('500'))).toBe(true);
     expect(result[0]).toHaveProperty('ingredient');
     expect(result[0].ingredient).toHaveProperty('name', 'Vodka');
     expect(result[0].ingredient).toHaveProperty('category', 'spirit');
@@ -162,7 +164,7 @@ describe('UserInventoryService - Inventory Read with Joins', () => {
 **Example TDD for Inventory Pagination & Sorting (UC 1.12):**
 ```typescript
 describe('UserInventoryService - Pagination & Sorting', () => {
-  it('should apply cursor-based pagination to inventory results', async () => {
+  it('should apply page-based pagination to inventory results', async () => {
     const inventoryService = new UserInventoryService();
     const mockRepo = {
       createQueryBuilder: jest.fn().mockReturnValue({
@@ -174,7 +176,7 @@ describe('UserInventoryService - Pagination & Sorting', () => {
         getManyAndCount: jest.fn().mockResolvedValue([
           Array(10).fill(null).map((_, i) => ({
             id: `item-${i}`,
-            quantity: 100,
+            quantity: new Decimal('100'),
             ingredient: { name: `Ingredient ${i}` }
           })),
           50 // total count
@@ -185,15 +187,16 @@ describe('UserInventoryService - Pagination & Sorting', () => {
 
     const result = await inventoryService.getPaginatedInventory('user123', {
       limit: 10,
-      cursor: 'item-9',
+      page: 1,
       sortBy: 'name',
       sortOrder: 'ASC'
     });
 
     expect(result.data).toHaveLength(10);
-    expect(result.total).toBe(50);
-    expect(result.hasMore).toBe(true);
-    expect(result.nextCursor).toBe('item-19');
+    expect(result.meta.totalItems).toBe(50);
+    expect(result.meta.totalPages).toBe(5);
+    expect(result.meta.currentPage).toBe(1);
+    expect(result.meta.nextPage).toBe(2);
   });
 
   it('should sort inventory alphabetically by ingredient name', async () => {
@@ -252,7 +255,7 @@ describe('Inventory Validation - Boundaries', () => {
   it('should reject astronomically large inventory additions', async () => {
     const inventoryService = new UserInventoryService();
     
-    const payload = { ingredientId: 'vodka-123', quantity: 999999999, unit: 'ml' };
+    const payload = { ingredientId: 'vodka-123', quantity: new Decimal('999999999'), unit: 'ml' };
     
     await expect(inventoryService.addToInventory('user123', payload))
       .rejects
@@ -264,7 +267,7 @@ describe('Inventory Validation - Boundaries', () => {
     const mockRepo = { save: jest.fn().mockResolvedValue(true) };
     inventoryService.inventoryRepo = mockRepo;
     
-    const payload = { ingredientId: 'vodka-123', quantity: 100000, unit: 'ml' };
+    const payload = { ingredientId: 'vodka-123', quantity: new Decimal('100000'), unit: 'ml' };
     
     await expect(inventoryService.addToInventory('user123', payload)).resolves.not.toThrow();
   });
@@ -272,8 +275,8 @@ describe('Inventory Validation - Boundaries', () => {
   it('should prevent decimal overflow in database operations', async () => {
     const inventoryService = new UserInventoryService();
     
-    // Test with value that would overflow decimal(10,2)
-    const overflowPayload = { ingredientId: 'vodka-123', quantity: 999999999.99, unit: 'ml' };
+    // Test with value that would overflow decimal(10,4)
+    const overflowPayload = { ingredientId: 'vodka-123', quantity: new Decimal('999999999.99'), unit: 'ml' };
     
     await expect(inventoryService.addToInventory('user123', overflowPayload))
       .rejects
@@ -328,7 +331,7 @@ describe('Inventory Service - Count-Based Inventory Management', () => {
     
     const payload = {
       ingredientId: 'lemon-123',
-      quantity: 3,
+      quantity: new Decimal('3'),
       unit: 'piece'
     };
     
@@ -339,7 +342,7 @@ describe('Inventory Service - Count-Based Inventory Management', () => {
     
     // Should save with count unit, not attempt to convert to ml
     expect(mockSave).toHaveBeenCalledWith(expect.objectContaining({
-      quantity: 3,
+      quantity: new Decimal('3'),
       unit: 'piece',
       baseUnit: 'count'
     }));
@@ -347,17 +350,18 @@ describe('Inventory Service - Count-Based Inventory Management', () => {
 
   it('should deduct count-based items linearly during preparation', async () => {
     const inventoryService = new UserInventoryService();
+    const Decimal = require('decimal.js');
     
-    // User has 5 lemons
+    // User has 5 lemons (using decimal.js)
     jest.spyOn(inventoryService, 'getInventoryQuantity')
-      .mockResolvedValue(5);
+      .mockResolvedValue(new Decimal('5'));
     
-    // Cocktail requires 0.5 lemons (half a lemon)
+    // Cocktail requires 0.5 lemons (half a lemon) using decimal.js
     const mockDeduct = jest.spyOn(inventoryService, 'deductInventory');
     
-    await inventoryService.prepareCocktail('lemon_drop_id', 0.5, 'piece');
+    await inventoryService.prepareCocktail('lemon_drop_id', new Decimal('0.5'), 'piece');
     
-    expect(mockDeduct).toHaveBeenCalledWith('user123', 'lemon-123', 0.5);
+    expect(mockDeduct).toHaveBeenCalledWith('user123', 'lemon-123', new Decimal('0.5'));
   });
 
   it('should handle count-based ingredients in makeability calculations', async () => {
@@ -365,12 +369,12 @@ describe('Inventory Service - Count-Based Inventory Management', () => {
     
     // Cocktail requires 2 mint sprigs (count-based)
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'mint_sprig', amount: 2, unit: 'piece', baseUnit: 'count' }
+      { ingredientId: 'mint_sprig', amount: new Decimal('2'), unit: 'piece', baseUnit: 'count' }
     ]);
     
     // User has 3 mint sprigs
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'mint_sprig', quantity: 3, unit: 'piece' }
+      { ingredientId: 'mint_sprig', quantity: new Decimal('3'), unit: 'piece' }
     ]);
     
     const result = await makeableService.checkMakeable('mojito_id', 1);
@@ -385,14 +389,14 @@ describe('Inventory Service - Count-Based Inventory Management', () => {
     
     // Cocktail requires 1 lemon (piece) and 50ml lime juice
     jest.spyOn(makeableService, 'getCocktailRequirements').mockResolvedValue([
-      { ingredientId: 'lemon', amount: 1, unit: 'piece', baseUnit: 'count' },
-      { ingredientId: 'lime_juice', amount: 50, unit: 'ml', baseUnit: 'volume' }
+      { ingredientId: 'lemon', amount: new Decimal('1'), unit: 'piece', baseUnit: 'count' },
+      { ingredientId: 'lime_juice', amount: new Decimal('50'), unit: 'ml', baseUnit: 'volume' }
     ]);
     
     // User has both
     jest.spyOn(makeableService, 'getUserInventory').mockResolvedValue([
-      { ingredientId: 'lemon', quantity: 2, unit: 'piece' },
-      { ingredientId: 'lime_juice', quantity: 100, unit: 'ml' }
+      { ingredientId: 'lemon', quantity: new Decimal('2'), unit: 'piece' },
+      { ingredientId: 'lime_juice', quantity: new Decimal('100'), unit: 'ml' }
     ]);
     
     const result = await makeableService.checkMakeable('lemon_lime_id', 1);
@@ -414,7 +418,7 @@ describe('Inventory Service - Row Limits', () => {
     
     const payload = {
       ingredientId: 'ingredient-10001',
-      quantity: 100,
+      quantity: new Decimal('100'),
       unit: 'ml'
     };
     
@@ -432,7 +436,7 @@ describe('Inventory Service - Row Limits', () => {
     
     const payload = {
       ingredientId: 'ingredient-10000',
-      quantity: 100,
+      quantity: new Decimal('100'),
       unit: 'ml'
     };
     
@@ -449,12 +453,12 @@ describe('Inventory Service - Row Limits', () => {
     jest.spyOn(inventoryService.inventoryRepo, 'findOne').mockResolvedValue({
       id: 'existing-item',
       ingredientId: 'vodka-123',
-      quantity: 500
+      quantity: new Decimal('500')
     });
     
     const payload = {
       ingredientId: 'vodka-123', // Already exists
-      quantity: 600,
+      quantity: new Decimal('600'),
       unit: 'ml'
     };
     
@@ -467,7 +471,7 @@ describe('Inventory Service - Row Limits', () => {
     
     jest.spyOn(inventoryService.inventoryRepo, 'count').mockResolvedValue(10001);
     
-    const payload = { ingredientId: 'test', quantity: 1, unit: 'ml' };
+    const payload = { ingredientId: 'test', quantity: new Decimal('1'), unit: 'ml' };
     
     try {
       await inventoryService.addToInventory('user123', payload);
@@ -488,7 +492,7 @@ describe('Inventory Service - Row Limits', () => {
         return 0;
       });
     
-    const payload = { ingredientId: 'new-ingredient', quantity: 1, unit: 'ml' };
+    const payload = { ingredientId: 'new-ingredient', quantity: new Decimal('1'), unit: 'ml' };
     
     // User A should be blocked
     await expect(inventoryService.addToInventory('userA', payload))
@@ -505,7 +509,7 @@ describe('Inventory Service - Row Limits', () => {
     
     jest.spyOn(inventoryService.inventoryRepo, 'count').mockResolvedValue(10000);
     
-    const payload = { ingredientId: 'test', quantity: 1, unit: 'ml' };
+    const payload = { ingredientId: 'test', quantity: new Decimal('1'), unit: 'ml' };
     
     try {
       await inventoryService.addToInventory('user123', payload);
@@ -557,7 +561,7 @@ describe('Inventory Service - Unit Type Validation', () => {
     inventoryService.ingredientService = ingredientService;
     
     // Attempt to add vodka with count unit (incompatible)
-    const invalidPayload = { ingredientId: 'vodka-123', quantity: 1, unit: 'slice' };
+    const invalidPayload = { ingredientId: 'vodka-123', quantity: new Decimal('1'), unit: 'slice' };
     
     await expect(inventoryService.addToInventory('user123', invalidPayload))
       .rejects
@@ -580,9 +584,9 @@ describe('Inventory Service - Unit Type Validation', () => {
     
     // Valid volume units for vodka
     const validPayloads = [
-      { ingredientId: 'vodka-123', quantity: 500, unit: 'ml' },
-      { ingredientId: 'vodka-123', quantity: 16.9, unit: 'oz' },
-      { ingredientId: 'vodka-123', quantity: 1, unit: 'L' }
+      { ingredientId: 'vodka-123', quantity: new Decimal('500'), unit: 'ml' },
+      { ingredientId: 'vodka-123', quantity: new Decimal('16.9'), unit: 'oz' },
+      { ingredientId: 'vodka-123', quantity: new Decimal('1'), unit: 'L' }
     ];
     
     for (const payload of validPayloads) {
@@ -619,13 +623,13 @@ describe('Inventory Service - Unit Type Validation', () => {
       
       // Test valid units
       for (const unit of testCase.validUnits) {
-        const payload = { ingredientId: testCase.ingredient.id, quantity: 1, unit };
+        const payload = { ingredientId: testCase.ingredient.id, quantity: new Decimal('1'), unit };
         await expect(inventoryService.addToInventory('user123', payload)).resolves.not.toThrow();
       }
       
       // Test invalid units
       for (const unit of testCase.invalidUnits) {
-        const payload = { ingredientId: testCase.ingredient.id, quantity: 1, unit };
+        const payload = { ingredientId: testCase.ingredient.id, quantity: new Decimal('1'), unit };
         await expect(inventoryService.addToInventory('user123', payload))
           .rejects
           .toThrow(`Incompatible unit type: ${testCase.ingredient.name} requires ${testCase.ingredient.unitType} units`);
@@ -654,7 +658,7 @@ describe('Inventory Service - Unit Type Validation', () => {
     inventoryService.unitConverter = unitConverter;
     
     // Add vodka in ounces (should convert to ml for storage)
-    const payload = { ingredientId: 'vodka-123', quantity: 1, unit: 'oz' };
+    const payload = { ingredientId: 'vodka-123', quantity: new Decimal('1'), unit: 'oz' };
     
     await inventoryService.addToInventory('user123', payload);
     
@@ -683,7 +687,7 @@ describe('Inventory Service - Unit Type Validation', () => {
     inventoryService.unitConverter = unitConverter;
     
     // Attempt to add vodka with mass unit (incompatible)
-    const payload = { ingredientId: 'vodka-123', quantity: 500, unit: 'g' };
+    const payload = { ingredientId: 'vodka-123', quantity: new Decimal('500'), unit: 'g' };
     
     await expect(inventoryService.addToInventory('user123', payload))
       .rejects
@@ -706,7 +710,7 @@ describe('Inventory Service - Unit Type Validation', () => {
     
     inventoryService.ingredientService = ingredientService;
     
-    const payload = { ingredientId: 'gin-123', quantity: 2, unit: 'slice' };
+    const payload = { ingredientId: 'gin-123', quantity: new Decimal('2'), unit: 'slice' };
     
     try {
       await inventoryService.addToInventory('user123', payload);
@@ -894,8 +898,8 @@ describe('AdminIngredientService - Merge Ingredients', () => {
     
     // User123 has 100ml of "Fresh Lime" (A) and 200ml of "Lime" (B)
     jest.spyOn(adminService.inventoryRepo, 'find').mockResolvedValue([
-      { userId: 'user123', ingredientId: 'A', quantity: 100 },
-      { userId: 'user123', ingredientId: 'B', quantity: 200 }
+      { userId: 'user123', ingredientId: 'A', quantity: new Decimal('100') },
+      { userId: 'user123', ingredientId: 'B', quantity: new Decimal('200') }
     ]);
     
     const saveSpy = jest.spyOn(adminService.inventoryRepo, 'save');
@@ -907,7 +911,7 @@ describe('AdminIngredientService - Merge Ingredients', () => {
     expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'user123',
       ingredientId: 'B',
-      quantity: 300
+      quantity: new Decimal('300')
     }));
     
     // Should delete ingredient A
@@ -1009,10 +1013,10 @@ describe('UnitConverterService - Decimal Precision for Large Batches', () => {
     
     // Mock multiple inventory entries with fractional amounts
     jest.spyOn(inventoryService.inventoryRepo, 'find').mockResolvedValue([
-      { ingredientId: 'vodka', quantity: 100.33, unit: 'ml' },
-      { ingredientId: 'vodka', quantity: 50.67, unit: 'ml' },
-      { ingredientId: 'gin', quantity: 75.25, unit: 'ml' },
-      { ingredientId: 'gin', quantity: 25.75, unit: 'ml' }
+      { ingredientId: 'vodka', quantity: new Decimal('100.33'), unit: 'ml' },
+      { ingredientId: 'vodka', quantity: new Decimal('50.67'), unit: 'ml' },
+      { ingredientId: 'gin', quantity: new Decimal('75.25'), unit: 'ml' },
+      { ingredientId: 'gin', quantity: new Decimal('25.75'), unit: 'ml' }
     ]);
     
     const aggregated = await inventoryService.getAggregatedInventory('user123');
@@ -1049,7 +1053,7 @@ describe('UnitConverterService - Decimal Precision for Large Batches', () => {
     expect(error).toBeLessThan(0.000000000001);
     
     // Verify deduction uses precise math
-    const mockInventory = { quantity: 5000 };
+    const mockInventory = { quantity: new Decimal('5000') };
     const remaining = preparationService.deductFromInventory(mockInventory, totalRequired);
     
     // 5000 - 3333.3333333333335 = 1666.6666666666665
@@ -1076,15 +1080,15 @@ describe('UnitConverterService - Decimal Precision for Large Batches', () => {
   });
 
   it('should validate that database decimal columns match JavaScript precision', () => {
-    // Test that PostgreSQL decimal(10,2) matches our Decimal.js precision
+    // Test that PostgreSQL decimal(10,4) matches our Decimal.js precision
     
     const testValues = [
-      0.01,  // Smallest representable in decimal(10,2)
-      0.33,  // Recurring decimal
-      123456.78,  // Large with 2 decimal places
-      999999.99,  // Maximum for decimal(10,2)
-      0.005, // Should round to 0.01
-      0.004  // Should round to 0.00
+      0.0001,  // Smallest representable in decimal(10,4)
+      0.3333,  // Recurring decimal
+      123456.7890,  // Large with 4 decimal places
+      999999.9999,  // Maximum for decimal(10,4)
+      0.00005, // Should round to 0.0001
+      0.00004  // Should round to 0.0000
     ];
     
     const columnTransformer = new ColumnNumericTransformer();
@@ -1114,13 +1118,13 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
       id: 'part-based-cocktail',
       recipeType: 'parts',
       ingredients: [
-        { ingredientId: 'vodka', amount: 1, unit: 'part' },
-        { ingredientId: 'lime-juice', amount: 1, unit: 'part' }
+        { ingredientId: 'vodka', amount: new Decimal('1'), unit: 'part' },
+        { ingredientId: 'lime-juice', amount: new Decimal('1'), unit: 'part' }
       ]
     };
     
     // User attempts to prepare with totalVolumeMl = 1000000 (1 million ml total)
-    const totalVolumeMl = 1000000; // 1000 liters total - absurdly large
+    const totalVolumeMl = '1000000.00'; // 1000 liters total - absurdly large
     
     await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, totalVolumeMl))
       .rejects
@@ -1131,24 +1135,24 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const preparationService = new CocktailPreparationService();
     
     // Test at the boundary
-    const maxTotalVolumeMl = 10000; // 10 liters total (maximum allowed)
-    const boundaryTotalVolumeMl = 10001; // Just over boundary
+    const maxTotalVolumeMl = '10000.00'; // 10 liters total (maximum allowed)
+    const boundaryTotalVolumeMl = '10001.00'; // Just over boundary
     
     const mockCocktail = {
       id: 'test-cocktail',
       recipeType: 'parts',
-      ingredients: [{ ingredientId: 'vodka', amount: 1, unit: 'part' }]
+      ingredients: [{ ingredientId: 'vodka', amount: new Decimal('1'), unit: 'part' }]
     };
     
     // Should accept at boundary
-    jest.spyOn(preparationService, 'validatePartSize').mockReturnValue(true);
-    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, maxPartSize))
+    jest.spyOn(preparationService, 'validateTotalVolume').mockReturnValue(true);
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, maxTotalVolumeMl))
       .resolves.not.toThrow();
     
     // Should reject just over boundary
-    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, boundaryPartSize))
+    await expect(preparationService.prepareCocktail('user123', mockCocktail.id, 1, boundaryTotalVolumeMl))
       .rejects
-      .toThrow('Part size exceeds maximum allowed volume');
+      .toThrow('Total volume exceeds maximum allowed');
   });
 
   it('should prevent integer overflow attacks with large part counts', async () => {
@@ -1159,11 +1163,11 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
       id: 'overflow-attack',
       recipeType: 'parts',
       ingredients: [
-        { ingredientId: 'vodka', amount: 1000, unit: 'part' } // 1000 parts!
+        { ingredientId: 'vodka', amount: new Decimal('1000'), unit: 'part' } // 1000 parts!
       ]
     };
     
-    const totalVolumeMl = 10000; // Maximum allowed total volume
+    const totalVolumeMl = '10000.00'; // Maximum allowed total volume
     
     // Total would be 1000 * (10000 / 1000) = 10,000 ml per ingredient (10 liters!)
     // Should be rejected even though totalVolumeMl is within limit
@@ -1177,13 +1181,13 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
   it('should validate part size before any inventory operations', async () => {
     const preparationService = new CocktailPreparationService();
     
-    const validateSpy = jest.spyOn(preparationService, 'validatePartSize');
+    const validateSpy = jest.spyOn(preparationService, 'validateTotalVolume');
     const inventorySpy = jest.spyOn(preparationService, 'checkInventoryAvailability');
     
-    const largePartSize = 50000; // 50 liters per part - should be rejected
+    const largeTotalVolumeMl = '50000.00'; // 50 liters - should be rejected
     
     try {
-      await preparationService.prepareCocktail('user123', 'cocktail-id', 1, largePartSize);
+      await preparationService.prepareCocktail('user123', 'cocktail-id', 1, largeTotalVolumeMl);
     } catch (error) {
       // Validation should happen BEFORE inventory check
       expect(validateSpy).toHaveBeenCalled();
@@ -1195,9 +1199,9 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const preparationService = new CocktailPreparationService();
     
     const testCases = [
-      { totalVolumeMl: 1000000, expectedMessage: 'Total volume (1000.0 L) exceeds maximum allowed (10.0 L)' },
-      { totalVolumeMl: 50000, expectedMessage: 'Total volume (50.0 L) exceeds maximum allowed (10.0 L)' },
-      { totalVolumeMl: 15000, expectedMessage: 'Total volume (15.0 L) exceeds maximum allowed (10.0 L)' }
+      { totalVolumeMl: '1000000.00', expectedMessage: 'Total volume (1000.0 L) exceeds maximum allowed (10.0 L)' },
+      { totalVolumeMl: '50000.00', expectedMessage: 'Total volume (50.0 L) exceeds maximum allowed (10.0 L)' },
+      { totalVolumeMl: '15000.00', expectedMessage: 'Total volume (15.0 L) exceeds maximum allowed (10.0 L)' }
     ];
     
     for (const testCase of testCases) {
@@ -1213,7 +1217,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
   it('should allow reasonable part sizes for normal use', async () => {
     const preparationService = new CocktailPreparationService();
     
-    const reasonableVolumes = [30, 50, 100, 500, 1000]; // 30ml to 1L total volume
+    const reasonableVolumes = ['30.00', '50.00', '100.00', '500.00', '1000.00']; // 30ml to 1L total volume
     
     for (const totalVolumeMl of reasonableVolumes) {
       jest.spyOn(preparationService, 'validateTotalVolume').mockReturnValue(true);
@@ -1232,7 +1236,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const invalidRequest = {
       cocktailId: 'part-based-cocktail',
       servings: 1,
-      totalVolumeMl: 999999 // Absurdly large
+      totalVolumeMl: "999999.00" // Absurdly large, passed as string to pass DTO type-check
     };
     
     const mockResponse = {
@@ -1258,7 +1262,7 @@ describe('Inventory Service - Strict Boundary Failsafe', () => {
     const attackAttempt = {
       userId: 'attacker-123',
       cocktailId: 'test-cocktail',
-      totalVolumeMl: 1000000,
+      totalVolumeMl: '1000000.00',
       timestamp: new Date().toISOString()
     };
     

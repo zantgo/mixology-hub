@@ -76,6 +76,9 @@ We implement a `CocktailAggregatorService` that acts as an API Gateway/Aggregato
 
 5. Concatenates, paginates, and returns a unified response.
 
+**Architectural Decision: Exclusion of Asset Ingestion on Rating Actions**
+**Explicit Trade-off:** Actions like "Save" or "Prepare" trigger the heavy Sharp library to download and localize external images. To maintain high performance for rapid user voting, the Rate action will NOT trigger local asset ingestion. We explicitly accept that rating an external cocktail will generate an EXTERNAL_COCKTAIL_RATINGS row but will leave the cocktail's images as null in the system. We trade visual asset completeness for high-throughput, low-latency user engagement.
+
   
 
 ### 2. The Adapter Pattern (Provider-Agnostic AI)
@@ -162,10 +165,10 @@ export class MeasureParserService {
 
 **Critical Edge Case: Recurring Decimals & Database Precision**
 - Fractions like "1/3 oz" produce recurring decimals (0.333333...)
-- Database uses `decimal(10,2)` - only 2 decimal places stored
-- **Solution**: Round to 2 decimal places before database insertion
-- **TDD Test Required**: Ensure "1/3 oz" → 0.33 (rounded), not 0.333333...
-- **Business Impact**: Precision loss acceptable for cocktail measurements (±0.01 oz ≈ 0.3 ml)
+- Database uses `decimal(10,4)` - 4 decimal places stored for fractional measurements
+- **Solution**: Round to 4 decimal places before database insertion
+- **TDD Test Required**: Ensure "1/3 oz" → 0.3333 (rounded), not 0.333333...
+- **Business Impact**: Precision loss acceptable for cocktail measurements (±0.0001 oz ≈ 0.003 ml with 4 decimal places)
 ```
 
 **Why This Matters:**
@@ -277,7 +280,7 @@ External API calls are expensive and subject to rate-limiting. We utilize **Redi
 
 - Execute HTTP GET to external API.
 
-- Store response in Redis with a TTL (Time-To-Live) of 6 hours.
+- Store response in Redis with a TTL (Time-To-Live) of 5 minutes (300 seconds) to support the unified cache-slicing pagination strategy.
 
 - Return response.
 

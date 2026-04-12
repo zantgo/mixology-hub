@@ -27,13 +27,20 @@
 
 **UC 15.5: Automated cleanup of transient AI recipes**
  * **Given** the `ai_generated_recipes` table contains transient recipes not linked to permanent cocktails.
- * **When** the nightly cron job (or background task) executes.
+ * **When** the nightly cron job executes.
  * **Then** the system identifies records where `created_at` is older than 24 hours AND `cocktail_id IS NULL` (not saved as permanent cocktail).
  * **And** safely permanently deletes these rows to reclaim database storage.
  * **Note:** Recipes saved as permanent cocktails (`cocktail_id` not null) are preserved for historical reference even if older than 24 hours.
- * **Senior Architectural Decision: AI JSONB Storage Retention**
-   * **Explicit Trade-off:** To maintain a perfect audit trail of AI generations, the system will retain the heavy JSONB payloads of AI recipes indefinitely if they were ever saved by a user, even if the resulting cocktail is subsequently soft-deleted. We accept the storage bloat cost in Postgres to ensure we can always trace back any flagged/reported public cocktail to its original LLM prompt and raw output.
-   * **Edge Case:** If a user generates 50 AI recipes, saves them, and immediately deletes them (soft delete with `is_deleted = true`), the `cocktail_id` remains populated (pointing to a soft-deleted row). The cron job will never clean up these heavy JSONB rows, leading to permanent, unreferenced database bloat. We accept this as the cost of auditability.
+  * **Architectural Decision: AI JSONB Storage Retention**
+    * **Explicit Trade-off:** To maintain a perfect audit trail of AI generations, the system will retain the heavy JSONB payloads of AI recipes indefinitely if they were ever saved by a user, even if the resulting cocktail is subsequently soft-deleted. We accept the storage bloat cost in Postgres to ensure we can always trace back any flagged/reported public cocktail to its original LLM prompt and raw output.
+    * **Edge Case:** If a user generates 50 AI recipes, saves them, and immediately deletes them (soft delete with `is_deleted = true`), the `cocktail_id` remains populated (pointing to a soft-deleted row). The cron job will never clean up these heavy JSONB rows, leading to permanent, unreferenced database bloat. We accept this as the cost of auditability.
+    * **Architectural Decision: Ephemeral AI Audit Trails on Admin Hard-Deletes**
+    * **Explicit Trade-off:** The nightly cron job deletes AI_RECIPES where cocktail_id IS NULL to prevent JSONB storage bloat. If an Administrator hard-deletes an offensive AI-generated public cocktail, the relational cascade will set the AI Recipe's foreign key to NULL, marking it for deletion by the cron job. We explicitly accept the destruction of the original LLM prompt audit trail upon Admin hard-deletion. We trade long-term forensic LLM auditing for aggressive database storage reclamation.
+  * **Architectural Decision: Uncoordinated In-Process Cron Execution**
+    * **Explicit Trade-off:** To strictly adhere to the "No Distributed State" mandate, we explicitly reject the use of Redis-based distributed locks (e.g., Redlock) for cron job execution. We accept that in a vertically scaled cluster environment, all active Node.js worker processes on the single VM will concurrently fire the nightly cleanup tasks at the exact same millisecond. We rely entirely on PostgreSQL's native concurrency control to safely process redundant DELETE commands, trading minor database CPU spikes for the total elimination of distributed cron coordination.
+  * **Architectural Decision: Acceptance of Phantom Orphaned Cocktails during Cron Race Conditions**
+    * **Explicit Trade-off:** Because we have strictly banned distributed locks, transaction isolation elevation, and row-level locking (`SELECT FOR UPDATE`) to maintain absolute backend simplicity, a race condition exists if a user saves an AI recipe at the exact millisecond the uncoordinated cron job executes. We explicitly accept the microscopic risk that the cron job's DELETE command may wipe out an AI recipe immediately after a user successfully links it to a new Cocktail. We trade perfect relational preservation against edge-case timing for the complete elimination of complex database locking overhead.
+
 
 **UC 15.6: Graceful Shutdown of Active Transactions**
 * **Given** the backend receives a `SIGTERM` signal from the Docker/Kubernetes orchestrator.

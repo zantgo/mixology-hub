@@ -102,7 +102,7 @@ AIAdapter -->|HTTP POST| LLM[LLM API - DeepSeek/OpenAI]
 
 - **Responsibility:** Reduces latency and prevents rate-limiting from external APIs.
 
-- **Implementation:** When a user searches for a public cocktail, the backend checks Redis first. If a cache miss occurs, it fetches from the external API, stores the result in Redis with a Time-To-Live (TTL) of 6 hours, and returns the response.
+- **Implementation:** When a user searches for a public cocktail, the backend checks Redis first. If a cache miss occurs, it fetches from the external API, stores the result in Redis with a Time-To-Live (TTL) of 5 minutes (300 seconds), and returns the response.
 
   
 

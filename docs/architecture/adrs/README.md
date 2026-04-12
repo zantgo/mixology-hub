@@ -52,11 +52,11 @@ Each ADR follows this structure:
 
 ### [ADR 0008: O(N×Page) DoS Risk in Makeability Pagination](./0008-makeability-pagination-dos-risk.md)
 **Status**: Accepted  
-**Summary**: Decision to implement strict pagination caps (max page=10, offset=100) for makeability sorting to prevent DoS attacks from deep pagination.
+**Summary**: Decision to implement strict pagination caps (max page=100 globally, with 200-iteration computation limit for makeability sorting) to prevent DoS attacks from deep pagination.
 
 ### [ADR 0009: Idempotency "Fail-Open" Double Deduction Risk](./0009-idempotency-fail-open-double-deduction-risk.md)
-**Status**: Superseded by ADR 0012  
-**Summary**: Decision to accept double-deduction risk during Redis outages with user undo recovery, rather than implementing complex database fallback.
+**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
+**Summary**: This ADR described idempotency failure modes during Redis outages. All idempotency systems have been removed for MVP simplification.
 
 ### [ADR 0010: Offline Logout Impeding JWT Revocation Gap](./0010-offline-logout-jwt-revocation-gap.md)
 **Status**: Deprecated  
@@ -64,23 +64,23 @@ Each ADR follows this structure:
 
 ### [ADR 0011: Client IP Leakage via External Images Despite SSRF Prevention](./0011-client-ip-leakage-external-images.md)
 **Status**: Deprecated (Replaced by Native Uploads - ADR 0016)  
-**Summary**: Decision to implement secure image proxy for all external cocktail images to prevent client IP leakage while maintaining SSRF protection.
+**Summary**: Decision to implement secure image proxy for all external cocktail images to prevent client IP leakage while maintaining SSRF protection. **DEPRECATED** by ADR 0016 (Local Image Processing via Sharp).
 
 ### [ADR 0012: Unified Idempotency System to Prevent Redis-PostgreSQL Clash](./0012-unified-idempotency-system.md)
-**Status**: Accepted  
-**Summary**: Decision to implement unified hybrid idempotency system with PostgreSQL as source of truth to prevent double deductions from clashing Redis/PostgreSQL idempotency systems.
+**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
+**Summary**: This ADR described a complex unified idempotency system. All concurrency protection has been removed for MVP simplification.
 
 ### [ADR 0013: Optimistic Concurrency for Rating Updates to Prevent GDPR Contention](./0013-optimistic-rating-concurrency.md)
-**Status**: Accepted  
-**Summary**: Decision to replace `SELECT FOR UPDATE` with optimistic concurrency control using atomic SQL updates to prevent database contention during GDPR bulk rating recalculations.
+**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
+**Summary**: This ADR described complex optimistic concurrency control for rating updates. All concurrency protection has been removed for MVP simplification.
 
 ### [ADR 0014: Composite Cursor Pagination Cache Jitter](./0014-composite-cursor-pagination-cache-jitter.md)
-**Status**: Accepted  
-**Summary**: Decision to accept pagination jitter when external API cache expires during deep pagination, with UI warnings and graceful restart.
+**Status**: Deprecated  
+**Summary**: Deprecated in favor of standardized offset-based page limits across all endpoints.
 
 ### [ADR 0015: Accept Precision Drift in Atomic Ratings](./0015-accept-precision-drift-in-atomic-ratings.md)
-**Status**: Accepted  
-**Summary**: Decision to accept minor decimal precision drift in atomic rating calculations (O(1) performance) with nightly cron job correction, trading mathematical accuracy for update performance.
+**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
+**Summary**: This ADR described accepting precision drift in ratings for performance. All complex rating systems have been simplified for MVP.
 
 ### [ADR 0016: Local Image Processing via Sharp](./0016-local-image-processing-via-sharp.md)
 **Status**: Accepted  

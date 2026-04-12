@@ -1,60 +1,41 @@
-# ADR 0005: Rate Limiter Failure State Strategy (Redis Degradation)
+# ADR 0005: Local-Only Rate Limiting Strategy (Removal of Redis Dependency)
 
 ## Status
 Accepted
 
 ## Context
-The system relies on Redis for critical security and financial protection mechanisms:
+The system originally relied on Redis for critical security and financial protection mechanisms. However, to adhere to the "No Concurrency / No Distributed State" mandate, we have simplified the architecture:
 
-1. **Global Rate Limiting (UC 13.3)**: `ThrottlerGuard` prevents API abuse
-2. **Idempotency Keys (UC 4.21)**: Prevents duplicate operations from network retries
-3. **AI Quota Enforcement**: Limits LLM API calls to prevent financial abuse
-4. **Session Management**: JWT blacklisting and refresh token grace periods
+1. **Local Rate Limiting (UC 13.3)**: `ThrottlerGuard` uses in-memory storage only, preventing API abuse per Node.js instance
+2. **AI Quota Enforcement**: Uses PostgreSQL directly, bypassing Redis for quota tracking
 
-UC 11.4 defines "Redis Graceful Degradation" stating the system bypasses the cache if Redis is down. However, this creates a critical security dilemma for rate limiting:
+UC 11.4 defines "Redis Graceful Degradation" stating the system bypasses the cache if Redis is down. However, with the simplified architecture, we have eliminated the Redis dependency for rate limiting entirely, avoiding the security dilemma:
 
-- **Fail Open**: If Redis is down and we bypass rate limiting, users could make unlimited requests to external LLM APIs, potentially costing thousands of dollars in minutes
-- **Fail Closed**: If Redis is down and we block all API requests, the application becomes unavailable
+- **Local-Only**: Rate limiting is per-process, not global across instances
+- **No Redis Dependency**: Rate limiting continues to function even if Redis is unavailable
 
 ## Decision
-We implement a **hybrid fail-safe strategy** with tiered fallbacks:
+We implement a **local-only rate limiting strategy** to adhere to the "No Concurrency" mandate:
 
-1. **Primary**: Redis-based rate limiting (production)
-2. **Secondary**: In-memory Map fallback per Node.js process (Redis unavailable)
-3. **Tertiary**: Request queuing with circuit breaker (severe degradation)
+1. **Primary**: In-memory Map storage per Node.js process
+2. **No Distributed State**: No Redis synchronization across instances
+3. **Accept Multiplier Bypass**: Explicitly accept that vertical scaling across worker processes multiplies rate limits
 
 ### Specific Decisions by Component
 
-#### 1. Global Rate Limiting (`ThrottlerGuard`)
-- **Fail State**: Fall back to in-memory `Map` per Node.js process
-- **Limitation**: In-memory limits are per-process, not global across cluster
-- **Acceptance**: For MVP scale (single instance), per-process limits are acceptable
-- **Monitoring**: Alert when falling back to in-memory rate limiting
+#### 1. Local Rate Limiting (`ThrottlerGuard`)
+- **Storage**: In-memory `Map` per Node.js process only
+- **Limitation**: Limits are per-process, not global across cluster
+- **Acceptance**: We explicitly accept that vertical scaling across worker processes multiplies effective rate limits
+- **Trade-off**: Trade absolute rate-limit accuracy for elimination of concurrent state coordination
 
 #### 2. AI Quota Enforcement
-- **Fail State**: **Fail closed** - block AI requests if Redis unavailable
-- **Rationale**: Financial risk outweighs availability for non-critical feature
-- **User Experience**: Show "AI features temporarily unavailable" message
-- **Circuit Breaker**: After 5 failed Redis attempts, block AI for 5 minutes
+- **Storage**: PostgreSQL `USER_AI_QUOTAS` table directly
+- **No Redis Dependency**: Quota tracking uses database, not Redis
+- **Rationale**: Eliminates distributed concurrency while maintaining financial protection
+- **Monitoring**: Track quota usage via database queries
 
-#### 3. Idempotency Keys
-- **Fail State**: **Fail open** - process requests without idempotency protection
-- **Rationale**: Better to risk duplicate operations than block user actions
-- **Mitigation**: Short timeout (1 second) for Redis check, then proceed
-- **Logging**: Log all idempotency bypass events for audit
 
-#### 4. Session Management (JWT Blacklist & Refresh Grace Period)
-- **JWT Blacklist Fail State**: **Fail open** - allow requests even if cannot check blacklist
-- **Refresh Grace Period Fail State**: **Downgraded penalty** - return 401 Unauthorized without token family revocation
-- **Rationale**: To prevent catastrophic SPA cross-tab race conditions from triggering global account logouts during a Redis outage, we must downgrade the penalty for token reuse when the grace-period cache is unavailable. Preventing token chain divergence takes priority over SPA multi-tab UX during caching outages, but we trade maximum security for UX survival.
-- **Senior Architectural Decision: Downgrade of Token Reuse Penalty During Redis Outages**
-  - **Explicit Trade-off**: To prevent catastrophic SPA cross-tab race conditions from triggering global account logouts during a Redis outage, we must downgrade the penalty for token reuse when the grace-period cache is unavailable.
-  - **Resolution**: If Redis is down, presenting a just-revoked refresh token will NOT instantly trigger a full token family revocation (nuclear option). Instead, it will simply return a standard 401 Unauthorized for that specific request, forcing that specific tab to redirect to login, but preserving the user's sessions on other devices. We trade maximum security (catching edge-case token theft during a Redis outage) for UX survival.
-- **Mitigation**: 
-  - Short JWT expiry (15 minutes) reduces window of risk for blacklist
-  - PostgreSQL `rotated_at` timestamp provides grace period fallback
-- **Monitoring**: Alert on Redis session store failures
-- **Note**: During Redis outages, grace period timestamps may have slight clock skew but prevent catastrophic logout scenarios
 
 ## Consequences
 
@@ -94,18 +75,12 @@ We implement a **hybrid fail-safe strategy** with tiered fallbacks:
 
 ## Implementation Details
 
-### Rate Limiter with Fallback
+### Local-Only Rate Limiter
 ```typescript
-class HybridRateLimiter {
+class LocalRateLimiter {
   async checkLimit(userId: string, endpoint: string): Promise<boolean> {
-    try {
-      // Try Redis first
-      return await this.redisRateLimiter.check(userId, endpoint);
-    } catch (redisError) {
-      // Fall back to in-memory
-      this.metrics.recordFallback('rate_limiter');
-      return this.inMemoryRateLimiter.check(userId, endpoint);
-    }
+    // Local in-memory storage only - no Redis dependency
+    return this.inMemoryRateLimiter.check(userId, endpoint);
   }
 }
 
@@ -138,26 +113,22 @@ class InMemoryRateLimiter {
 }
 ```
 
-### AI Quota Enforcer (Fail Closed)
+### AI Quota Enforcer (Database-Only)
 ```typescript
 class AIQuotaEnforcer {
   async checkQuota(userId: string): Promise<boolean> {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const key = `ai_quota:${userId}:${today}`;
-      
-      // Try Redis with short timeout
-      const usageStr = await this.redis.get(key).timeout(1000);
-      const usage = usageStr ? parseInt(usageStr, 10) : 0;
-      
-      return usage < 20; // 20 is the daily limit
-    } catch (error) {
-      // Redis unavailable - fail closed for AI
-      this.metrics.recordAiBlocked('redis_unavailable');
-      throw new ServiceUnavailableException(
-        'AI features temporarily unavailable. Please try again later.'
-      );
-    }
+    // Database-only quota tracking - no Redis dependency
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Find the quota record for today (UNIQUE constraint ensures 0 or 1 rows)
+    const quota = await this.userAiQuotasRepo.findOne({ 
+      where: { userId, quota_date: today } 
+    });
+    
+    // If no record exists, usage is 0 (user hasn't generated any AI recipes today)
+    // If record exists, read the usage_count column value
+    const usage = quota ? quota.usage_count : 0;
+    return usage < 20; 
   }
 }
 ```
@@ -167,12 +138,14 @@ class AIQuotaEnforcer {
    - `redis.availability` (percentage)
    - `rate_limiter.fallback.count`
    - `ai_requests.blocked.count`
-   - `idempotency.bypassed.count`
 
 2. **Alert Thresholds**:
    - Redis unavailable > 5 minutes
    - Rate limiter fallback > 100 requests/minute
    - AI requests blocked > 10 requests/minute
+
+### Architectural Decision: Mandatory Trust Proxy Configuration for Local Rate Limiting
+**Explicit Trade-off:** Because we stripped Redis and rely entirely on the local in-memory `ThrottlerGuard` for brute-force and API abuse protection, we explicitly mandate that the NestJS application MUST be configured with `app.set('trust proxy', true)`. If the backend is deployed behind a reverse proxy (e.g., NGINX, AWS ALB) without this setting, the in-memory rate limiter will read the Load Balancer's IP for all requests, instantly triggering a global Denial of Service for all users. We trade deployment agility for the absolute requirement of exact reverse-proxy header forwarding.
 
 ## Related Decisions
 - [ADR 0001: Use PostgreSQL for Inventory Management](./0001-use-postgresql-for-inventory.md)

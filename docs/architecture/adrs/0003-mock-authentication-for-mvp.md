@@ -75,12 +75,16 @@ export class SeederService {
        await userRepository.save({
          email: 'mock@test.com',
          displayName: 'Mock User',
+         role: 'admin', // Auto-grant admin role for local development
          // ... other required fields
        });
     }
   }
 }
 ```
+
+### Architectural Decision: Admin Role Auto-Grant for Mock Environments
+* **Explicit Trade-off:** To allow full-stack testing of moderation and taxonomy-merging features during local development, we explicitly mandate that the SeederService will forcefully assign `role: 'admin'` to the `mock@test.com` user when `ENABLE_MOCK_AUTH=true` is active. We accept that developers testing locally will possess elevated privileges by default, trading strict RBAC isolation in development for frictionless feature testing.
 
 ### Environment Configuration
 ```env

@@ -311,7 +311,17 @@ export class UserInventoryService {
     const inventory = await this.getInventory(userId);
     
     if (inventory.length === 0) {
-      return { data: [], total: 0, ...paginationQuery };
+      const { limit = 10, page = 1 } = paginationQuery;
+      return { 
+        data: [], 
+        meta: {
+          currentPage: page,
+          nextPage: null,
+          itemsPerPage: limit,
+          totalItems: 0,
+          totalPages: 0
+        }
+      };
     }
 
     // Get all cocktails and filter by makeability
@@ -345,14 +355,22 @@ export class UserInventoryService {
     });
 
     // Apply pagination
-    const { limit = 10, offset = 0 } = paginationQuery;
+    const { limit = 10, page = 1 } = paginationQuery;
+    const offset = (page - 1) * limit;
     const paginatedData = makeableCocktails.slice(offset, offset + limit);
+    
+    const totalPages = Math.ceil(makeableCocktails.length / limit);
+    const hasNextPage = page < totalPages;
 
     return {
       data: paginatedData,
-      total: makeableCocktails.length,
-      limit,
-      offset,
+      meta: {
+        currentPage: page,
+        nextPage: hasNextPage ? page + 1 : null,
+        itemsPerPage: limit,
+        totalItems: makeableCocktails.length,
+        totalPages
+      }
     };
   }
 

@@ -97,7 +97,7 @@ npm run test:e2e    # Run Playwright E2E tests (requires backend running)
 | `FavoritesService`       | >80%            | Idempotent operations, polymorphic data handling, removal operations, favorites hydration, dangling external favorite handling. |
 | Frontend Components       | >60%            | Critical user flows (search, inventory, AI), error handling, empty states, route guards, RxJS debouncing, Signal reactivity. |
 | Authentication Module    | 100%            | Password hashing, JWT signing, refresh token rotation, brute-force protection, registration/login flows, logout/session invalidation. |
-| Pagination Logic         | >90%            | Unified cursor merging, offset tracking across local and external data. |
+| Pagination Logic         | >90%            | Page-based pagination, offset calculation, metadata generation across local and external data. |
 | Redis Caching Layer      | >80%            | Cache hit/miss logic, TTL management, cache invalidation, external API response caching. |
 
 ## 🔧 Mocking Strategies

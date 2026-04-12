@@ -148,8 +148,27 @@ export class Cocktail {
 - Update CSS for 1:1 aspect ratio
 
 ### Phase 5: External API Integration
-- Update CocktailAggregatorService to download and process external images
-- Server-side ingestion of TheCocktailDB images
+- Update CocktailAggregatorService to handle external image blackout during search
+- Server-side ingestion of TheCocktailDB images only during 'Save as Custom Cocktail' action
+
+### Architectural Decision: Complete Image Blackout During External Search
+**Explicit Trade-off:** To strictly adhere to the "No Image URLs" mandate without triggering a Node.js event loop DoS (which would occur if we synchronously downloaded and processed 50 images via Sharp during a single search request), we explicitly mandate that all External API search results will return `null` for `image_full` and `image_thumb`. The Angular frontend will render local static `/assets/` placeholders. External images are ONLY downloaded, processed, and saved locally when a user explicitly forks the recipe via the 'Save as Custom Cocktail' action. We trade Search UI aesthetics for absolute adherence to the Local-Only Assets mandate and guaranteed server stability.
+
+**Rationale:** TheCocktailDB returns 50 cocktails per page during a Unified Search. If the backend attempts to synchronously download, decode, resize, and re-encode 50 images via Sharp within the GET /cocktails request lifecycle, the Node.js event loop will entirely stall, causing massive latency (10+ seconds) and creating a trivial DoS vector. Passing external URLs would violate the "No Image URLs" mandate.
+
+### Architectural Decision: Libuv Worker Pool Exhaustion vs Image Blackout
+**Explicit Trade-off:** The Node.js sharp library executes image processing in the Libuv worker thread pool. Synchronously ingesting 50 external images during a search request would instantly exhaust these threads (default 4), causing all subsequent database queries and API requests from other users to stall. We trade search interface aesthetics (forcing local SVG placeholders) for guaranteed Libuv thread availability and API responsiveness.
+
+### Architectural Decision: Synchronous Image Processing Event-Loop Blocking
+**Explicit Trade-off:** By removing background worker queues (Redis/Bull) for MVP simplicity, we mandate that external image ingestion via Sharp happens synchronously during the 'Save as Custom Cocktail' action. We explicitly accept that this will cause CPU spikes and block the Node.js event loop for several hundred milliseconds per image. We trade consistent, low-latency API response times on these specific endpoints for guaranteed local asset isolation without the architectural overhead of background job processing.
+
+### Architectural Decision: Aggressive HTTP Timeouts for Synchronous Asset Ingestion
+**Explicit Trade-off:** Because we have banned asynchronous background queues, the ingestion of external images via Axios and Sharp must occur synchronously during the user's HTTP request. If the external provider experiences severe latency or network degradation, it will hold the Node.js request open, threatening to exhaust our connection pools. We explicitly mandate a strict, aggressive timeout (e.g., 3000ms) on all outbound Axios asset requests. We trade the ability to reliably ingest large or slow external images for guaranteed Node.js event loop protection and server stability.
+
+### Architectural Decision: Acceptance of File System Bloat on Cascading Deletes
+**Explicit Trade-off:** We rely on PostgreSQL's native ON DELETE CASCADE for rapid, transaction-safe GDPR account deletions and Admin moderation deletions. Because native database cascades bypass the Node.js lifecycle, we cannot reliably trigger fs.unlink() to delete the associated local .webp images for private cocktails or moderated content. We explicitly accept orphaned image files and storage bloat as a trade-off for simplified, database-level compliance.
+
+**Mitigation:** We defer disk-cleanup to an infrastructure-level cron job (Phase 2) that will periodically diff the /uploads/ directory against the COCKTAILS table to purge orphaned files.
 
 ## Migration Strategy
 
@@ -184,6 +203,22 @@ export class Cocktail {
    - Sharp validates image format during processing
    - Reject non-image files even if MIME type is spoofed
 
+ 5. **Decompression Bomb Protection**:
+    - **Architectural Decision: Sharp Decompression Bomb Risk Acceptance**
+    - **Explicit Trade-off:** To prevent Node.js Out-Of-Memory crashes from "Decompression Bomb" attacks (tiny files that expand to gigabytes in RAM), we explicitly mandate that the Multer/Sharp integration must be configured with strict `limitInputPixels` parameters. If an uploaded image exceeds safe pixel boundaries (e.g., 50,000 × 50,000 pixels), it will be rejected with a 400 Bad Request, even if the file byte size is under the 2MB limit. We trade support for extremely high-resolution panorama uploads for guaranteed event-loop memory safety.
+
+ 6. **Stateful Deployment Requirement**:
+    - **Architectural Decision: Stateful Monolith Deployment Mandate (Rejection of Serverless)**
+    - **Explicit Trade-off:** Because the "No Image URLs" mandate forces us to store processed .webp files directly on the local Node.js file system (`/uploads/cocktails/`), we explicitly reject ephemeral, scale-to-zero serverless orchestration (e.g., AWS ECS Fargate, Google Cloud Run). The application MUST be deployed on a stateful, persistent Virtual Machine (e.g., AWS EC2, DigitalOcean Droplet) with persistent block storage attached. We trade cloud-native serverless auto-scaling for absolute adherence to the local-asset-only security policy.
+
+ 7. **Single-VM Scaling Mandate**:
+    - **Architectural Decision: Single-VM Vertical Scaling Mandate**
+    - **Explicit Trade-off:** Because we enforce the "No Image URLs" mandate by storing assets on the local file system (`/uploads/cocktails/`), we explicitly forbid multi-VM horizontal scaling (e.g., deploying across multiple EC2 instances behind an AWS ALB without a shared EFS volume). To adhere to the "No Distributed State" mandate (which forbids shared network drives), the application MUST be scaled vertically on a single Virtual Machine, utilizing only the native Node.js cluster module to span multiple CPU cores across a shared physical disk. We trade cloud-native horizontal load balancing for absolute architectural simplicity and secure local asset storage.
+
+ 8. **Local Development Asset Proxying**:
+    - **Architectural Decision: Static Asset Proxy Routing for Local Development**
+    - **Explicit Trade-off:** Because local .webp assets are served statically by the NestJS backend (Port 3000), running the Angular frontend via Webpack HMR (Port 4200) will cause broken images due to relative path routing (`/uploads/...`). We explicitly mandate that the Angular development server (`proxy.conf.json`) MUST be configured to proxy all `/uploads/*` requests directly to the backend. We trade slightly more complex local dev-server configuration for keeping production database strings clean of absolute domain URLs.
+
 ## Performance Considerations
 
 1. **Image Optimization**:
@@ -198,7 +233,7 @@ export class Cocktail {
 3. **Processing Overhead**:
    - Sharp is highly optimized C++ library
    - Async processing prevents blocking event loop
-   - Consider queue for high-volume scenarios
+   - Due to the 'No Concurrency' mandate, message queues are forbidden. High-volume image processing must be managed via Node cluster horizontal scaling and load balancer rate-limiting.
 
 ## Future Evolution
 

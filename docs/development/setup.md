@@ -189,6 +189,8 @@ npm start
 
 *The frontend will be available at `http://localhost:4200` with Webpack HMR (Hot Module Replacement).*
 
+**Important:** Because local .webp assets are served statically by the NestJS backend (Port 3000), the Angular development server (`proxy.conf.json`) is configured to proxy all `/uploads/*` requests directly to the backend. This ensures images load correctly during local development without requiring absolute URLs in the database.
+
   
 
 ---

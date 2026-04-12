@@ -11,7 +11,7 @@ describe('UserInventoryService - Multi-Tenant Isolation', () => {
       find: jest.fn().mockImplementation((options) => {
         // Verify query includes user_id filter
         expect(options.where).toHaveProperty('user_id', 'user123');
-        return Promise.resolve([{ ingredientId: 'vodka', quantity: 500 }]);
+        return Promise.resolve([{ ingredientId: 'vodka', quantity: new Decimal('500') }]);
       })
     };
     
@@ -1205,7 +1205,7 @@ describe('User Service - GDPR & Account Deletion', () => {
 
   it('should aggregate all user data into standardized JSON for GDPR export', async () => {
     const userService = new UserService();
-    jest.spyOn(userService.inventoryRepo, 'find').mockResolvedValue([{ ingredient: 'Vodka', quantity: 500 }]);
+    jest.spyOn(userService.inventoryRepo, 'find').mockResolvedValue([{ ingredient: 'Vodka', quantity: new Decimal('500') }]);
     jest.spyOn(userService.favoritesRepo, 'find').mockResolvedValue([{ cocktailId: '123' }]);
     
     const exportData = await userService.exportUserData('user123');
@@ -1218,42 +1218,7 @@ describe('User Service - GDPR & Account Deletion', () => {
   });
 });
 
-**Example TDD for JWT Revocation Race Condition:**
-```typescript
-describe('Auth Service - Race Condition Prevention', () => {
-  it('should handle concurrent logout and token validation', async () => {
-    const authService = new AuthService();
-    const userRepo = {
-      findOne: jest.fn().mockResolvedValue({
-        id: 'user123',
-        token_version: 1,
-        last_logout_timestamp: null
-      }),
-      save: jest.fn().mockImplementation((user) => Promise.resolve(user))
-    };
-    
-    authService.userRepo = userRepo;
-    
-    // Simulate race condition: logout updates token_version while old token is being validated
-    const oldToken = authService.generateAccessToken('user123', Date.now(), 1);
-    
-    // Concurrent operations
-    const logoutPromise = authService.logout('user123'); // Increments token_version to 2
-    const validatePromise = authService.validateAccessToken(oldToken); // Checks with version 1
-    
-    const [logoutResult, validationResult] = await Promise.allSettled([
-      logoutPromise,
-      validatePromise
-    ]);
-    
-    // Logout should succeed
-    expect(logoutResult.status).toBe('fulfilled');
-    
-    // Token validation should fail due to version mismatch
-    expect(validationResult.status).toBe('rejected');
-    expect(validationResult.reason.message).toContain('Token version mismatch');
-  });
-});
+
 
 **Example TDD for JWT Secret Rotation (UC 9.27):**
 ```typescript
@@ -1264,10 +1229,10 @@ describe('Auth Service - JWT Secret Rotation', () => {
     const token = authService.generateAccessToken('user123', Date.now(), 1); // saltVersion 1 inside token
     await expect(authService.validateAccessToken(token)).resolves.toBeDefined();
     
-    // Simulate emergency global revocation via Redis
+    // Simulate emergency global revocation via PostgreSQL SYSTEM_SETTINGS
     await authService.emergencyGlobalRevocation(); // Increments global salt to 2
     
-    // Token (saltVersion 1) should now be instantly invalid against Redis (saltVersion 2)
+    // Token (saltVersion 1) should now be instantly invalid against database (saltVersion 2)
     await expect(authService.validateAccessToken(token))
       .rejects
       .toThrow('Token invalidated by global revocation');
@@ -1277,14 +1242,19 @@ describe('Auth Service - JWT Secret Rotation', () => {
 
   it('should rotate token_version_salt for global session revocation', async () => {
     const authService = new AuthService();
-    const redisService = new RedisService();
+    const systemSettingsRepo = new SystemSettingsRepository();
     
-    authService.redisService = redisService;
+    authService.systemSettingsRepo = systemSettingsRepo;
     
-    // Mock Redis for token version salt
-    const mockGet = jest.spyOn(redisService, 'get').mockResolvedValue('1');
-    const mockSet = jest.spyOn(redisService, 'set').mockResolvedValue('OK');
-    const mockIncr = jest.spyOn(redisService, 'incr').mockResolvedValue(2);
+    // Mock SystemSettings repository for token version salt
+    const mockFindOne = jest.spyOn(systemSettingsRepo, 'findOne').mockResolvedValue({ 
+      key: 'global_token_salt_version', 
+      value: '5' 
+    });
+    const mockUpsert = jest.spyOn(systemSettingsRepo, 'upsert').mockResolvedValue({ 
+      key: 'global_token_salt_version', 
+      value: '6' 
+    });
     
     // Generate token with current salt version
     const token = authService.generateAccessToken('user123', Date.now(), 1);
@@ -1296,9 +1266,11 @@ describe('Auth Service - JWT Secret Rotation', () => {
     // Simulate emergency global revocation
     await authService.emergencyGlobalRevocation();
     
-    // Should increment salt version in Redis
-    expect(mockIncr).toHaveBeenCalledWith('global_token_salt_version');
-    expect(mockSet).toHaveBeenCalledWith('global_token_salt_version', '2');
+    // Should increment salt version in PostgreSQL SYSTEM_SETTINGS table
+    expect(mockUpsert).toHaveBeenCalledWith(
+      { key: 'global_token_salt_version', value: '6' },
+      { conflictPaths: ['key'] }
+    );
     
     // New tokens should use updated salt version
     const newToken = authService.generateAccessToken('user123', Date.now(), 1);

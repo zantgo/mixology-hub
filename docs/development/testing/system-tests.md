@@ -204,14 +204,14 @@ describe('Makeability Performance', () => {
       name: `Cocktail ${i}`,
       ingredients: Array.from({ length: 5 }, (_, j) => ({
         ingredient_id: `ingredient-${Math.floor(Math.random() * 500)}`,
-        quantity: 50,
+        quantity: new Decimal('50'),
         unit: 'ml'
       }))
     }));
 
     const mockInventory = Array.from({ length: 500 }, (_, i) => ({
       ingredient_id: `ingredient-${i}`,
-      quantity: 1000,
+      quantity: new Decimal('1000'),
       unit: 'ml'
     }));
 

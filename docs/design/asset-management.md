@@ -116,8 +116,7 @@ export class MakeabilityIconComponent {
 ### Cocktail Images
 **Source Priority:**
 1. User-uploaded images (custom recipes)
-2. TheCocktailDB API images
-3. Placeholder images (fallback)
+2. Placeholder images (fallback)
 
 **Image Specifications:**
 - **Aspect Ratio:** 16:9 for cards, 4:3 for details
@@ -129,7 +128,7 @@ export class MakeabilityIconComponent {
 ```html
 <!-- Progressive image loading -->
 <div class="image-container">
-  <img [src]="imageUrl"
+  <img [src]="imagePath"
        [alt]="altText"
        loading="lazy"
        (error)="onImageError($event)"
@@ -366,7 +365,7 @@ npm run optimize:images
   standalone: true
 })
 export class LazyLoadDirective implements AfterViewInit, OnDestroy {
-  @Input('appLazyLoad') imageUrl!: string;
+  @Input('appLazyLoad') imagePath!: string;
   
   private observer!: IntersectionObserver;
   
@@ -385,9 +384,9 @@ export class LazyLoadDirective implements AfterViewInit, OnDestroy {
   
   private loadImage() {
     const img = new Image();
-    img.src = this.imageUrl;
+    img.src = this.imagePath;
     img.onload = () => {
-      this.el.nativeElement.src = this.imageUrl;
+      this.el.nativeElement.src = this.imagePath;
       this.el.nativeElement.classList.add('loaded');
     };
   }

@@ -127,14 +127,27 @@ export class CocktailsService {
   }
 
   async findAll(paginationQuery: PaginationQueryDto) {
-    const { limit = 10, offset = 0 } = paginationQuery;
+    const { limit = 10, page = 1 } = paginationQuery;
+    const offset = (page - 1) * limit;
     const [data, total] = await this.cocktailRepository.findAndCount({
       relations: ['ingredients', 'ingredients.ingredient'],
       skip: offset,
       take: limit,
     });
     
-    return { data, total, limit, offset };
+    const totalPages = Math.ceil(total / limit);
+    const hasNextPage = page < totalPages;
+    
+    return { 
+      data, 
+      meta: {
+        currentPage: page,
+        nextPage: hasNextPage ? page + 1 : null,
+        itemsPerPage: limit,
+        totalItems: total,
+        totalPages
+      }
+    };
   }
 
   async findOne(id: string) {

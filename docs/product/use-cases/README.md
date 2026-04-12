@@ -11,9 +11,9 @@ Use cases are split into domain-specific files for easier navigation and mainten
 | [inventory-management.md](./inventory-management.md) | Inventory Management | UC 1.1-1.11 | Core inventory CRUD operations, parsing, validation, custom ingredient scoping |
 | [cocktail-discovery.md](./cocktail-discovery.md) | Cocktail Discovery & Aggregator | UC 2.1-2.10 | Unified search, external API integration, caching, privacy scoping |
 | [makeable-intelligence.md](./makeable-intelligence.md) | Smart Inventory & Makeable Intelligence | UC 3.1-3.7 | Makeable cocktail logic, unit conversion, optional ingredients |
-| [cocktail-preparation.md](./cocktail-preparation.md) | Cocktail Preparation | UC 4.1-4.5 | ACID transactions, race condition prevention, undo |
+| [cocktail-preparation.md](./cocktail-preparation.md) | Cocktail Preparation | UC 4.1-4.5 | ACID transactions, undo |
 | [ai-bartender.md](./ai-bartender.md) | AI Generative Bartender | UC 5.1-5.8 | LLM integration, prompt injection defense, rate limiting |
-| [favorites-management.md](./favorites-management.md) | Favorites Management | UC 6.1-6.5 | Polymorphic favorites, idempotent operations, hydration |
+| [favorites-management.md](./favorites-management.md) | Favorites Management | UC 6.1-6.5 | Polymorphic favorites, hydration |
 | [frontend-ui.md](./frontend-ui.md) | Frontend UI & Reactivity | UC 7.1-7.8 | Angular signals, RxJS debouncing, error handling, measurement localization |
 | [system-environment.md](./system-environment.md) | System & Environment | UC 8.1 | Developer setup |
 | [authentication.md](./authentication.md) | Authentication & Multi-Tenant | UC 9.1-9.11 | JWT auth, password hashing, rate limiting, GDPR deletion, user preferences, email verification |

@@ -214,8 +214,11 @@ test.describe('E2E - AI Determinism & Cost Control', () => {
     
     // Assert timeout UI is shown
     await expect(page.locator('.error-message')).toContainText('Request timed out');
-    });
+  });
 
+  test('Should handle AI API errors gracefully', async ({ page }) => {
+    // WireMock configured to return 500 for this test
+    
     await page.goto('/ai-bartender');
     await page.fill('textarea[name="ingredients"]', 'Vodka');
     await page.click('button:has-text("Generate Recipe")');
@@ -226,19 +229,32 @@ test.describe('E2E - AI Determinism & Cost Control', () => {
   });
 
   test('Should handle AI API rate limits', async ({ page }) => {
-    // Mock rate limit response
-    await page.route('**/api/ai/generate', async route => {
-      await route.fulfill({
-        status: 429,
-        json: { error: 'Rate limit exceeded', retryAfter: 60 }
-      });
-    });
+    // WireMock configured to return 429 for this test
+    // WireMock mapping: /wiremock/mappings/ai-rate-limit.json
+    // {
+    //   "request": {
+    //     "method": "POST",
+    //     "url": "/v1/chat/completions"
+    //   },
+    //   "response": {
+    //     "status": 429,
+    //     "headers": {
+    //       "Retry-After": "60"
+    //     },
+    //     "jsonBody": {
+    //       "error": {
+    //         "message": "Rate limit exceeded",
+    //         "type": "rate_limit_error"
+    //       }
+    //     }
+    //   }
+    // }
 
     await page.goto('/ai-bartender');
     await page.fill('textarea[name="ingredients"]', 'Vodka');
     await page.click('button:has-text("Generate Recipe")');
     
-    // Should show rate limit UI
+    // Should show rate limit UI (backend translates WireMock 429 to application error)
     await expect(page.locator('.rate-limit-message')).toBeVisible();
     await expect(page.locator('.rate-limit-message')).toContainText('Please wait 60 seconds');
   });
@@ -308,6 +324,11 @@ export default defineConfig({
     baseURL: process.env.BASE_URL || 'http://localhost:4200',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    // INJECT THE RATE-LIMIT BYPASS HEADER FOR ALL E2E BROWSER CONTEXTS
+    // This bypasses the internal ThrottlerGuard (UC 13.3) but NOT external API rate limits
+    extraHTTPHeaders: {
+      'x-test-bypass-ratelimit': 'true'
+    }
   },
   
   projects: [
