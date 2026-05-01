@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, MoreThan } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -265,7 +265,7 @@ export class AuthService {
     const user = await this.userRepository.findOne({
       where: {
         resetPasswordToken: token,
-        resetPasswordExpires: new Date(),
+        resetPasswordExpires: MoreThan(new Date()),
       },
     });
 

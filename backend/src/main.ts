@@ -3,20 +3,27 @@ import { AppModule } from './app.module';
 import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import { join } from 'path';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  
+
+  app.use(helmet());
+
   // Serve static files from uploads directory
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
   });
-  
+
+  const corsOrigin = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : process.env.NODE_ENV === 'production'
+      ? ['https://mixologyhub.com']
+      : ['http://localhost:4200', 'http://localhost:8080'];
+
   app.enableCors({
-    origin: process.env.NODE_ENV === 'production' 
-      ? ['https://mixologyhub.com'] 
-      : ['http://localhost:4200', 'http://localhost:8080'],
+    origin: corsOrigin,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
   });
 
@@ -39,6 +46,7 @@ async function bootstrap() {
     .addTag('Cocktails')
     .addTag('Ingredients')
     .addTag('AI')
+    .addBearerAuth()
     .build();
 
   const documentFactory = () => SwaggerModule.createDocument(app, config);

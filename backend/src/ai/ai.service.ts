@@ -56,7 +56,9 @@ export class AiService {
       // 1. Create the cocktail within the transaction
       const newCocktail = em.create(Cocktail, {
         name: saveDto.name,
-        instructions: recipe.instructions,
+        instructions: Array.isArray(recipe.instructions)
+          ? recipe.instructions.join('\n')
+          : recipe.instructions || '',
         user: aiRecord.user,
         source: 'ai'
       });
@@ -67,7 +69,10 @@ export class AiService {
         let ingredient = await em.findOne(Ingredient, { where: { name: item.name.toLowerCase() } });
         
         if (!ingredient) {
-          ingredient = em.create(Ingredient, { name: item.name.toLowerCase(), baseUnit: 'ml' });
+          ingredient = em.create(Ingredient, {
+            name: item.name.toLowerCase(),
+            baseUnit: this.determineBaseUnit(item.unit || 'count'),
+          });
           ingredient = await em.save(ingredient);
         }
 
@@ -75,15 +80,26 @@ export class AiService {
         const cocktailIngredient = em.create(CocktailIngredient, {
           cocktail: savedCocktail,
           ingredient: ingredient,
-          measure: item.measure,
-          amount: 1, // Default value
-          unit: 'ml'
+          measure: item.note || `${item.amount} ${item.unit}`,
+          amount: item.amount || 1,
+          unit: item.unit || 'count'
         });
         
         await em.save(cocktailIngredient);
       }
       return savedCocktail;
     });
+  }
+
+  private determineBaseUnit(unit: string): string {
+    const unitMap: Record<string, string> = {
+      'ml': 'ml', 'oz': 'ml', 'cl': 'ml', 'l': 'ml',
+      'g': 'g', 'kg': 'g',
+      'dash': 'dashes', 'drop': 'drops', 'splash': 'splashes',
+      'part': 'parts', 'slice': 'slices', 'wedge': 'wedges',
+      'twist': 'twists', 'sprig': 'sprigs', 'leaf': 'leaves',
+    };
+    return unitMap[unit.toLowerCase()] || 'count';
   }
 
   async findAll(paginationQuery: PaginationQueryDto) {

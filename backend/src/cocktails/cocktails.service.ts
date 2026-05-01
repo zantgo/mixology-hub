@@ -1,12 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException, forwardRef, InternalServerErrorException, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
 import { Cocktail } from './entities/cocktail.entity';
 import { CocktailIngredient } from './entities/cocktail-ingredient.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { User } from '../users/entities/user.entity';
+import { UserInventory } from '../users/entities/user-inventory.entity';
 import { UserInventoryService } from '../users/user-inventory.service';
 import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -52,14 +54,14 @@ export class CocktailsService {
         instructions: createCocktailDto.instructions,
         image_full: createCocktailDto.imageFull,
         image_thumb: createCocktailDto.imageThumb,
-        is_public: createCocktailDto.isPublic ?? true, // Default to true if not provided
+        is_public: createCocktailDto.isPublic ?? true,
         user: user,
       });
 
       const savedCocktail = await transactionalEntityManager.save(newCocktail);
 
       for (const item of createCocktailDto.ingredients) {
-        const ingredient = await this.ingredientRepository.findOne({
+        const ingredient = await transactionalEntityManager.findOne(Ingredient, {
           where: { id: item.ingredientId },
         });
 
@@ -94,31 +96,43 @@ export class CocktailsService {
     return completeCocktail;
   }
 
-  async prepare(cocktailId: string) {
+  async prepare(cocktailId: string, userId: string) {
     return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
-      const cocktail = await this.findOne(cocktailId);
-      // TODO: Update this to use the new inventory service method with user context
-      // For now, using a mock user ID
-      const inventory = await this.inventoryService.getInventory('00000000-0000-0000-0000-000000000000');
+      const cocktail = await transactionalEntityManager.findOne(Cocktail, {
+        where: { id: cocktailId },
+        relations: ['ingredients', 'ingredients.ingredient'],
+      });
 
-      for (const req of cocktail.ingredients) {
-        if (!req.ingredient || !req.ingredient.id) {
-            throw new InternalServerErrorException('Cocktail recipe is corrupt: Missing ingredient data.');
-        }
-
-        const stock = inventory.find(i => i.ingredient && i.ingredient.id === req.ingredient.id);
-        
-        if (!stock || !this.unitConverter.hasEnoughStock(Number(stock.quantity), stock.unit, req.amount, req.unit, req.ingredient)) {
-          throw new BadRequestException(`Not enough stock for ingredient: ${req.ingredient.name || 'Unknown'}`);
-        }
+      if (!cocktail) {
+        throw new NotFoundException(`Cocktail #${cocktailId} not found`);
       }
 
       for (const req of cocktail.ingredients) {
-        const stock = inventory.find(i => i.ingredient.id === req.ingredient.id);
-        if (stock) {
-            const amountToSubtract = this.unitConverter.convert(req.amount, req.unit, stock.unit, req.ingredient);
-            stock.quantity -= amountToSubtract;
-            await transactionalEntityManager.save(stock);
+        if (!req.ingredient || !req.ingredient.id) {
+          throw new InternalServerErrorException('Cocktail recipe is corrupt: Missing ingredient data.');
+        }
+
+        const amountToSubtract = this.unitConverter.convert(req.amount, req.unit, req.ingredient.baseUnit, req.ingredient);
+
+        const result = await transactionalEntityManager
+          .createQueryBuilder()
+          .update(UserInventory)
+          .set({
+            quantity: () => `quantity - :amount`,
+          })
+          .where('user_id = :userId', { userId })
+          .andWhere('ingredient_id = :ingredientId', { ingredientId: req.ingredient.id })
+          .andWhere('quantity >= :amount', { amount: amountToSubtract.toString() })
+          .returning('*')
+          .execute();
+
+        if (!result.affected || result.affected === 0) {
+          const stock = await transactionalEntityManager.findOne(UserInventory, {
+            where: { user: { id: userId }, ingredient: { id: req.ingredient.id } },
+          });
+          throw new BadRequestException(
+            `Not enough stock for ingredient: ${req.ingredient.name || 'Unknown'}`
+          );
         }
       }
 

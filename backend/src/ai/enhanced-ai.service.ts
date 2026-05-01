@@ -1,8 +1,9 @@
 import { Injectable, Logger, BadRequestException, InternalServerErrorException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Ai } from './entities/ai.entity';
+import { UserAiQuotas } from './entities/user-ai-quotas.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
@@ -70,21 +71,14 @@ export interface AiRecipeValidationResult {
 @Injectable()
 export class EnhancedAiService {
   private readonly logger = new Logger(EnhancedAiService.name);
-  private readonly MAX_RECIPES_PER_DAY = 50;
-  private readonly MAX_INGREDIENTS_PER_RECIPE = 15;
-  private readonly BANNED_INGREDIENTS = [
-    'methanol', 'ethanol (pure)', 'industrial alcohol', 'denatured alcohol',
-    'toxic berries', 'poisonous plants', 'household chemicals', 'bleach',
-    'ammonia', 'gasoline', 'paint thinner', 'antifreeze',
-  ];
-  private readonly BANNED_THEMES = [
-    'drugs', 'illegal substances', 'explicit', 'offensive',
-    'dangerous challenges', 'harmful', 'toxic', 'poison',
-  ];
-  private userDailyCounts: Map<string, { count: number; date: string }> = new Map();
+  private readonly MAX_RECIPES_PER_DAY: number;
+  private readonly MAX_INGREDIENTS_PER_RECIPE: number;
+  private readonly BANNED_INGREDIENTS: string[];
+  private readonly BANNED_THEMES: string[];
 
   constructor(
     @InjectRepository(Ai) private readonly aiRepository: Repository<Ai>,
+    @InjectRepository(UserAiQuotas) private readonly quotaRepository: Repository<UserAiQuotas>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(Ingredient) private readonly ingredientRepository: Repository<Ingredient>,
     @InjectRepository(Cocktail) private readonly cocktailRepository: Repository<Cocktail>,
@@ -92,7 +86,21 @@ export class EnhancedAiService {
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly llmAdapterService: LlmAdapterService,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.MAX_RECIPES_PER_DAY = this.configService.get<number>('AI_MAX_RECIPES_PER_DAY') || 50;
+    this.MAX_INGREDIENTS_PER_RECIPE = this.configService.get<number>('AI_MAX_INGREDIENTS_PER_RECIPE') || 15;
+    this.BANNED_INGREDIENTS = this.configService.get<string>('AI_BANNED_INGREDIENTS')
+      ?.split(',').map(s => s.trim().toLowerCase()) || [
+      'methanol', 'ethanol (pure)', 'industrial alcohol', 'denatured alcohol',
+      'toxic berries', 'poisonous plants', 'household chemicals', 'bleach',
+      'ammonia', 'gasoline', 'paint thinner', 'antifreeze',
+    ];
+    this.BANNED_THEMES = this.configService.get<string>('AI_BANNED_THEMES')
+      ?.split(',').map(s => s.trim().toLowerCase()) || [
+      'drugs', 'illegal substances', 'explicit', 'offensive',
+      'dangerous challenges', 'harmful', 'toxic', 'poison',
+    ];
+  }
 
   async generateRecipe(
     userId: string,
@@ -200,7 +208,7 @@ export class EnhancedAiService {
     await this.recordGeneration(userId, bestRecipe, bestValidation);
 
     // 16. Increment user quota
-    this.incrementUserQuota(userId);
+    await this.incrementUserQuota(userId);
 
     return bestRecipe;
   }
@@ -314,9 +322,38 @@ export class EnhancedAiService {
 
   private async checkUserQuota(userId: string): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
-    const userCount = this.userDailyCounts.get(userId);
 
-    if (userCount && userCount.date === today && userCount.count >= this.MAX_RECIPES_PER_DAY) {
+    let quota = await this.quotaRepository.findOne({
+      where: { user: { id: userId }, quotaDate: today },
+    });
+
+    if (!quota) {
+      // Use an atomic INSERT to prevent TOCTOU race condition.
+      // If two concurrent requests both try to create the row,
+      // the second will fail on the UNIQUE(user_id, quota_date) constraint.
+      try {
+        quota = this.quotaRepository.create({
+          user: { id: userId },
+          quotaDate: today,
+          usageCount: 0,
+        });
+        await this.quotaRepository.save(quota);
+      } catch (error) {
+        // UNIQUE constraint violation — another request created the row first.
+        if (error instanceof QueryFailedError && (error as any).code === '23505') {
+          quota = await this.quotaRepository.findOne({
+            where: { user: { id: userId }, quotaDate: today },
+          });
+          if (!quota) {
+            throw new InternalServerErrorException('Failed to check AI quota');
+          }
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (quota.usageCount >= this.MAX_RECIPES_PER_DAY) {
       throw new ForbiddenException(
         `Daily limit of ${this.MAX_RECIPES_PER_DAY} AI recipes exceeded. ` +
         `Please try again tomorrow.`
@@ -324,19 +361,18 @@ export class EnhancedAiService {
     }
   }
 
-  private incrementUserQuota(userId: string): void {
+  private async incrementUserQuota(userId: string): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
-    const userCount = this.userDailyCounts.get(userId);
 
-    if (userCount && userCount.date === today) {
-      userCount.count++;
-    } else {
-      this.userDailyCounts.set(userId, { count: 1, date: today });
-    }
+    await this.quotaRepository
+      .createQueryBuilder()
+      .update(UserAiQuotas)
+      .set({ usageCount: () => 'usage_count + 1' })
+      .where('user_id = :userId AND quota_date = :today', { userId, today })
+      .execute();
   }
 
   private sanitizeAndValidateRequest(request: AiRecipeRequest): AiRecipeRequest {
-    // Validate ingredients
     if (!request.ingredients || !Array.isArray(request.ingredients) || request.ingredients.length === 0) {
       throw new BadRequestException('At least one ingredient is required');
     }
@@ -347,14 +383,37 @@ export class EnhancedAiService {
       );
     }
 
-    // Sanitize ingredient names
+    // Blocked prompt injection patterns (per llm-prompt-security.md)
+    const blockedPatterns = [
+      /ignore.*previous.*instructions/i,
+      /system.*prompt/i,
+      /output.*template/i,
+      /disregard.*previous/i,
+      /respond\s+in\s+plain\s+text/i,
+      /forget\s+your\s+instructions/i,
+      /you\s+are\s+now/i,
+      /new\s+system\s+prompt/i,
+    ];
+
+    const MAX_LENGTH = 500;
+
+    // Sanitize ingredient names with character whitelisting + length limits
     const sanitizedIngredients = request.ingredients.map(ingredient => {
-      const sanitized = ingredient.trim();
-      if (sanitized.length === 0) {
+      const trimmed = ingredient.trim();
+      if (trimmed.length === 0) {
         throw new BadRequestException('Ingredient names cannot be empty');
       }
-      if (sanitized.length > 100) {
-        throw new BadRequestException('Ingredient names cannot exceed 100 characters');
+      // Truncate and apply character whitelist
+      const truncated = trimmed.slice(0, MAX_LENGTH);
+      const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '').trim();
+      if (sanitized.length === 0) {
+        throw new BadRequestException('Ingredient name contains no valid characters');
+      }
+      // Check blocked patterns
+      for (const pattern of blockedPatterns) {
+        if (pattern.test(sanitized)) {
+          throw new BadRequestException('Input contains blocked patterns');
+        }
       }
       return sanitized;
     });
@@ -833,6 +892,6 @@ export class EnhancedAiService {
       'leaf': 'leaves',
     };
 
-    return unitMap[unit.toLowerCase()] || 'units';
+    return unitMap[unit.toLowerCase()] || 'count';
   }
 }

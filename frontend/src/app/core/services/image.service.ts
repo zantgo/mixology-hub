@@ -16,20 +16,14 @@ export class ImageService {
    * Get a safe image URL with fallback to default images
    * Now supports both external URLs and local upload paths
    */
-  getSafeCocktailImageUrl(imageUrl?: string, imageFull?: string, imageThumb?: string, cocktailName?: string): string {
-    // Prefer local uploaded images over external URLs
+  getSafeCocktailImageUrl(imageFull?: string, imageThumb?: string, cocktailName?: string): string {
     if (imageThumb) {
       return imageThumb;
     }
     if (imageFull) {
       return imageFull;
     }
-    
-    // Fallback to legacy external URL
-    if (imageUrl && this.isValidUrl(imageUrl)) {
-      return imageUrl;
-    }
-    
+
     return this.getDefaultCocktailImage(cocktailName);
   }
 

@@ -23,12 +23,12 @@ export class CocktailService {
   }
 
   // Create a new cocktail (legacy - without file upload)
-  createCocktail(cocktail: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'> & { imageUrl?: string }): Observable<Cocktail> {
+  createCocktail(cocktail: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>): Observable<Cocktail> {
     return this.http.post<Cocktail>(this.apiUrl, cocktail);
   }
 
   // Create a new cocktail with image upload
-  createCocktailWithImage(cocktailData: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source' | 'imageUrl' | 'imageFull' | 'imageThumb'>, imageFile?: File): Observable<Cocktail> {
+  createCocktailWithImage(cocktailData: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>, imageFile?: File): Observable<Cocktail> {
     const formData = new FormData();
     formData.append('data', JSON.stringify(cocktailData));
     
@@ -40,12 +40,12 @@ export class CocktailService {
   }
 
   // Update cocktail (legacy - without file upload)
-  updateCocktail(id: string, cocktail: Partial<Cocktail> & { imageUrl?: string }): Observable<Cocktail> {
+  updateCocktail(id: string, cocktail: Partial<Cocktail>): Observable<Cocktail> {
     return this.http.patch<Cocktail>(`${this.apiUrl}/${id}`, cocktail);
   }
 
   // Update cocktail with image upload
-  updateCocktailWithImage(id: string, cocktailData: Partial<Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source' | 'imageUrl' | 'imageFull' | 'imageThumb'>>, imageFile?: File): Observable<Cocktail> {
+  updateCocktailWithImage(id: string, cocktailData: Partial<Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>>, imageFile?: File): Observable<Cocktail> {
     const formData = new FormData();
     formData.append('data', JSON.stringify(cocktailData));
     

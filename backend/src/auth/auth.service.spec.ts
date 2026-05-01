@@ -307,8 +307,8 @@ describe('AuthService', () => {
       const result = await service.validateUser(payload);
 
       expect(result).toBeDefined();
-      expect(result.id).toBe(mockUser.id);
-      expect(result.email).toBe(mockUser.email);
+      expect(result!.id).toBe(mockUser.id);
+      expect(result!.email).toBe(mockUser.email);
     });
 
     it('should return null for blacklisted token', async () => {

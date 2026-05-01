@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, MoreThan } from 'typeorm';
+import { Repository, LessThan, MoreThan, In } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from './entities/user.entity';
 import { UserInventory } from './entities/user-inventory.entity';
+import { UserProfile } from './entities/user-profile.entity';
 import { Ai } from '../ai/entities/ai.entity';
+import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
+import { Favorite } from '../favorites/entities/favorite.entity';
+import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { ConfigService } from '@nestjs/config';
 
 export interface DataRetentionPolicy {
@@ -32,8 +36,16 @@ export class GdprDataRetentionService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserInventory)
     private readonly inventoryRepository: Repository<UserInventory>,
+    @InjectRepository(UserProfile)
+    private readonly profileRepository: Repository<UserProfile>,
     @InjectRepository(Ai)
     private readonly aiRepository: Repository<Ai>,
+    @InjectRepository(UserAiQuotas)
+    private readonly quotaRepository: Repository<UserAiQuotas>,
+    @InjectRepository(Favorite)
+    private readonly favoriteRepository: Repository<Favorite>,
+    @InjectRepository(Cocktail)
+    private readonly cocktailRepository: Repository<Cocktail>,
     private readonly configService: ConfigService,
   ) {
     // Load retention policy from config or use defaults
@@ -213,11 +225,26 @@ export class GdprDataRetentionService {
   private async deleteUserData(userId: string): Promise<void> {
     // Delete user inventory
     await this.inventoryRepository.delete({ user: { id: userId } });
-    
+
+    // Delete user profile
+    await this.profileRepository.delete({ user: { id: userId } });
+
+    // Delete favorites
+    await this.favoriteRepository.delete({ user: { id: userId } });
+
     // Delete AI generated recipes
     await this.aiRepository.delete({ user: { id: userId } });
-    
-    // Note: Other associations would be handled by cascade delete or additional cleanup
+
+    // Delete AI quotas
+    await this.quotaRepository.delete({ user: { id: userId } });
+
+    // Delete user-created cocktails (hard delete, bypassing soft-delete flag)
+    await this.cocktailRepository
+      .createQueryBuilder()
+      .delete()
+      .where('created_by = :userId', { userId })
+      .execute();
+
     this.logger.log(`Deleted all data for user ${userId}`);
   }
 
@@ -227,19 +254,21 @@ export class GdprDataRetentionService {
   async exportUserData(userId: string): Promise<any> {
     const user = await this.userRepository.findOne({
       where: { id: userId },
-      relations: ['inventory', 'inventory.ingredient'],
     });
 
     if (!user) {
       throw new Error('User not found');
     }
 
-    // Get AI generated recipes
+    const inventory = await this.inventoryRepository.find({
+      where: { user: { id: userId } },
+      relations: ['ingredient'],
+    });
+
     const aiRecipes = await this.aiRepository.find({
       where: { user: { id: userId } },
     });
 
-    // Structure the data export
     const exportData = {
       userProfile: {
         id: user.id,
@@ -251,7 +280,12 @@ export class GdprDataRetentionService {
         lastLogin: user.lastLoginAt,
         isAnonymized: user.is_anonymized,
       },
-      inventory: [], // user.inventory would need to be loaded with relations
+      inventory: inventory.map(item => ({
+        ingredientId: item.ingredient.id,
+        ingredientName: item.ingredient.name,
+        quantity: item.quantity,
+        unit: item.unit,
+      })),
       aiGeneratedRecipes: aiRecipes.map(recipe => ({
         id: recipe.id,
         prompt: recipe.prompt,

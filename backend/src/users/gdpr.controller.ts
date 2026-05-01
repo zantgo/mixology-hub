@@ -3,15 +3,16 @@ import { AuthGuard } from '@nestjs/passport';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import { User } from './entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @ApiTags('GDPR')
 @ApiBearerAuth()
 @Controller('gdpr')
-@UseGuards(AuthGuard('jwt'))
 export class GdprController {
   constructor(private readonly gdprService: GdprDataRetentionService) {}
 
   @Get('export-data')
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Export all user data (GDPR right to access)' })
   @ApiResponse({ status: 200, description: 'User data exported successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -26,12 +27,11 @@ export class GdprController {
 
   @Post('request-deletion')
   @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(AuthGuard('jwt'))
   @ApiOperation({ summary: 'Request account deletion (GDPR right to be forgotten)' })
   @ApiResponse({ status: 202, description: 'Deletion request accepted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async requestAccountDeletion(@Request() req) {
-    // In a real implementation, you might want to schedule deletion
-    // after a grace period or send a confirmation email
     const success = await this.gdprService.deleteUserAccount(req.user.id);
     
     return {
@@ -44,13 +44,12 @@ export class GdprController {
   }
 
   @Get('retention-stats')
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiOperation({ summary: 'Get data retention statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Retention statistics retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
   async getRetentionStats(@Request() req) {
-    // Check if user is admin (you would need to implement this)
-    // For now, we'll allow any authenticated user to see stats
     const stats = await this.gdprService.getRetentionStats();
     
     return {
@@ -62,15 +61,12 @@ export class GdprController {
 
   @Post('run-cleanup')
   @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(AuthGuard('jwt'), AdminGuard)
   @ApiOperation({ summary: 'Manually trigger GDPR data cleanup (Admin only)' })
   @ApiResponse({ status: 202, description: 'Cleanup triggered successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden - Admin access required' })
   async runCleanup(@Request() req) {
-    // Check if user is admin
-    // For now, we'll allow any authenticated user to trigger cleanup
-    
-    // Run cleanup asynchronously
     this.gdprService.runDataRetentionCleanup();
     
     return {

@@ -36,10 +36,9 @@ import { ImageService } from '../../core/services/image.service';
   `]
 })
 export class CocktailImageComponent implements OnInit {
-  @Input() imageUrl?: string; // Legacy field
-  @Input() imageFull?: string; // New field for full-size image
-  @Input() imageThumb?: string; // New field for thumbnail image
-  @Input() cocktailName?: string; // For consistent default image selection
+  @Input() imageFull?: string;
+  @Input() imageThumb?: string;
+  @Input() cocktailName?: string;
   @Input() altText: string = 'Cocktail image';
   @Input() width: string = '100%';
   @Input() height: string = 'auto';
@@ -63,7 +62,6 @@ export class CocktailImageComponent implements OnInit {
   private setImageUrl() {
     this.errorCount = 0;
     this.currentImageUrl = this.imageService.getSafeCocktailImageUrl(
-      this.imageUrl,
       this.imageFull,
       this.imageThumb,
       this.cocktailName
@@ -76,29 +74,6 @@ export class CocktailImageComponent implements OnInit {
 
   onImageError() {
     this.errorCount++;
-    
-    if (this.errorCount <= this.maxRetries && this.imageUrl) {
-      // Try adding cache busting parameter
-      this.currentImageUrl = this.addCacheBuster(this.imageUrl);
-    } else {
-      // Fall back to default image
-      this.currentImageUrl = this.getRandomDefaultImage();
-    }
-  }
-
-  private getRandomDefaultImage(): string {
-    const randomIndex = Math.floor(Math.random() * this.defaultImages.length);
-    return this.defaultImages[randomIndex];
-  }
-
-  private addCacheBuster(url: string): string {
-    try {
-      const urlObj = new URL(url);
-      urlObj.searchParams.set('t', Date.now().toString());
-      return urlObj.toString();
-    } catch {
-      // If URL parsing fails, just return the original
-      return url;
-    }
+    this.currentImageUrl = this.imageService.getDefaultCocktailImage(this.cocktailName);
   }
 }

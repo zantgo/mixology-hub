@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, DataSource, QueryRunner } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { UserInventoryService } from './user-inventory.service';
 import { UserInventory } from './entities/user-inventory.entity';
 import { User } from './entities/user.entity';
@@ -54,6 +55,8 @@ describe('UserInventoryService', () => {
       rollbackTransaction: jest.fn(),
       release: jest.fn(),
       manager: {
+        find: jest.fn(),
+        findOne: jest.fn(),
         remove: jest.fn(),
         save: jest.fn(),
       },
@@ -156,7 +159,7 @@ describe('UserInventoryService', () => {
         ...addInventoryDto,
       });
 
-      const result = await service.addToInventory(mockUser as User, addInventoryDto);
+      const result = await service.addToInventory("user-123", addInventoryDto);
 
       expect(result).toBeDefined();
       expect(userInventoryRepository.save).toHaveBeenCalled();
@@ -173,7 +176,7 @@ describe('UserInventoryService', () => {
         id: 'existing-123',
         user: mockUser as User,
         ingredient: mockIngredient as Ingredient,
-        quantity: 300,
+        quantity: new Decimal(300),
         unit: 'ml',
       };
 
@@ -184,7 +187,7 @@ describe('UserInventoryService', () => {
         quantity: 500, // 300 + 200
       });
 
-      const result = await service.addToInventory(mockUser as User, addInventoryDto);
+      const result = await service.addToInventory("user-123", addInventoryDto);
 
       expect(result.quantity).toBe(500);
     });
@@ -211,7 +214,7 @@ describe('UserInventoryService', () => {
         unit: 'ml',
       });
 
-      await service.addToInventory(mockUser as User, addInventoryDto);
+      await service.addToInventory("user-123", addInventoryDto);
 
       expect(unitConverterService.convert).toHaveBeenCalledWith(16.9, 'oz', 'ml', expect.objectContaining({
         id: 'ingredient-123',
@@ -229,7 +232,7 @@ describe('UserInventoryService', () => {
 
       (ingredientRepository.findOne as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.addToInventory(mockUser as User, addInventoryDto))
+      await expect(service.addToInventory("user-123", addInventoryDto))
         .rejects.toThrow(NotFoundException);
     });
   });
@@ -240,14 +243,14 @@ describe('UserInventoryService', () => {
         {
           id: 'inventory-123',
           ingredient: mockBourbonIngredient,
-          quantity: 750,
+          quantity: new Decimal(750),
           unit: 'ml',
         },
       ];
 
       (userInventoryRepository.find as jest.Mock).mockResolvedValue(mockInventory);
 
-      const result = await service.getInventory(mockUser.id);
+      const result = await service.getInventory("user-123");
 
       expect(result).toEqual(mockInventory);
       expect(userInventoryRepository.find).toHaveBeenCalledWith({
@@ -264,14 +267,14 @@ describe('UserInventoryService', () => {
         id: 'inventory-123',
         user: mockUser,
         ingredient: mockIngredient,
-        quantity: 500,
+        quantity: new Decimal(500),
         unit: 'ml',
       };
 
       (userInventoryRepository.findOne as jest.Mock).mockResolvedValue(mockInventoryItem);
       (userInventoryRepository.remove as jest.Mock).mockResolvedValue(mockInventoryItem);
 
-      const result = await service.removeFromInventory(mockUser.id, 'inventory-123');
+      const result = await service.removeFromInventory("user-123", 'inventory-123');
 
       expect(result).toEqual(mockInventoryItem);
       expect(userInventoryRepository.findOne).toHaveBeenCalledWith({
@@ -282,7 +285,7 @@ describe('UserInventoryService', () => {
     it('should throw error when inventory item not found', async () => {
       (userInventoryRepository.findOne as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.removeFromInventory(mockUser.id, 'invalid-id'))
+      await expect(service.removeFromInventory("user-123", 'invalid-id'))
         .rejects.toThrow(NotFoundException);
     });
   });
@@ -293,7 +296,7 @@ describe('UserInventoryService', () => {
         id: 'inventory-123',
         user: mockUser,
         ingredient: mockIngredient,
-        quantity: 300,
+        quantity: new Decimal(300),
         unit: 'ml',
       };
 
@@ -301,12 +304,12 @@ describe('UserInventoryService', () => {
       (unitConverterService.convert as jest.Mock).mockReturnValue(500);
       (userInventoryRepository.save as jest.Mock).mockResolvedValue({
         ...mockInventoryItem,
-        quantity: 500,
+        quantity: new Decimal(500),
       });
 
-      const result = await service.updateInventoryItem(mockUser.id, 'inventory-123', 500, 'ml');
+      const result = await service.updateInventoryItem("user-123", 'inventory-123', 500, 'ml');
 
-      expect(result.quantity).toBe(500);
+      expect(result.quantity instanceof Decimal ? result.quantity.toNumber() : result.quantity).toBe(500);
       // The convert method should be called even with same units
       // But it might not be called if units are the same
       // expect(unitConverterService.convert).toHaveBeenCalled();
@@ -317,7 +320,7 @@ describe('UserInventoryService', () => {
         id: 'inventory-123',
         user: mockUser,
         ingredient: { ...mockIngredient, baseUnit: 'ml' },
-        quantity: 300,
+        quantity: new Decimal(300),
         unit: 'ml',
       };
 
@@ -325,10 +328,10 @@ describe('UserInventoryService', () => {
       (unitConverterService.convert as jest.Mock).mockReturnValue(473); // 16 oz to ml
       (userInventoryRepository.save as jest.Mock).mockResolvedValue({
         ...mockInventoryItem,
-        quantity: 473,
+        quantity: new Decimal(473),
       });
 
-      await service.updateInventoryItem(mockUser.id, 'inventory-123', 16, 'oz');
+      await service.updateInventoryItem("user-123", 'inventory-123', 16, 'oz');
 
       expect(unitConverterService.convert).toHaveBeenCalledWith(16, 'oz', 'ml', expect.objectContaining({
         id: 'ingredient-123',
@@ -340,7 +343,7 @@ describe('UserInventoryService', () => {
     it('should throw error for invalid inventory item', async () => {
       (userInventoryRepository.findOne as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.updateInventoryItem(mockUser.id, 'invalid-id', 500, 'ml'))
+      await expect(service.updateInventoryItem("user-123", 'invalid-id', 500, 'ml'))
         .rejects.toThrow(NotFoundException);
     });
   });
@@ -354,7 +357,7 @@ describe('UserInventoryService', () => {
       const mockInventory = [
         {
           ingredient: mockIngredient,
-          quantity: 100,
+          quantity: new Decimal(100),
           unit: 'ml',
         },
       ];
@@ -363,7 +366,7 @@ describe('UserInventoryService', () => {
       (ingredientRepository.findOne as jest.Mock).mockResolvedValue(mockIngredient);
       (unitConverterService.hasEnoughStock as jest.Mock).mockReturnValue(true);
 
-      const result = await service.checkMakeability(mockUser.id, { ingredients: recipeIngredients });
+      const result = await service.checkMakeability("user-123", { ingredients: recipeIngredients });
 
       expect(result.isMakeable).toBe(true);
       expect(result.missingIngredients).toHaveLength(0);
@@ -377,7 +380,7 @@ describe('UserInventoryService', () => {
       const mockInventory = [
         {
           ingredient: mockBourbonIngredient, // bourbon (child of whiskey)
-          quantity: 100,
+          quantity: new Decimal(100),
           unit: 'ml',
         },
       ];
@@ -395,7 +398,7 @@ describe('UserInventoryService', () => {
         },
       ]);
 
-      const result = await service.checkMakeability(mockUser.id, { ingredients: recipeIngredients });
+      const result = await service.checkMakeability("user-123", { ingredients: recipeIngredients });
 
       expect(result.isMakeable).toBe(true);
     });
@@ -408,7 +411,7 @@ describe('UserInventoryService', () => {
       const mockInventory = [
         {
           ingredient: mockIngredient,
-          quantity: 100, // only 100ml available, need 150ml
+          quantity: new Decimal(100), // only 100ml available, need 150ml
           unit: 'ml',
         },
       ];
@@ -417,7 +420,7 @@ describe('UserInventoryService', () => {
       (ingredientRepository.findOne as jest.Mock).mockResolvedValue(mockIngredient);
       (unitConverterService.hasEnoughStock as jest.Mock).mockReturnValue(false);
 
-      const result = await service.checkMakeability(mockUser.id, { ingredients: recipeIngredients });
+      const result = await service.checkMakeability("user-123", { ingredients: recipeIngredients });
 
       expect(result.isMakeable).toBe(false);
       expect(result.missingIngredients).toHaveLength(1);
@@ -433,7 +436,7 @@ describe('UserInventoryService', () => {
       const mockInventoryItem = {
         id: 'inventory-123',
         ingredient: mockIngredient,
-        quantity: 100,
+        quantity: new Decimal(100),
         unit: 'ml',
       };
 
@@ -454,7 +457,7 @@ describe('UserInventoryService', () => {
       (userInventoryRepository.findOne as jest.Mock).mockResolvedValue(mockInventoryItem);
       (unitConverterService.convert as jest.Mock).mockReturnValue(50);
 
-      const result = await service.depleteInventory(mockUser.id, { ingredients: recipeIngredients });
+      const result = await service.depleteInventory("user-123", { ingredients: recipeIngredients });
 
       expect(result.success).toBe(true);
       expect(result.depletedItems).toHaveLength(1);
@@ -479,7 +482,7 @@ describe('UserInventoryService', () => {
         substitutions: [],
       });
 
-      await expect(service.depleteInventory(mockUser.id, { ingredients: recipeIngredients }))
+      await expect(service.depleteInventory("user-123", { ingredients: recipeIngredients }))
         .rejects.toThrow(BadRequestException);
     });
 
@@ -496,7 +499,7 @@ describe('UserInventoryService', () => {
       const mockInventoryItem = {
         id: 'inventory-123',
         ingredient: mockCountIngredient,
-        quantity: 5,
+        quantity: new Decimal(5),
         unit: 'units',
       };
 
@@ -517,7 +520,7 @@ describe('UserInventoryService', () => {
       (userInventoryRepository.findOne as jest.Mock).mockResolvedValue(mockInventoryItem);
       (unitConverterService.convert as jest.Mock).mockReturnValue(2);
 
-      await service.depleteInventory(mockUser.id, { ingredients: recipeIngredients });
+      await service.depleteInventory("user-123", { ingredients: recipeIngredients });
 
       // Verify transaction was committed
       expect(service['dataSource'].createQueryRunner().commitTransaction).toHaveBeenCalled();
@@ -528,7 +531,7 @@ describe('UserInventoryService', () => {
     it('should return empty array when inventory is empty', async () => {
       jest.spyOn(service, 'getInventory').mockResolvedValue([]);
 
-      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, page: 1 });
+      const result = await service.getMakeableCocktails("user-123", { limit: 10, page: 1 });
 
       expect(result.data).toEqual([]);
       expect(result.meta.totalItems).toBe(0);
@@ -539,7 +542,7 @@ describe('UserInventoryService', () => {
         {
           id: 'inventory-123',
           ingredient: mockIngredient,
-          quantity: 100,
+          quantity: new Decimal(100),
           unit: 'ml',
         },
       ];
@@ -564,7 +567,7 @@ describe('UserInventoryService', () => {
         isSubstitution: false,
       });
 
-      const result = await service.getMakeableCocktails(mockUser.id, { limit: 10, page: 1 });
+      const result = await service.getMakeableCocktails("user-123", { limit: 10, page: 1 });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].name).toBe('Vodka Martini');
@@ -577,13 +580,13 @@ describe('UserInventoryService', () => {
         {
           id: 'inventory-123',
           ingredient: { ...mockIngredient, name: 'vodka' },
-          quantity: 750,
+          quantity: new Decimal(750),
           unit: 'ml',
         },
         {
           id: 'inventory-456',
           ingredient: { ...mockIngredient, name: 'lime juice', baseUnit: 'ml' },
-          quantity: 200,
+          quantity: new Decimal(200),
           unit: 'ml',
         },
       ];
@@ -594,7 +597,7 @@ describe('UserInventoryService', () => {
         return value; // Simplified for test
       });
 
-      const result = await service.getInventorySummary(mockUser.id);
+      const result = await service.getInventorySummary("user-123");
 
       expect(result.totalItems).toBe(2);
       expect(result.categories).toContain('Spirits');
@@ -606,7 +609,7 @@ describe('UserInventoryService', () => {
         {
           id: 'inventory-123',
           ingredient: { ...mockIngredient, name: 'vodka', baseUnit: 'ml' },
-          quantity: 50, // Low stock (< 100ml)
+          quantity: new Decimal(50), // Low stock (< 100ml)
           unit: 'ml',
         },
       ];
@@ -614,7 +617,7 @@ describe('UserInventoryService', () => {
       jest.spyOn(service, 'getInventory').mockResolvedValue(mockInventory as any);
       (unitConverterService.convert as jest.Mock).mockReturnValue(50);
 
-      const result = await service.getInventorySummary(mockUser.id);
+      const result = await service.getInventorySummary("user-123");
 
       expect(result.lowStockItems).toHaveLength(1);
       expect(result.lowStockItems[0].ingredientName).toBe('vodka');

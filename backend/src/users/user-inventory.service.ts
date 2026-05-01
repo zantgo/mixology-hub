@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, DataSource, QueryRunner } from 'typeorm';
+import { Repository, DataSource, QueryRunner } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { UserInventory } from './entities/user-inventory.entity';
 import { AddInventoryDto } from './dto/add-inventory.dto';
 import { UsersService } from './users.service';
@@ -10,7 +11,6 @@ import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CheckMakeabilityDto } from './dto/check-makeability.dto';
 import { DepleteInventoryDto } from './dto/deplete-inventory.dto';
-// BulkSyncDto removed as part of Online-Only Mandate
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 
 export interface MakeabilityResult {
@@ -34,6 +34,8 @@ export interface MakeabilityResult {
 
 @Injectable()
 export class UserInventoryService {
+  private readonly MAX_ITERATIONS = 200;
+
   constructor(
     @InjectRepository(UserInventory)
     private readonly inventoryRepository: Repository<UserInventory>,
@@ -51,8 +53,7 @@ export class UserInventoryService {
     const ingredient = await this.ingredientRepository.findOne({ where: { id: dto.ingredientId } });
     if (!ingredient) throw new NotFoundException('Ingredient not found');
 
-    // Convert to base unit for storage
-    let quantityToStore = dto.quantity;
+    let quantityToStore: Decimal | number = dto.quantity;
     if (dto.unit !== ingredient.baseUnit) {
       try {
         quantityToStore = this.unitConverter.convert(dto.quantity, dto.unit, ingredient.baseUnit, ingredient);
@@ -67,11 +68,15 @@ export class UserInventoryService {
     });
 
     if (inventoryItem) {
-      // Update existing item
-      inventoryItem.quantity = Number(inventoryItem.quantity) + quantityToStore;
+      const currentQty = inventoryItem.quantity instanceof Decimal
+        ? inventoryItem.quantity
+        : new Decimal(inventoryItem.quantity || 0);
+      const addQty = quantityToStore instanceof Decimal
+        ? quantityToStore
+        : new Decimal(quantityToStore);
+      inventoryItem.quantity = currentQty.plus(addQty);
       inventoryItem.unit = ingredient.baseUnit;
     } else {
-      // Create new item
       inventoryItem = this.inventoryRepository.create({
         user: { id: userId },
         ingredient,
@@ -96,7 +101,7 @@ export class UserInventoryService {
       where: { id: inventoryItemId, user: { id: userId } },
     });
     if (!item) throw new NotFoundException('Inventory item not found');
-    
+
     return await this.inventoryRepository.remove(item);
   }
 
@@ -107,8 +112,7 @@ export class UserInventoryService {
     });
     if (!item) throw new NotFoundException('Inventory item not found');
 
-    // Convert to ingredient's base unit
-    let quantityToStore = quantity;
+    let quantityToStore: Decimal | number = quantity;
     if (unit !== item.ingredient.baseUnit) {
       try {
         quantityToStore = this.unitConverter.convert(quantity, unit, item.ingredient.baseUnit, item.ingredient);
@@ -117,7 +121,7 @@ export class UserInventoryService {
       }
     }
 
-    item.quantity = quantityToStore;
+    item.quantity = quantityToStore instanceof Decimal ? quantityToStore : new Decimal(quantityToStore);
     item.unit = item.ingredient.baseUnit;
 
     return await this.inventoryRepository.save(item);
@@ -137,7 +141,6 @@ export class UserInventoryService {
         throw new NotFoundException(`Ingredient ${required.ingredientId} not found`);
       }
 
-      // Find matching inventory item considering hierarchy and synonyms
       const matchingInventory = await this.findMatchingInventoryItem(
         inventory,
         requiredIngredient,
@@ -179,7 +182,7 @@ export class UserInventoryService {
     requiredUnit: string
   ): Promise<{ item: UserInventory; isSubstitution: boolean } | null> {
     // 1. Direct match
-    const directMatch = inventory.find(item => 
+    const directMatch = inventory.find(item =>
       item.ingredient.id === requiredIngredient.id
     );
     if (directMatch) {
@@ -203,10 +206,10 @@ export class UserInventoryService {
 
     // 3. Check inventory for substitution matches
     for (const substitution of substitutions) {
-      const substitutionMatch = inventory.find(item => 
+      const substitutionMatch = inventory.find(item =>
         item.ingredient.id === substitution.substitute.id
       );
-      
+
       if (substitutionMatch) {
         const hasEnough = this.unitConverter.hasEnoughStock(
           substitutionMatch.quantity,
@@ -216,9 +219,9 @@ export class UserInventoryService {
           requiredIngredient
         );
         if (hasEnough) {
-          return { 
-            item: substitutionMatch, 
-            isSubstitution: true 
+          return {
+            item: substitutionMatch,
+            isSubstitution: true
           };
         }
       }
@@ -227,28 +230,15 @@ export class UserInventoryService {
     return null;
   }
 
-
-
   async depleteInventory(userId: string, dto: DepleteInventoryDto): Promise<{ success: boolean; depletedItems: Array<{ ingredientId: string; amountDepleted: number }> }> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const makeabilityResult = await this.checkMakeability(userId, {
-        ingredients: dto.ingredients,
-      });
-
-      if (!makeabilityResult.isMakeable) {
-        throw new BadRequestException('Cannot deplete inventory: missing ingredients', {
-          cause: makeabilityResult.missingIngredients,
-        });
-      }
-
       const depletedItems: Array<{ ingredientId: string; amountDepleted: number }> = [];
 
       for (const required of dto.ingredients) {
-        const inventory = await this.getInventory(userId);
         const requiredIngredient = await this.ingredientRepository.findOne({
           where: { id: required.ingredientId },
         });
@@ -257,45 +247,49 @@ export class UserInventoryService {
           throw new NotFoundException(`Ingredient ${required.ingredientId} not found`);
         }
 
-        const matchingInventory = await this.findMatchingInventoryItem(
-          inventory,
-          requiredIngredient,
-          required.amount,
-          required.unit
-        );
-
-        if (!matchingInventory) {
-          throw new InternalServerErrorException('Inventory item not found despite makeability check');
-        }
-
-        // Convert required amount to inventory item's unit
         const amountToDeplete = this.unitConverter.convert(
           required.amount,
           required.unit,
-          matchingInventory.item.unit,
+          requiredIngredient.baseUnit,
           requiredIngredient
         );
 
-        // Update inventory
-        matchingInventory.item.quantity = Number(matchingInventory.item.quantity) - amountToDeplete;
+        const result = await queryRunner.manager
+          .createQueryBuilder()
+          .update(UserInventory)
+          .set({
+            quantity: () => `quantity - :amount`,
+          })
+          .where('user_id = :userId', { userId })
+          .andWhere('ingredient_id = :ingredientId', { ingredientId: required.ingredientId })
+          .andWhere('quantity >= :amount', { amount: amountToDeplete.toString() })
+          .returning('*')
+          .execute();
 
-        // Handle count-based items (cannot have fractional quantities)
-        if (matchingInventory.item.ingredient.baseUnit === 'units') {
-          matchingInventory.item.quantity = Math.floor(matchingInventory.item.quantity);
+        if (!result.affected || result.affected === 0) {
+          throw new BadRequestException(
+            `Not enough stock for ingredient: ${requiredIngredient.name || required.ingredientId}`
+          );
         }
 
-        // Remove item if quantity is zero or negative
-        if (matchingInventory.item.quantity <= 0) {
-          await queryRunner.manager.remove(UserInventory, matchingInventory.item);
-        } else {
-          await queryRunner.manager.save(UserInventory, matchingInventory.item);
-        }
+        const depletedAmount = amountToDeplete instanceof Decimal
+          ? amountToDeplete.toNumber()
+          : amountToDeplete;
 
         depletedItems.push({
-          ingredientId: matchingInventory.item.ingredient.id,
-          amountDepleted: amountToDeplete,
+          ingredientId: required.ingredientId,
+          amountDepleted: depletedAmount,
         });
       }
+
+      // Clean up rows that reached zero
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(UserInventory)
+        .where('user_id = :userId', { userId })
+        .andWhere('quantity <= 0')
+        .execute();
 
       await queryRunner.commitTransaction();
       return { success: true, depletedItems };
@@ -309,11 +303,11 @@ export class UserInventoryService {
 
   async getMakeableCocktails(userId: string, paginationQuery: PaginationQueryDto) {
     const inventory = await this.getInventory(userId);
-    
+
     if (inventory.length === 0) {
       const { limit = 10, page = 1 } = paginationQuery;
-      return { 
-        data: [], 
+      return {
+        data: [],
         meta: {
           currentPage: page,
           nextPage: null,
@@ -324,42 +318,61 @@ export class UserInventoryService {
       };
     }
 
-    // Get all cocktails and filter by makeability
-    // NOTE: This has an N+1 problem. For production, consider:
-    // 1. Creating a PostgreSQL function for unit conversions
-    // 2. Using a materialized view
-    // 3. Implementing pagination at database level with window functions
     const allCocktails = await this.cocktailRepository.find({
       relations: ['ingredients', 'ingredients.ingredient'],
       where: { is_public: true },
     });
 
-    const makeableCocktails = allCocktails.filter(cocktail => {
-      for (const cocktailIngredient of cocktail.ingredients) {
-        const requiredIngredient = cocktailIngredient.ingredient;
-        const requiredAmount = cocktailIngredient.amount;
-        const requiredUnit = cocktailIngredient.unit;
+    const { limit = 10, page = 1 } = paginationQuery;
+    const offset = (page - 1) * limit;
+    const targetCount = offset + limit;
 
-        const matchingInventory = this.findMatchingInventoryItem(
+    const makeableCocktails: Cocktail[] = [];
+    let iterations = 0;
+
+    // Iterate through cocktails with a hard cap per ADR 0008
+    for (const cocktail of allCocktails) {
+      if (iterations >= this.MAX_ITERATIONS) {
+        break;
+      }
+      iterations++;
+
+      let isMakeable = true;
+      for (const cocktailIngredient of cocktail.ingredients) {
+        const matchingInventory = await this.findMatchingInventoryItem(
           inventory,
-          requiredIngredient,
-          requiredAmount,
-          requiredUnit
+          cocktailIngredient.ingredient,
+          cocktailIngredient.amount instanceof Decimal
+            ? cocktailIngredient.amount.toNumber()
+            : cocktailIngredient.amount,
+          cocktailIngredient.unit
         );
 
         if (!matchingInventory) {
-          return false;
+          isMakeable = false;
+          break;
         }
       }
-      return true;
-    });
 
-    // Apply pagination
-    const { limit = 10, page = 1 } = paginationQuery;
-    const offset = (page - 1) * limit;
+      if (isMakeable) {
+        makeableCocktails.push(cocktail);
+        if (makeableCocktails.length >= targetCount) {
+          break;
+        }
+      }
+    }
+
+    // Check for pagination overshoot per ADR 0008
+    if (iterations >= this.MAX_ITERATIONS && makeableCocktails.length > 0 && makeableCocktails.length <= offset) {
+      throw new BadRequestException(
+        'Pagination overshoot: Requested page exceeds available results due to computation limits.',
+        'PAGINATION_OVERSHOOT'
+      );
+    }
+
     const paginatedData = makeableCocktails.slice(offset, offset + limit);
-    
-    const totalPages = Math.ceil(makeableCocktails.length / limit);
+    const totalItems = makeableCocktails.length;
+    const totalPages = Math.ceil(totalItems / limit);
     const hasNextPage = page < totalPages;
 
     return {
@@ -368,34 +381,40 @@ export class UserInventoryService {
         currentPage: page,
         nextPage: hasNextPage ? page + 1 : null,
         itemsPerPage: limit,
-        totalItems: makeableCocktails.length,
-        totalPages
+        totalItems,
+        totalPages,
+        iterations,
+        maxIterations: this.MAX_ITERATIONS,
+        warning: iterations >= this.MAX_ITERATIONS
+          ? 'Results limited by computation constraints. Try filtering to reduce candidates.'
+          : null,
       }
     };
   }
 
   async getInventorySummary(userId: string) {
     const inventory = await this.getInventory(userId);
-    
+
     const totalItems = inventory.length;
     const totalVolume = inventory.reduce((sum, item) => {
-      if (item.ingredient.baseUnit === 'units') {
-        return sum + item.quantity; // Count-based items
+      if (item.ingredient.baseUnit === 'count') {
+        const qty = item.quantity instanceof Decimal
+          ? item.quantity.toNumber()
+          : Number(item.quantity);
+        return new Decimal(sum).plus(qty);
       }
-      // Convert all to ml for volume summary
       try {
         const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
-        return sum + volumeInMl;
+        return sum.plus(volumeInMl);
       } catch {
-        return sum; // Skip unconvertible items
+        return sum;
       }
-    }, 0);
+    }, new Decimal(0));
 
     const categories = new Set<string>();
     inventory.forEach(item => {
-      // Simple category detection based on ingredient name
       const name = item.ingredient.name.toLowerCase();
-      if (name.includes('vodka') || name.includes('gin') || name.includes('rum') || 
+      if (name.includes('vodka') || name.includes('gin') || name.includes('rum') ||
           name.includes('tequila') || name.includes('whiskey') || name.includes('bourbon')) {
         categories.add('Spirits');
       } else if (name.includes('juice') || name.includes('soda') || name.includes('tonic')) {
@@ -411,27 +430,27 @@ export class UserInventoryService {
 
     return {
       totalItems,
-      totalVolumeMl: Math.round(totalVolume),
+      totalVolumeMl: Math.round(totalVolume.toNumber()),
       categories: Array.from(categories),
       lowStockItems: inventory.filter(item => {
-        // Consider items with less than 100ml or 5 units as low stock
-        if (item.ingredient.baseUnit === 'units') {
-          return item.quantity < 5;
+        if (item.ingredient.baseUnit === 'count') {
+          const qty = item.quantity instanceof Decimal
+            ? item.quantity
+            : new Decimal(item.quantity || 0);
+          return qty.lt(5);
         }
         try {
           const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
-          return volumeInMl < 100;
+          return volumeInMl.lt(100);
         } catch {
           return false;
         }
       }).map(item => ({
         id: item.id,
         ingredientName: item.ingredient.name,
-        quantity: item.quantity,
+        quantity: item.quantity instanceof Decimal ? item.quantity.toNumber() : Number(item.quantity),
         unit: item.unit,
       })),
     };
   }
-
-  // bulkSync method removed as part of Online-Only Mandate
 }

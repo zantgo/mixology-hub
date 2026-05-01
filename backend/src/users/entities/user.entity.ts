@@ -59,6 +59,9 @@ export class User {
   @Column({ name: 'last_name', nullable: true })
   last_name: string | null;
 
+  @Column({ name: 'role', default: 'user' })
+  role: string;
+
   @Column({ name: 'profile_picture_url', nullable: true, type: 'text' })
   profile_picture_url: string | null;
 

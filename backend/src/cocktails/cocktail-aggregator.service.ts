@@ -1,12 +1,11 @@
 import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { Decimal } from 'decimal.js';
 import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { UserInventoryService } from '../users/user-inventory.service';
-import { ImageService } from '../images/image.service';
-import axios from 'axios';
 
 export interface SearchFilters {
   ingredient?: string;
@@ -34,7 +33,6 @@ export class CocktailAggregatorService {
     private readonly localService: CocktailsService,
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly inventoryService: UserInventoryService,
-    private readonly imageService: ImageService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
@@ -255,7 +253,7 @@ export class CocktailAggregatorService {
     }
 
     const ingredients: any[] = [];
-    let totalVolumeMl = 0;
+    let totalVolumeMl = new Decimal(0);
     
     // TheCocktailDB uses strIngredient1 up to 15
     for (let i = 1; i <= 15; i++) {
@@ -278,36 +276,22 @@ export class CocktailAggregatorService {
 
         // Estimate total volume (for complexity scoring)
         if (parsedMeasure.unit === 'ml' || parsedMeasure.unit === 'oz') {
-          totalVolumeMl += parsedMeasure.unit === 'oz' ? parsedMeasure.amount * 29.57 : parsedMeasure.amount;
+          const ozToMl = new Decimal(29.57);
+          const amount = new Decimal(parsedMeasure.amount);
+          totalVolumeMl = totalVolumeMl.plus(
+            parsedMeasure.unit === 'oz' ? amount.times(ozToMl) : amount
+          );
         }
       }
     }
 
     // Calculate complexity score
-    const complexityScore = this.calculateComplexityScore(ingredients.length, totalVolumeMl);
+    const complexityScore = this.calculateComplexityScore(ingredients.length, totalVolumeMl.toNumber());
 
-    // Download and process external image
-    let imageFull: string | null = null;
-    let imageThumb: string | null = null;
-    const externalImageUrl = this.validateImageUrl(drink.strDrinkThumb);
-    
-    if (externalImageUrl) {
-      try {
-        // Download the image
-        const response = await axios.get(externalImageUrl, { 
-          responseType: 'arraybuffer',
-          timeout: 5000 // 5 second timeout
-        });
-        
-        // Process with ImageService
-        const imagePaths = await this.imageService.processAndSaveBuffer(response.data);
-        imageFull = imagePaths.full;
-        imageThumb = imagePaths.thumb;
-      } catch (error) {
-        this.logger.warn(`Failed to download external image for ${drink.strDrink}:`, error);
-        // Continue without image - will use default fallback
-      }
-    }
+    // ADR 0016: Complete Image Blackout During External Search
+    // Images are null for external results; only downloaded on "Save as Custom Cocktail"
+    const imageFull: string | null = null;
+    const imageThumb: string | null = null;
 
     return {
       id: `ext-${drink.idDrink}`,
@@ -317,9 +301,8 @@ export class CocktailAggregatorService {
       instructions: drink.strInstructions || 'No instructions provided',
       is_public: true,
       source: 'api',
-      image_url: externalImageUrl, // Keep for backward compatibility
-      image_full: imageFull, // New local image path
-      image_thumb: imageThumb, // New local thumbnail path
+      image_full: imageFull,
+      image_thumb: imageThumb,
       category: drink.strCategory || null,
       alcoholic: drink.strAlcoholic === 'Alcoholic',
       glass: drink.strGlass || null,
@@ -341,8 +324,27 @@ export class CocktailAggregatorService {
     }
 
     const measureStr = measure.trim().toLowerCase();
-    
-    // Common patterns
+
+    // Handle mixed fractions: "1 1/2 oz"
+    const mixedFractionMatch = measureStr.match(/^(\d+)\s+(\d+)\/(\d+)\s*(.+)$/);
+    if (mixedFractionMatch) {
+      const whole = new Decimal(mixedFractionMatch[1]);
+      const num = new Decimal(mixedFractionMatch[2]);
+      const den = new Decimal(mixedFractionMatch[3]);
+      const unit = mixedFractionMatch[4].trim();
+      return { amount: whole.plus(num.div(den)).toNumber(), unit };
+    }
+
+    // Handle simple fractions: "3/4 oz"
+    const fractionMatch = measureStr.match(/^(\d+)\/(\d+)\s*(.+)$/);
+    if (fractionMatch) {
+      const num = new Decimal(fractionMatch[1]);
+      const den = new Decimal(fractionMatch[2]);
+      const unit = fractionMatch[3].trim();
+      return { amount: num.div(den).toNumber(), unit };
+    }
+
+    // Common patterns for decimal amounts
     const patterns = [
       { regex: /(\d+(?:\.\d+)?)\s*ml/, unit: 'ml' },
       { regex: /(\d+(?:\.\d+)?)\s*oz/, unit: 'oz' },
@@ -361,14 +363,14 @@ export class CocktailAggregatorService {
     for (const pattern of patterns) {
       const match = measureStr.match(pattern.regex);
       if (match) {
-        return { amount: parseFloat(match[1]), unit: pattern.unit };
+        return { amount: new Decimal(match[1]).toNumber(), unit: pattern.unit };
       }
     }
 
     // Default to parts if it's just a number
     const numberMatch = measureStr.match(/(\d+(?:\.\d+)?)/);
     if (numberMatch) {
-      return { amount: parseFloat(numberMatch[1]), unit: 'parts' };
+      return { amount: new Decimal(numberMatch[1]).toNumber(), unit: 'parts' };
     }
 
     // Default values for descriptive measures
@@ -379,7 +381,7 @@ export class CocktailAggregatorService {
       return { amount: 1, unit: 'splashes' };
     }
     if (measureStr.includes('to taste') || measureStr.includes('garnish')) {
-      return { amount: 1, unit: 'units' };
+      return { amount: 1, unit: 'count' };
     }
 
     return { amount: 1, unit: 'parts' };
@@ -401,37 +403,6 @@ export class CocktailAggregatorService {
     
     // Normalize to 0-5 scale
     return Math.min(5, score);
-  }
-
-  private validateImageUrl(url: string): string | null {
-    if (!url) return null;
-    
-    // Basic URL validation
-    try {
-      const parsedUrl = new URL(url);
-      
-      // Only allow HTTPS
-      if (parsedUrl.protocol !== 'https:') {
-        this.logger.warn(`Invalid image URL protocol: ${url}`);
-        return null;
-      }
-      
-      // Check for common image extensions
-      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-      const hasImageExtension = imageExtensions.some(ext => 
-        parsedUrl.pathname.toLowerCase().endsWith(ext)
-      );
-      
-      if (!hasImageExtension) {
-        this.logger.warn(`Image URL missing valid extension: ${url}`);
-        return null;
-      }
-      
-      return url;
-    } catch (error) {
-      this.logger.warn(`Invalid image URL: ${url}`, error);
-      return null;
-    }
   }
 
   private generateSearchCacheKey(
@@ -489,8 +460,8 @@ export class CocktailAggregatorService {
 
   private async fetchLocalCocktails(name: string): Promise<any[]> {
     try {
-      // Use a high limit internally to allow filtering
-      const response = await this.localService.findAll({ limit: 10000, page: 1 });
+      const MAX_LOCAL_FETCH = 100;
+      const response = await this.localService.findAll({ limit: MAX_LOCAL_FETCH, page: 1 });
       const localCocktails = response.data;
       
       if (!name) {

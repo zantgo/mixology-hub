@@ -23,11 +23,14 @@ export class LlmAdapterService implements IAiProvider {
        throw new BadGatewayException('AI Service is not configured.');
     }
 
+    // Sanitize each ingredient against prompt injection
+    const sanitizedIngredients = ingredients.map(ing => this.sanitizeUserInput(ing));
+
     const theme = options?.theme ? ` with a ${options.theme} theme` : '';
     const difficulty = options?.difficulty ? ` suitable for ${options.difficulty} skill level` : '';
     const language = options?.language || 'English';
-    
-    const prompt = `Act as a professional bartender. Create a cocktail${theme}${difficulty} using ONLY these ingredients: ${ingredients.join(', ')}. 
+
+    const prompt = `Act as a professional bartender. Create a cocktail${theme}${difficulty} using ONLY these ingredients: ${sanitizedIngredients.join(', ')}. 
     Return ONLY a raw JSON object with this structure: {
       "name": "string",
       "description": "string",
@@ -55,7 +58,14 @@ export class LlmAdapterService implements IAiProvider {
       );
 
       const rawContent = response.data.choices[0].message.content;
-      const recipe = JSON.parse(rawContent.replace(/```json/g, '').replace(/```/g, '').trim());
+      // Robust JSON extraction: find from first '{' to last '}'
+      const startIdx = rawContent.indexOf('{');
+      const endIdx = rawContent.lastIndexOf('}');
+      if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+        throw new BadGatewayException('LLM response does not contain valid JSON');
+      }
+      const jsonString = rawContent.substring(startIdx, endIdx + 1);
+      const recipe = JSON.parse(jsonString);
       
       // Validate the recipe structure
       const validation = await this.validateContent(JSON.stringify(recipe));
@@ -141,13 +151,13 @@ export class LlmAdapterService implements IAiProvider {
   getModelInfo(): { name: string; version: string; capabilities: string[] } {
     const model = this.configService.get<string>('AI_MODEL') || 'deepseek-chat';
     const apiUrl = this.configService.get<string>('AI_API_URL') || '';
-    
+
     // Determine provider based on API URL
     let provider = 'Generic LLM';
     if (apiUrl.includes('openai')) provider = 'OpenAI';
     else if (apiUrl.includes('anthropic')) provider = 'Anthropic';
     else if (apiUrl.includes('deepseek')) provider = 'DeepSeek';
-    
+
     return {
       name: model,
       version: '1.0',
@@ -159,5 +169,33 @@ export class LlmAdapterService implements IAiProvider {
         'theme-customization'
       ]
     };
+  }
+
+  private sanitizeUserInput(input: string): string {
+    const MAX_LENGTH = 500;
+    const truncated = input.slice(0, MAX_LENGTH);
+
+    // Character whitelisting: allow alphanumeric, spaces, and common recipe punctuation
+    const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '');
+
+    // Block known prompt injection patterns
+    const blockedPatterns = [
+      /ignore.*previous.*instructions/i,
+      /system.*prompt/i,
+      /output.*template/i,
+      /disregard.*previous/i,
+      /respond\s+in\s+plain\s+text/i,
+      /forget\s+your\s+instructions/i,
+      /you\s+are\s+now/i,
+      /new\s+system\s+prompt/i,
+    ];
+
+    for (const pattern of blockedPatterns) {
+      if (pattern.test(sanitized)) {
+        throw new BadGatewayException('Input contains blocked patterns');
+      }
+    }
+
+    return sanitized.trim();
   }
 }

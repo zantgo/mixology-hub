@@ -1,5 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, JoinColumn, Index, BeforeInsert, BeforeUpdate } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { ApiProperty } from '@nestjs/swagger';
+import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
 @Entity('ingredients')
 export class Ingredient {
@@ -12,10 +14,10 @@ export class Ingredient {
   name: string;
 
   /**
-   * The base unit of measurement for this ingredient in the system (e.g., 'ml', 'g', 'units').
+   * The base unit of measurement for this ingredient in the system (e.g., 'ml', 'g', 'count').
    * Used for mathematical operations during inventory depletion.
    */
-  @ApiProperty({ example: 'ml', description: 'The base unit for this ingredient (ml, g, units)' })
+  @ApiProperty({ example: 'ml', description: 'The base unit for this ingredient (ml, g, count)' })
   @Column({ default: 'ml' })
   baseUnit: string;
 
@@ -83,8 +85,8 @@ export class Ingredient {
    * Default is 1.0 (water density)
    */
   @ApiProperty({ example: 1.0, description: 'Density in g/ml for mass-volume conversions' })
-  @Column({ type: 'decimal', precision: 5, scale: 4, default: 1.0 })
-  density: number;
+  @Column({ type: 'decimal', precision: 5, scale: 4, default: 1.0, transformer: new ColumnNumericTransformer() })
+  density: Decimal;
 
   /**
    * Whether this ingredient allows cross-conversion between mass and volume

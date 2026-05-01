@@ -13,9 +13,8 @@ export class PaginationQueryDto {
 
   @ApiPropertyOptional({ description: 'Page number (default: 1, max: 100 to prevent database performance degradation)', minimum: 1, maximum: 100, default: 1 })
   @IsOptional()
-  @IsNumber()
+  @Type(() => Number)
   @Min(1)
   @Max(100, { message: 'Page number cannot exceed 100 to prevent database performance degradation.' })
-  @Type(() => Number)
   page?: number = 1;
 }

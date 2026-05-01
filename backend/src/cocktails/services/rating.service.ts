@@ -62,13 +62,13 @@ export class RatingService {
 
       // Auto-fork: Create local copy of external cocktail
       const forkedCocktail = this.cocktailRepository.create({
-        name: externalCocktail.name,
-        description: externalCocktail.description,
-        instructions: externalCocktail.instructions,
+        name: externalCocktail.strDrink || externalCocktail.name,
+        description: externalCocktail.strInstructions || externalCocktail.instructions,
+        instructions: externalCocktail.strInstructions || externalCocktail.instructions || '',
         source: 'api',
         external_id: externalId,
-        image_full: externalCocktail.imageFull,
-        image_thumb: externalCocktail.imageThumb,
+        image_full: null,
+        image_thumb: null,
         user, // The user who forked it by rating
         is_public: false, // Private to the user who forked it
         is_deleted: false,

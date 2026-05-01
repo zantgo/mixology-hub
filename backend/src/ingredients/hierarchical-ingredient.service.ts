@@ -265,14 +265,28 @@ export class HierarchicalIngredientService {
   }
 
   private async findHierarchicalMatch(normalizedName: string): Promise<IngredientMatch | null> {
-    // Get all ingredients and build a search index
     const allIngredients = await this.ingredientRepository.find({
       relations: ['parent'],
     });
 
+    // Build an in-memory parent map to avoid per-ingredient DB queries
+    const parentMap = new Map<string, string | null>();
+    for (const ing of allIngredients) {
+      parentMap.set(ing.id, ing.parentId || null);
+    }
+
+    // Build a children index to find descendants efficiently
+    const childrenMap = new Map<string, Ingredient[]>();
+    for (const ing of allIngredients) {
+      const pId = ing.parentId || '__root__';
+      if (!childrenMap.has(pId)) {
+        childrenMap.set(pId, []);
+      }
+      childrenMap.get(pId)!.push(ing);
+    }
+
     // Try to find by name in hierarchy
     for (const ingredient of allIngredients) {
-      // Check if this ingredient matches
       if (this.normalizeName(ingredient.name) === normalizedName) {
         return {
           ingredient,
@@ -281,36 +295,54 @@ export class HierarchicalIngredientService {
         };
       }
 
-      // Check ancestors
-      const ancestors = await this.getAncestors(ingredient.id);
-      for (const ancestor of ancestors) {
-        if (this.normalizeName(ancestor.name) === normalizedName) {
-          const path = [ingredient.name, ...ancestors.slice(0, ancestors.indexOf(ancestor) + 1).map(a => a.name)];
+      // Check ancestors using the in-memory parent map
+      const ancestors: Ingredient[] = [];
+      let currentId: string | null = ingredient.parentId || null;
+      while (currentId) {
+        const parent = allIngredients.find((i) => i.id === currentId);
+        if (!parent) break;
+        ancestors.push(parent);
+        if (this.normalizeName(parent.name) === normalizedName) {
+          const path = [ingredient.name, ...ancestors.map((a) => a.name)];
           return {
-            ingredient: ancestor,
+            ingredient: parent,
             matchType: 'hierarchical',
             confidence: this.calculateHierarchicalConfidence(path.length),
             path,
           };
         }
+        currentId = parentMap.get(currentId) || null;
       }
 
-      // Check descendants
-      const descendants = await this.getDescendants(ingredient.id);
-      for (const descendant of descendants) {
-        if (this.normalizeName(descendant.name) === normalizedName) {
-          const path = [descendant.name];
-          let current: Ingredient | null = descendant;
-          while (current && current.id !== ingredient.id) {
-            current = await this.getParent(current.id);
-            if (current) path.unshift(current.name);
-          }
+      // Check descendants using the children map
+      const descendantQueue = [...(childrenMap.get(ingredient.id) || [])];
+      const visited = new Set<string>();
+      const pathMap = new Map<string, string[]>(); // descendantId -> path of names
+      for (const child of descendantQueue) {
+        pathMap.set(child.id, [ingredient.name]);
+      }
+
+      while (descendantQueue.length > 0) {
+        const current = descendantQueue.shift()!;
+        if (visited.has(current.id)) continue;
+        visited.add(current.id);
+
+        if (this.normalizeName(current.name) === normalizedName) {
+          const path = [...(pathMap.get(current.id) || []), current.name];
           return {
-            ingredient: descendant,
+            ingredient: current,
             matchType: 'hierarchical',
             confidence: this.calculateHierarchicalConfidence(path.length),
             path,
           };
+        }
+
+        const children = childrenMap.get(current.id) || [];
+        for (const child of children) {
+          if (!visited.has(child.id)) {
+            descendantQueue.push(child);
+            pathMap.set(child.id, [...(pathMap.get(current.id) || []), current.name]);
+          }
         }
       }
     }

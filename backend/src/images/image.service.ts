@@ -30,13 +30,14 @@ export class ImageService {
     const thumbPath = path.join(this.UPLOAD_DIR, `${filename}-thumb.webp`);
 
     // Process Full Image (1024x1024, 1:1 Aspect Ratio, WebP, ~80% quality to stay under 300KB)
-    await sharp(file.buffer)
+    // limitInputPixels prevents decompression bomb attacks (ADR 0016)
+    await sharp(file.buffer, { limitInputPixels: 268435456 }) // 16384^2 max
       .resize(1024, 1024, { fit: 'cover', position: 'center' })
       .webp({ quality: 80, effort: 4 }) // Effort 4 balances speed/compression
       .toFile(fullPath);
 
     // Process Thumbnail (300x300, 1:1 Aspect Ratio, WebP)
-    await sharp(file.buffer)
+    await sharp(file.buffer, { limitInputPixels: 268435456 })
       .resize(300, 300, { fit: 'cover', position: 'center' })
       .webp({ quality: 75, effort: 4 })
       .toFile(thumbPath);
@@ -53,13 +54,14 @@ export class ImageService {
     const thumbPath = path.join(this.UPLOAD_DIR, `${filename}-thumb.webp`);
 
     // Process Full Image (1024x1024, 1:1 Aspect Ratio, WebP, ~80% quality to stay under 300KB)
-    await sharp(buffer)
+    // limitInputPixels prevents decompression bomb attacks (ADR 0016)
+    await sharp(buffer, { limitInputPixels: 268435456 })
       .resize(1024, 1024, { fit: 'cover', position: 'center' })
       .webp({ quality: 80, effort: 4 })
       .toFile(fullPath);
 
     // Process Thumbnail (300x300, 1:1 Aspect Ratio, WebP)
-    await sharp(buffer)
+    await sharp(buffer, { limitInputPixels: 268435456 })
       .resize(300, 300, { fit: 'cover', position: 'center' })
       .webp({ quality: 75, effort: 4 })
       .toFile(thumbPath);

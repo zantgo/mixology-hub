@@ -4,6 +4,7 @@ import { AiService } from './ai.service';
 import { EnhancedAiService } from './enhanced-ai.service';
 import { AiController } from './ai.controller';
 import { Ai } from './entities/ai.entity';
+import { UserAiQuotas } from './entities/user-ai-quotas.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
@@ -13,7 +14,7 @@ import { IngredientsModule } from '../ingredients/ingredients.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Ai, User, Ingredient, Cocktail, CocktailIngredient]),
+    TypeOrmModule.forFeature([Ai, UserAiQuotas, User, Ingredient, Cocktail, CocktailIngredient]),
     ExternalModule,
     IngredientsModule,
   ],

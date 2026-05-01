@@ -45,7 +45,7 @@ export class Cocktail {
   @Expose({ name: 'isDeleted' })
   is_deleted: boolean; // Soft delete flag for data integrity
 
-  @ManyToOne(() => User, { onDelete: 'CASCADE', nullable: true })
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'created_by' })
   @Expose()
   user: User;

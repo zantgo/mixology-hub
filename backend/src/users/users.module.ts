@@ -12,6 +12,7 @@ import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { UtilsModule } from '../utils/utils.module';
 import { GdprDataRetentionModule } from './gdpr-data-retention.module';
+import { AdminGuard } from '../auth/guards/admin.guard';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { GdprDataRetentionModule } from './gdpr-data-retention.module';
     GdprDataRetentionModule,
   ],
   controllers:[UsersController, UserInventoryController, GdprController],
-  providers:[UsersService, UserInventoryService, SeederService],
+  providers:[UsersService, UserInventoryService, SeederService, AdminGuard],
   exports: [TypeOrmModule, UsersService, UserInventoryService, GdprDataRetentionModule],
 })
 export class UsersModule {}

@@ -1,8 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { Expose } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { Cocktail } from './cocktail.entity';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
+import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
 @Entity('cocktail_ingredients')
 export class CocktailIngredient {
@@ -35,12 +37,12 @@ export class CocktailIngredient {
   measure: string;
 
   @ApiProperty({ example: 2.00, description: 'Numeric amount for inventory calculation' })
-  @Column('decimal', { precision: 10, scale: 4, default: 0 })
+  @Column('decimal', { precision: 10, scale: 4, default: 0, transformer: new ColumnNumericTransformer(), nullable: true })
   @Expose()
-  amount: number;
+  amount: Decimal;
 
   @ApiProperty({ example: 'oz', description: 'The unit used for calculations (ml, oz, grams)' })
-  @Column({ default: 'units' })
+  @Column({ default: 'count' })
   @Expose()
   unit: string;
 }
