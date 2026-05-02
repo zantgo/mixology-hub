@@ -1,16 +1,19 @@
-import { Injectable, NotFoundException, BadRequestException, forwardRef, InternalServerErrorException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Decimal } from 'decimal.js';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
 import { Cocktail } from './entities/cocktail.entity';
 import { CocktailIngredient } from './entities/cocktail-ingredient.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { User } from '../users/entities/user.entity';
-import { UserInventory } from '../users/entities/user-inventory.entity';
-import { UserInventoryService } from '../users/user-inventory.service';
-import { UnitConverterService } from '../utils/unit-converter.service';
+import { PreparationLog } from './entities/preparation-log.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
@@ -24,119 +27,140 @@ export class CocktailsService {
     private readonly ingredientRepository: Repository<Ingredient>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @Inject(forwardRef(() => UserInventoryService))
-    private readonly inventoryService: UserInventoryService,
-    private readonly unitConverter: UnitConverterService,
+    @InjectRepository(PreparationLog)
+    private readonly preparationLogRepository: Repository<PreparationLog>,
+    @InjectQueue('bar-orders')
+    private readonly barOrdersQueue: Queue,
   ) {}
 
-  async create(createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string }, userId: string): Promise<Cocktail> {
-    const user = await this.userRepository.findOne({ 
-      where: { id: userId } 
+  async create(
+    createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string },
+    userId: string,
+  ): Promise<Cocktail> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
     });
 
     if (!user) {
       throw new NotFoundException('User not found');
     }
 
-    const cocktail = await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
-      const newCocktail = this.cocktailRepository.create({
-        name: createCocktailDto.name,
-        description: createCocktailDto.description,
-        instructions: createCocktailDto.instructions,
-        image_full: createCocktailDto.imageFull,
-        image_thumb: createCocktailDto.imageThumb,
-        is_public: createCocktailDto.isPublic ?? true,
-        user: user,
-      });
-
-      const savedCocktail = await transactionalEntityManager.save(newCocktail);
-
-      for (const item of createCocktailDto.ingredients) {
-        const ingredient = await transactionalEntityManager.findOne(Ingredient, {
-          where: { id: item.ingredientId },
+    const cocktail = await this.cocktailRepository.manager.transaction(
+      async (transactionalEntityManager) => {
+        const newCocktail = this.cocktailRepository.create({
+          name: createCocktailDto.name,
+          description: createCocktailDto.description,
+          instructions: createCocktailDto.instructions,
+          image_full: createCocktailDto.imageFull,
+          image_thumb: createCocktailDto.imageThumb,
+          is_public: createCocktailDto.isPublic ?? true,
+          user: user,
         });
 
-        if (!ingredient) {
-          throw new NotFoundException(`Ingredient with ID ${item.ingredientId} not found`);
+        const savedCocktail = await transactionalEntityManager.save(newCocktail);
+
+        for (const item of createCocktailDto.ingredients) {
+          const ingredient = await transactionalEntityManager.findOne(Ingredient, {
+            where: { id: item.ingredientId },
+          });
+
+          if (!ingredient) {
+            throw new NotFoundException(
+              `Ingredient with ID ${item.ingredientId} not found`,
+            );
+          }
+
+          const cocktailIngredient = transactionalEntityManager.create(
+            CocktailIngredient,
+            {
+              cocktail: savedCocktail,
+              ingredient: ingredient,
+              measure: item.measure,
+              amount: item.amount,
+              unit: item.unit,
+            },
+          );
+
+          await transactionalEntityManager.save(cocktailIngredient);
         }
 
-        const cocktailIngredient = transactionalEntityManager.create(CocktailIngredient, {
-          cocktail: savedCocktail,
-          ingredient: ingredient,
-          measure: item.measure,
-          amount: item.amount,
-          unit: item.unit
-        });
+        return savedCocktail;
+      },
+    );
 
-        await transactionalEntityManager.save(cocktailIngredient);
-      }
-
-      return savedCocktail;
-    });
-
-    // Load the complete cocktail with relations
     const completeCocktail = await this.cocktailRepository.findOne({
       where: { id: cocktail.id },
       relations: ['ingredients', 'user'],
     });
 
     if (!completeCocktail) {
-      throw new InternalServerErrorException('Failed to retrieve created cocktail');
+      throw new InternalServerErrorException(
+        'Failed to retrieve created cocktail',
+      );
     }
 
     return completeCocktail;
   }
 
-  async prepare(cocktailId: string, userId: string) {
-    return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
-      const cocktail = await transactionalEntityManager.findOne(Cocktail, {
-        where: { id: cocktailId },
-        relations: ['ingredients'],
-      });
-
-      if (!cocktail) {
-        throw new NotFoundException(`Cocktail #${cocktailId} not found`);
-      }
-
-      for (const req of cocktail.ingredients) {
-        if (!req.ingredient || !req.ingredient.id) {
-          throw new InternalServerErrorException('Cocktail recipe is corrupt: Missing ingredient data.');
-        }
-
-        const amountToSubtract = this.unitConverter.convert(req.amount, req.unit, req.ingredient.baseUnit, req.ingredient);
-
-        const result = await transactionalEntityManager
-          .createQueryBuilder()
-          .update(UserInventory)
-          .set({
-            quantity: () => `quantity - :amount`,
-          })
-          .where('user_id = :userId', { userId })
-          .andWhere('ingredient_id = :ingredientId', { ingredientId: req.ingredient.id })
-          .andWhere('quantity >= :amount', { amount: amountToSubtract.toString() })
-          .returning('*')
-          .execute();
-
-        if (!result.affected || result.affected === 0) {
-          const stock = await transactionalEntityManager.findOne(UserInventory, {
-            where: { user: { id: userId }, ingredient: { id: req.ingredient.id } },
-          });
-          throw new BadRequestException(
-            `Not enough stock for ingredient: ${req.ingredient.name || 'Unknown'}`
-          );
-        }
-      }
-
-      await transactionalEntityManager
-        .createQueryBuilder()
-        .delete()
-        .from(UserInventory)
-        .where('user_id = :userId', { userId })
-        .andWhere('quantity <= 0')
-        .execute();
-
-      return { message: `Cocktail ${cocktail.name} prepared successfully!` };
+  async prepare(
+    cocktailId: string,
+    bartenderId: string,
+    servings: number = 1,
+    force: boolean = false,
+  ) {
+    const cocktail = await this.cocktailRepository.findOne({
+      where: { id: cocktailId },
+      relations: ['ingredients'],
     });
+
+    if (!cocktail) {
+      throw new NotFoundException(`Cocktail #${cocktailId} not found`);
+    }
+
+    const preparationLog = this.preparationLogRepository.create({
+      bartenderId,
+      cocktailId: cocktail.id,
+      cocktailNameSnapshot: cocktail.name,
+      servings,
+      status: 'queued',
+    });
+    const savedLog = await this.preparationLogRepository.save(preparationLog);
+
+    const job = await this.barOrdersQueue.add('prepare-cocktail', {
+      cocktailId,
+      bartenderId,
+      preparationLogId: savedLog.id,
+      servings,
+      force,
+    });
+
+    return {
+      message: 'Cocktail preparation queued',
+      preparationLogId: savedLog.id,
+      jobId: job.id,
+      status: 'queued',
+      statusUrl: `/cocktails/preparations/${savedLog.id}/status`,
+    };
+  }
+
+  async getPreparationStatus(logId: string) {
+    const log = await this.preparationLogRepository.findOne({
+      where: { id: logId },
+    });
+
+    if (!log) {
+      throw new NotFoundException(`Preparation log ${logId} not found`);
+    }
+
+    return {
+      preparationLogId: log.id,
+      cocktailName: log.cocktailNameSnapshot,
+      servings: log.servings,
+      status: log.status,
+      deductedIngredients: log.deductedIngredients,
+      undone: log.undone,
+      createdAt: log.createdAt,
+    };
   }
 
   async findAll(paginationQuery: PaginationQueryDto) {
@@ -148,19 +172,19 @@ export class CocktailsService {
       skip: offset,
       take: limit,
     });
-    
+
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;
-    
-    return { 
-      data, 
+
+    return {
+      data,
       meta: {
         currentPage: page,
         nextPage: hasNextPage ? page + 1 : null,
         itemsPerPage: limit,
         totalItems: total,
-        totalPages
-      }
+        totalPages,
+      },
     };
   }
 
@@ -173,27 +197,37 @@ export class CocktailsService {
     return cocktail;
   }
 
-  async update(id: string, updateCocktailDto: UpdateCocktailDto & { imageFull?: string; imageThumb?: string }, userId?: string) {
+  async update(
+    id: string,
+    updateCocktailDto: UpdateCocktailDto & {
+      imageFull?: string;
+      imageThumb?: string;
+    },
+    userId?: string,
+  ) {
     const cocktail = await this.findOne(id);
-    
-    // Check if user owns the cocktail (if userId is provided)
+
     if (userId && cocktail.user?.id !== userId) {
-      throw new NotFoundException(`Cocktail #${id} not found or you don't have permission to update it`);
+      throw new NotFoundException(
+        `Cocktail #${id} not found or you don't have permission to update it`,
+      );
     }
-    
+
     Object.assign(cocktail, {
       ...updateCocktailDto,
       image_full: updateCocktailDto.imageFull,
       image_thumb: updateCocktailDto.imageThumb,
     });
-    
+
     return await this.cocktailRepository.save(cocktail);
   }
 
   async remove(id: string, userId?: string) {
     const cocktail = await this.findOne(id);
     if (userId && cocktail.user?.id !== userId) {
-      throw new NotFoundException(`Cocktail #${id} not found or you don't have permission to delete it`);
+      throw new NotFoundException(
+        `Cocktail #${id} not found or you don't have permission to delete it`,
+      );
     }
     cocktail.is_deleted = true;
     return await this.cocktailRepository.save(cocktail);

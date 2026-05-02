@@ -5,7 +5,7 @@ import { Decimal } from 'decimal.js';
 import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { UserInventoryService } from '../users/user-inventory.service';
+import { BarInventoryService } from '../inventory/bar-inventory.service';
 
 export interface SearchFilters {
   ingredient?: string;
@@ -32,7 +32,7 @@ export class CocktailAggregatorService {
   constructor(
     private readonly localService: CocktailsService,
     private readonly externalService: EnhancedTheCocktailDbService,
-    private readonly inventoryService: UserInventoryService,
+    private readonly inventoryService: BarInventoryService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
@@ -168,12 +168,13 @@ export class CocktailAggregatorService {
     });
   }
 
-  private async calculateMakeabilityScores(cocktails: any[], userId: string): Promise<any[]> {
+  private async calculateMakeabilityScores(cocktails: any[]): Promise<any[]> {
     try {
-      const inventory = await this.inventoryService.getInventory(userId);
-      
+      const inventory = await this.inventoryService.getInventory();
+      const inventoryData = inventory.data;
+
       return cocktails.map(cocktail => {
-        const makeabilityScore = this.calculateMakeabilityScore(cocktail, inventory);
+        const makeabilityScore = this.calculateMakeabilityScore(cocktail, inventoryData);
         return {
           ...cocktail,
           makeabilityScore,
@@ -451,10 +452,8 @@ export class CocktailAggregatorService {
       unifiedList = this.applyFilters(unifiedList, options.filters);
     }
 
-    // 4. Calculate makeability scores if user ID provided
-    if (userId) {
-      unifiedList = await this.calculateMakeabilityScores(unifiedList, userId);
-    }
+    // 4. Calculate makeability scores
+    unifiedList = await this.calculateMakeabilityScores(unifiedList);
 
     // 5. Sort results
     unifiedList = this.sortCocktails(unifiedList, options.sortBy, options.sortOrder);

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan, MoreThan, In } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from './entities/user.entity';
-import { UserInventory } from './entities/user-inventory.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { UserProfile } from './entities/user-profile.entity';
 import { Ai } from '../ai/entities/ai.entity';
 import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
@@ -35,8 +35,8 @@ export class GdprDataRetentionService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
-    @InjectRepository(UserInventory)
-    private readonly inventoryRepository: Repository<UserInventory>,
+    @InjectRepository(BarInventory)
+    private readonly inventoryRepository: Repository<BarInventory>,
     @InjectRepository(UserProfile)
     private readonly profileRepository: Repository<UserProfile>,
     @InjectRepository(Ai)
@@ -250,8 +250,7 @@ export class GdprDataRetentionService {
       await this.cocktailRepository.remove(cocktail);
     }
 
-    // Delete user inventory
-    await this.inventoryRepository.delete({ user: { id: userId } });
+    // Note: BarInventory is NOT deleted — it belongs to the bar, not the individual user
 
     // Delete user profile
     await this.profileRepository.delete({ user: { id: userId } });
@@ -281,7 +280,6 @@ export class GdprDataRetentionService {
     }
 
     const inventory = await this.inventoryRepository.find({
-      where: { user: { id: userId } },
       relations: ['ingredient'],
     });
 

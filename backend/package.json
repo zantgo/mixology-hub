@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
+    "@nestjs/bullmq": "^11.0.3",
     "@nestjs/cache-manager": "^3.1.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
@@ -38,6 +39,7 @@
     "@types/uuid": "^10.0.0",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.55.0",
     "cache-manager": "^7.2.8",
     "cache-manager-redis-yet": "^5.1.5",
     "class-transformer": "^0.5.1",

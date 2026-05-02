@@ -74,7 +74,7 @@ export class User {
   last_name: string | null;
 
   @Expose()
-  @Column({ name: 'role', default: 'user' })
+  @Column({ name: 'role', default: 'bartender' })
   role: string;
 
   @Expose()

@@ -3,7 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import { User } from './entities/user.entity';
-import { UserInventory } from './entities/user-inventory.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { UserProfile } from './entities/user-profile.entity';
 import { Ai } from '../ai/entities/ai.entity';
 import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
@@ -15,7 +15,7 @@ import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.en
   imports: [
     TypeOrmModule.forFeature([
       User,
-      UserInventory,
+      BarInventory,
       UserProfile,
       Ai,
       UserAiQuotas,

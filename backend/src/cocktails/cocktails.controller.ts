@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseInterceptors, UploadedFile, BadRequestException, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException, UseGuards } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiQuery, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
 import { CocktailsService } from './cocktails.service';
@@ -96,12 +96,29 @@ export class CocktailsController {
 
   @Post(':id/prepare')
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Prepare a cocktail and deplete inventory' })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Enqueue a cocktail preparation order (returns 202 Accepted)' })
+  @ApiQuery({ name: 'servings', required: false, description: 'Number of servings (default: 1)' })
+  @ApiQuery({ name: 'force', required: false, description: 'Force prepare with partial ingredients' })
   prepare(
     @Param('id') id: string,
-    @GetUser() user: User
+    @GetUser() user: User,
+    @Query('servings') servings?: string,
+    @Query('force') force?: string,
   ) {
-    return this.cocktailsService.prepare(id, user.id);
+    return this.cocktailsService.prepare(
+      id,
+      user.id,
+      servings ? parseInt(servings, 10) : 1,
+      force === 'true',
+    );
+  }
+
+  @Get('preparations/:logId/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Poll preparation status' })
+  getPreparationStatus(@Param('logId') logId: string) {
+    return this.cocktailsService.getPreparationStatus(logId);
   }
 
   @Get()
