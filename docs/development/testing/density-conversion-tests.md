@@ -1,5 +1,7 @@
 # Density Conversion Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference `getUserInventory`. When the codebase is migrated, update to `getBarInventory` for the shared bar inventory context.
+
 **Example TDD for Density Math (UC 3.24):**
 ```typescript
 describe('UnitConverterService - Density Math', () => {

@@ -1,115 +1,74 @@
-# Concurrency Features Removal Summary
+# B2B Concurrency Management via BullMQ Serialization
 
-## Overview
-All complex concurrency, distributed locking, and race-condition mitigation features have been removed from the MixologyHub specification to simplify the MVP and accelerate development.
+> **STATUS: The "No Concurrency Mandate" is OBSOLETE.**  
+> This document previously described the removal of all concurrency controls for MVP simplification (the "Fail-Open / No Concurrency" era).  
+> As of the B2B architecture pivot, concurrency is now actively managed via Redis-backed BullMQ with single-threaded (`concurrency: 1`) queue processing.
 
-## Removed Features
+---
 
-### 1. Unified Idempotency System
-- **ADR 0012**: Unified Idempotency System to Prevent Redis-PostgreSQL Clash (DEPRECATED)
-- **ADR 0009**: Idempotency "Fail-Open" Double Deduction Risk (DEPRECATED)
-- **UC 4.21**: Idempotency Keys for State-Mutating Operations (SIMPLIFIED)
-- **UC 4.19**: Idempotency of the Undo Action (SIMPLIFIED)
-- **UC 6.2**: Idempotent Favoriting (SIMPLIFIED)
+## Historical Context (OBSOLETE)
 
-**Simplified Approach**: No idempotency system. Double-clicks may cause duplicate operations. Users can manually fix duplicates via UI.
+The original MixologyHub B2C architecture explicitly accepted race conditions:
+- No `SELECT FOR UPDATE`, no row-level locking
+- Default `READ COMMITTED` isolation only
+- No idempotency keys or distributed locks
+- "Double-clicks may cause duplicate deductions — users must manually fix via UI"
 
-### 2. Complex Transaction Isolation & Row-Level Locking
-- **UC 4.3**: Race Condition Handling with Two-Phase Preparation (SIMPLIFIED)
-- **UC 10.9**: Concurrent Custom Cocktail Modification & Preparation (SIMPLIFIED)
-- **UC 10.5**: Concurrent Custom Ingredient Creation (SIMPLIFIED)
+This was viable in a B2C model where each user had an isolated inventory. Two users clicking "Prepare" simultaneously targeted different `user_inventory` rows, so collisions were rare and low-severity.
 
-**Simplified Approach**: Default `READ COMMITTED` isolation level only. No special transaction isolation or row-level locking.
+## Why the Old Approach Is No Longer Viable
 
-### 3. Optimistic Concurrency Control for Ratings
-- **ADR 0013**: Optimistic Concurrency for Rating Updates (DEPRECATED)
-- **ADR 0015**: Accept Precision Drift in Atomic Ratings (DEPRECATED)
-- **UC 2.30**: Rating a Cocktail with Optimistic Concurrency (SIMPLIFIED)
-- **UC 2.31**: Updating a Rating with Atomic Recalculation (SIMPLIFIED)
+In the new B2B single-bar architecture:
+- **All bartenders share one `bar_inventory` table.** Two bartenders pressing "Prepare" simultaneously target the exact same ingredient rows.
+- **Severe race conditions:** Without serialization, two concurrent `SELECT` + `UPDATE` operations on "Vodka" produce double-deductions (e.g., both bartenders see 50ml, both deduct 30ml, both write 20ml — actual deduction should be 60ml leaving -10ml or 20ml depending on timing).
+- **PostgreSQL deadlocks:** Under `READ COMMITTED`, concurrent updates to the same row can cause deadlock errors that cascade into connection pool exhaustion and HTTP 504 timeouts.
 
-**Simplified Approach**: Basic rating updates without locking, retry logic, or atomic operations.
+## New Architecture: BullMQ Serialized Queue Processing
 
-### 4. Redis Distributed Locks & Atomic Counters
-- **UC 5.23**: Concurrent AI Generation Lock (SIMPLIFIED)
-- **UC 5.25**: Atomic AI Quota Enforcement (SIMPLIFIED)
+All inventory mutations now flow through a single-threaded BullMQ worker:
 
-**Simplified Approach**: Basic rate limiting and quota checking without Redis distributed locks or atomic counters.
+1. **`POST /cocktails/:id/prepare`** → Enqueues a job → Returns `202 Accepted`
+2. **BullMQ Worker (concurrency: 1)** → Pops jobs sequentially → Executes PostgreSQL ACID transaction
+3. **`GET /preparations/:logId/status`** → Frontend polls for completion
 
-### 5. Frontend/SPA Cross-Tab Concurrency
-- **UC 7.19**: Refresh Token Race Condition with Cross-Tab Sync (SIMPLIFIED)
-- **UC 9.15**: Refresh Token Reuse Detection with Grace Period (SIMPLIFIED)
-- **UC 7.25**: Cross-Tab State Synchronization (SIMPLIFIED)
+### Key Architectural Properties
 
-**Simplified Approach**: No `BroadcastChannel` or cross-tab synchronization. Users must refresh tabs manually.
+| Property | Old B2C (OBSOLETE) | New B2B (CURRENT) |
+|---|---|---|
+| Inventory isolation | Per-user (`user_inventory`) | Shared global (`bar_inventory`) |
+| Concurrency model | Fail-open (accept races) | Serialized (BullMQ concurrency: 1) |
+| Deduction execution | Synchronous in HTTP controller | Async in BullMQ Worker |
+| Race condition risk | High (mitigated by user isolation) | Zero (mathematically eliminated) |
+| HTTP response | 200/400 immediate result | 202 Accepted + poll for result |
+| Redis dependency | Cache-only (graceful degradation) | Critical (queue backbone) |
+| UI update pattern | Optimistic instant update | Spinner → Poll → Success/Failure |
+| Double-deduction risk | Accepted as trade-off | Impossible by design |
 
-## Accepted Trade-offs for MVP
+### What Has Been Reintroduced
 
-### 1. Duplicate Operations
-- Double-clicks may cause duplicate inventory deductions
-- Users must use undo feature or manually correct duplicates
-- Network retries may cause duplicate state changes
+- **Redis as critical infrastructure:** Redis is no longer optional. If Redis is down, no cocktail preparation is possible (the `bar-orders` queue is unavailable).
+- **Strict ordering:** Jobs are processed FIFO within the queue, ensuring fair allocation of scarce inventory.
+- **Idempotency by design:** The singleton worker naturally prevents duplicate processing of the same logical operation — no need for complex idempotency keys.
 
-### 2. Concurrent Modifications
-- Two users editing the same data may overwrite each other
-- No special isolation levels to prevent phantom reads
-- Basic database constraints handle most conflicts
+### What Remains Removed
 
-### 3. Rating Inaccuracies
-- Concurrent rating updates may cause minor inaccuracies
-- No retry logic or exponential backoff
-- Simple average calculation without boundary enforcement
+- **Cross-tab sync / BroadcastChannel:** Still not implemented (frontend polls a REST endpoint).
+- **Distributed locks / Redis Redlock:** Not needed — `concurrency: 1` is simpler and more reliable.
+- **Optimistic concurrency for ratings:** Still simplified; ratings are not inventory-mutating and have lower consistency requirements.
 
-### 4. AI Generation Quota Bypass
-- Rapid clicks may bypass basic quota checking
-- No atomic Redis `INCR` counters for race condition prevention
-- Basic rate limiting only
+## Trade-Offs Accepted
 
-### 5. Cross-Tab State Desync
-- Multiple browser tabs won't synchronize automatically
-- Users must refresh tabs to see updates
-- No `BroadcastChannel` or localStorage synchronization
+### 1. Redis as Single Point of Failure for Preparation
+- If Redis goes down, bartenders cannot prepare drinks. Monitoring, persistence (AOF), and failover are mandatory operational requirements.
 
-## Implementation Guidelines
+### 2. Asynchronous User Experience
+- Bartenders see a spinner/pending state after pressing "Prepare" instead of an instant confirmation. This is a UX regression compared to optimistic UI, but necessary for inventory correctness.
 
-### Backend
-- Use basic database transactions (all-or-nothing)
-- Rely on database UNIQUE constraints for duplicate prevention
-- Implement simple validation before state changes
-- No complex retry logic or exponential backoff
-- No Redis caching for idempotency or distributed locks
+### 3. Throughput Ceiling
+- A single worker (`concurrency: 1`) can process approximately one preparation per DB transaction duration (~50-200ms). At 5-20 preparations/second, this is adequate for a single bar. If the bar scales to extreme volume, `concurrency` can be tuned upward with appropriate DB isolation.
 
-### Frontend
-- Basic HTTP interceptor for token refresh
-- No cross-tab synchronization
-- Simple optimistic UI updates without complex rollback
-- Manual refresh required for cross-tab updates
-
-### Database
-- Default `READ COMMITTED` isolation level
-- Basic UNIQUE constraints for data integrity
-- No `SELECT FOR UPDATE` or row-level locking
-- Simple average calculations without atomic operations
-
-## Benefits of Simplification
-
-### 1. Faster Development
-- Reduced implementation complexity
-- Fewer distributed systems to coordinate
-- Simpler testing requirements
-
-### 2. Reduced Maintenance
-- Less code to maintain
-- Fewer race conditions to debug
-- Simpler deployment architecture
-
-### 3. Accelerated MVP
-- Quicker time to market
-- Focus on core functionality
-- Validate product-market fit faster
-
-## Future Considerations
-If the MVP proves successful, concurrency features can be added incrementally based on:
-1. User feedback on duplicate operation issues
-2. Performance metrics under load
-3. Security requirements for production
-4. Team capacity for complex distributed systems
+## Related Documents
+- [ADR 0017: B2B Shared Inventory with BullMQ Serialized Concurrency](./adrs/0017-b2b-shared-inventory-bullmq-concurrency.md)
+- [Backend Architecture: Order Processing & Queue-Based Concurrency](./backend-architecture.md)
+- [ADR 0001: Use PostgreSQL for Inventory Management](./adrs/0001-use-postgresql-for-inventory.md) (DEPRECATED for concurrency section)
+- [ADR 0005: Rate Limiter Failure State Strategy](./adrs/0005-rate-limiter-failure-state-strategy.md) (amended — Redis is now critical)

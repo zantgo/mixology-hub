@@ -1,5 +1,7 @@
 # Makeable Intelligence Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference `getUserInventory`. When the codebase is migrated, update all references to `getBarInventory`. Test context shifts from per-user makeability to shared bar-wide makeability calculations.
+
 **Example TDD for Incompatible Units (UC 3.4):**
 ```typescript
 describe('UnitConverterService - Incompatible Units', () => {

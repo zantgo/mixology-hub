@@ -37,9 +37,9 @@
     * **Architectural Decision: Ephemeral AI Audit Trails on Admin Hard-Deletes**
     * **Explicit Trade-off:** The nightly cron job deletes AI_RECIPES where cocktail_id IS NULL to prevent JSONB storage bloat. If an Administrator hard-deletes an offensive AI-generated public cocktail, the relational cascade will set the AI Recipe's foreign key to NULL, marking it for deletion by the cron job. We explicitly accept the destruction of the original LLM prompt audit trail upon Admin hard-deletion. We trade long-term forensic LLM auditing for aggressive database storage reclamation.
   * **Architectural Decision: Uncoordinated In-Process Cron Execution**
-    * **Explicit Trade-off:** To strictly adhere to the "No Distributed State" mandate, we explicitly reject the use of Redis-based distributed locks (e.g., Redlock) for cron job execution. We accept that in a vertically scaled cluster environment, all active Node.js worker processes on the single VM will concurrently fire the nightly cleanup tasks at the exact same millisecond. We rely entirely on PostgreSQL's native concurrency control to safely process redundant DELETE commands, trading minor database CPU spikes for the total elimination of distributed cron coordination.
+    * **Explicit Trade-off:** We explicitly reject the use of Redis-based distributed locks (e.g., Redlock) for cron job execution. We accept that in a vertically scaled cluster environment, all active Node.js worker processes on the single VM will concurrently fire the nightly cleanup tasks at the exact same millisecond. We rely entirely on PostgreSQL's native concurrency control to safely process redundant DELETE commands, trading minor database CPU spikes for the total elimination of distributed cron coordination.
   * **Architectural Decision: Acceptance of Phantom Orphaned Cocktails during Cron Race Conditions**
-    * **Explicit Trade-off:** Because we have strictly banned distributed locks, transaction isolation elevation, and row-level locking (`SELECT FOR UPDATE`) to maintain absolute backend simplicity, a race condition exists if a user saves an AI recipe at the exact millisecond the uncoordinated cron job executes. We explicitly accept the microscopic risk that the cron job's DELETE command may wipe out an AI recipe immediately after a user successfully links it to a new Cocktail. We trade perfect relational preservation against edge-case timing for the complete elimination of complex database locking overhead.
+    * **Explicit Trade-off:** Because we have not implemented distributed locks, transaction isolation elevation, or row-level locking (`SELECT FOR UPDATE`) for cron jobs, a race condition exists if a user saves an AI recipe at the exact millisecond the uncoordinated cron job executes. We explicitly accept the microscopic risk that the cron job's DELETE command may wipe out an AI recipe immediately after a user successfully links it to a new Cocktail. We trade perfect relational preservation against edge-case timing for architectural simplicity.
 
 
 **UC 15.6: Graceful Shutdown of Active Transactions**
@@ -57,4 +57,4 @@
  * **And** retains logs marked as `undone = true` for 90 days for audit purposes.
  * **And** minimizes database bloat while preserving audit trail for disputed transactions.
 
-**Note:** UC 15.8 has been removed as the `SYNC_OPERATIONS` table no longer exists (Online-Only Mandate).
+**Note:** UC 15.8 has been removed as the `SYNC_OPERATIONS` table no longer exists (offline sync functionality removed).

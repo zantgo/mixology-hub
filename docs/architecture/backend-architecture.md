@@ -1,6 +1,6 @@
 # Backend Architecture & Design Patterns
 
-> **ONLINE-ONLY MANDATE:** This application requires a persistent internet connection to function. All offline and sync functionality has been removed to simplify architecture and eliminate complex state reconciliation.
+> **B2B SINGLE-BAR ARCHITECTURE:** MixologyHub is now a Point-of-Sale/Inventory system for a SINGLE physical bar. All bartenders share one global `bar_inventory`. Concurrency is actively managed via Redis-backed BullMQ with serialized queue processing (see ADR 0017).
 
   
 
@@ -97,11 +97,11 @@ The concrete implementation injects environment variables (`AI_API_URL`, `AI_API
 
 ### 3. Smart Inventory & Unit Conversion
 
-To determine if a user can make a cocktail, the system cannot rely on simple string matching (e.g., "1 oz" vs "30 ml").
+To determine if a cocktail is makeable against the bar's shared inventory, the system cannot rely on simple string matching (e.g., "1 oz" vs "30 ml").
 
 - We use a dedicated `UnitConverterService` containing mathematical conversion factors relative to a base unit (ml, grams).
-
-- **Makeable Algorithm:** When querying `GET /user-inventory/makeable`, the database uses a complex SQL `HAVING` clause to filter cocktails where *all* required ingredients exist in the user's inventory. Then, in memory, the `UnitConverterService` mathematically verifies that the *quantities* are sufficient.
+- **Makeable Algorithm:** When querying `GET /bar-inventory/makeable`, the database uses a complex SQL `HAVING` clause to filter cocktails where *all* required ingredients exist in the shared `bar_inventory`. Then, in memory, the `UnitConverterService` mathematically verifies that the *quantities* are sufficient.
+- All bartenders see the same "Makeable" list calculated against the single `bar_inventory`.
 
 #### 📐 Human-Readable Measure Parsing
 
@@ -188,30 +188,28 @@ For production-scale deployments with large ingredient catalogs, the current two
 **Example PostgreSQL function concept:**
 ```sql
 CREATE OR REPLACE FUNCTION can_make_cocktail(
-  user_id UUID, 
   cocktail_id UUID
 ) RETURNS BOOLEAN AS $$
 DECLARE
   ingredient RECORD;
-  user_quantity DECIMAL;
+  bar_quantity DECIMAL;
   required_quantity DECIMAL;
 BEGIN
   FOR ingredient IN 
     SELECT ci.amount, ci.unit, i.base_unit
     FROM cocktail_ingredients ci
     JOIN ingredients i ON ci.ingredient_id = i.id
-    WHERE ci.cocktail_id = $2
+    WHERE ci.cocktail_id = $1
   LOOP
     -- Convert required amount to base unit
     required_quantity := convert_to_base_unit(ingredient.amount, ingredient.unit, ingredient.base_unit);
     
-    -- Get user's inventory in base units
-    SELECT ui.quantity INTO user_quantity
-    FROM user_inventory ui
-    WHERE ui.user_id = $1 
-      AND ui.ingredient_id = ingredient.ingredient_id;
+    -- Get bar's inventory in base units
+    SELECT bi.quantity INTO bar_quantity
+    FROM bar_inventory bi
+    WHERE bi.ingredient_id = ingredient.ingredient_id;
     
-    IF user_quantity IS NULL OR user_quantity < required_quantity THEN
+    IF bar_quantity IS NULL OR bar_quantity < required_quantity THEN
       RETURN FALSE;
     END IF;
   END LOOP;
@@ -226,35 +224,103 @@ $$ LANGUAGE plpgsql;
 
   
 
-## 🗄️ Data Integrity & Transactions
+---
 
-  
+## 🔄 Order Processing & Queue-Based Concurrency
 
-When dealing with user inventory, data integrity is paramount. We utilize **TypeORM Database Transactions** to ensure ACID compliance.
+When multiple bartenders press "Prepare Drink" simultaneously, concurrent PostgreSQL transactions on the shared `bar_inventory` table would cause race conditions, double-deductions, and deadlocks. We eliminate this problem entirely by serializing all inventory mutations through a single-threaded Redis-backed BullMQ worker.
 
-  
+### Architecture Flow
 
-**Example: The `prepare()` Method**
+1. **HTTP Endpoint `POST /cocktails/:id/prepare`:**
+   - Validates auth/role and cocktail existence.
+   - Creates a `PREPARATION_LOGS` record with `status = 'queued'`.
+   - Pushes a job to the Redis `bar-orders` BullMQ queue.
+   - Returns `202 Accepted` with `{ jobId, statusUrl }` immediately — NO database deduction occurs in the HTTP request lifecycle.
 
-When a user prepares a cocktail, their inventory must be depleted.
+2. **BullMQ Worker (`concurrency: 1`):**
+   - A single worker process pops jobs from `bar-orders` sequentially.
+   - Opens a PostgreSQL ACID transaction.
+   - Validates `bar_inventory` sufficiency (including unit conversion and synonym resolution).
+   - If sufficient: deducts ingredients, updates `PREPARATION_LOGS` to `status = 'completed'`.
+   - If insufficient: rolls back, updates `PREPARATION_LOGS` to `status = 'failed_insufficient_stock'`.
+   - On infrastructure error: logs `status = 'failed_other'` for debugging.
+
+3. **Status Polling / WebSockets:**
+   - Frontend polls `GET /preparations/:logId/status` or subscribes via WebSocket/SSE.
+   - When status transitions from `queued` to `completed` or `failed_*`, the UI updates accordingly.
+   - This replaces the old "Optimistic UI Update" pattern which is fundamentally incompatible with async queue processing.
+
+### NestJS Integration
 
 ```typescript
+// Queue definition
+@Injectable()
+export class BarOrdersQueue {
+  constructor(@InjectQueue('bar-orders') private readonly queue: Queue) {}
 
-return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
+  async enqueue(cocktailId: string, bartenderId: string, servings: number, options?: PrepareOptions) {
+    const job = await this.queue.add('prepare-cocktail', {
+      cocktailId,
+      bartenderId,
+      servings,
+      ...options,
+    }, {
+      removeOnComplete: 100,
+      removeOnFail: 500,
+      attempts: 1, // No automatic retries — stock is deterministic
+    });
+    return { jobId: job.id };
+  }
+}
 
-// 1. Verify inventory holds sufficient quantities (Unit Converted)
+// Worker (concurrency: 1 = sequential execution)
+@Processor('bar-orders')
+export class BarOrdersWorker extends WorkerHost {
+  constructor(private readonly preparationService: PreparationService) {
+    super();
+  }
 
-// 2. Subtract required amounts from user stock
-
-// 3. Save updated inventory rows
-
-// If ANY step fails (e.g., concurrent request depletes stock first),
-
-// the entire transaction rolls back, preventing negative inventory.
-
-});
-
+  @Process('prepare-cocktail')
+  async handlePrepare(job: Job<PrepareJobPayload>) {
+    return await this.preparationService.execute(job.data);
+  }
+}
 ```
+
+### Why Not HTTP-Controller Transactions?
+
+Holding a PostgreSQL transaction open inside an HTTP request lifecycle is dangerous under concurrency:
+- **Row-level locks** on popular ingredients (e.g., "Vodka") cascade into connection pool exhaustion as other bartenders queue up waiting for the lock.
+- **HTTP timeouts**: if a transaction takes 5+ seconds due to lock contention, the reverse proxy returns 504 while the DB transaction is still running.
+- **Client retries**: a timed-out client that retries creates a SECOND concurrent transaction, compounding the lock issue.
+
+By moving inventory mutations OUT of HTTP controllers and into a serialized worker, we solve all three problems simultaneously.
+
+---
+
+## 🗄️ Data Integrity & Transactions
+
+Inventory mutations occur inside a single-threaded BullMQ Worker context, not in the HTTP controller. Each job execution wraps all operations in a single **TypeORM Database Transaction** to ensure ACID compliance.
+
+**Example: The Worker `execute()` Method**
+
+```typescript
+return await this.dataSource.transaction(async (transactionalEntityManager) => {
+  // 1. Load current bar_inventory rows for required ingredients
+  // 2. Verify quantities are sufficient (via UnitConverterService + synonym resolution)
+  // 3. Subtract required amounts from bar stock
+  // 4. Save updated inventory rows
+  // 5. Update PREPARATION_LOGS status to 'completed'
+  //
+  // If ANY step fails, the entire transaction rolls back,
+  // preventing negative inventory or partial deductions.
+});
+```
+
+Because the worker processes jobs with `concurrency: 1`, we are mathematically guaranteed that no two transactions ever touch the same `bar_inventory` row simultaneously. This eliminates the need for `SELECT FOR UPDATE`, advisory locks, or retry loops.
+
+
 
   
 
@@ -307,8 +373,8 @@ In a production environment, public endpoints—especially the AI generation end
 The system implements a comprehensive RBAC system with the following components:
 
 #### 1. Database Schema
-- **`users.role` column:** Stores user role (`'user'` or `'admin'`) with default value `'user'`
-- **Admin-only tables:** Certain operations require admin privileges (e.g., global ingredient management)
+- **`users.role` column:** Stores user role (`'bartender'` or `'admin'`) with default value `'bartender'`
+- **Admin-only operations:** Inventory management, ingredient taxonomy, and system configuration require admin privileges
 
 #### 2. Authorization Guards
 ```typescript
@@ -331,24 +397,25 @@ export class RolesGuard implements CanActivate {
 #### 3. Role Decorators
 ```typescript
 // Controller usage
-@Controller('admin/ingredients')
+@Controller('admin/inventory')
 @UseGuards(RolesGuard)
-export class AdminIngredientsController {
-  @Post('merge')
-  @Roles('admin') // Only admins can access
-  async mergeIngredients(@Body() dto: MergeIngredientsDto) {
+export class AdminInventoryController {
+  @Post('add')
+  @Roles('admin') // Only admins can add stock
+  async addStock(@Body() dto: AddStockDto) {
     // Admin-only logic
   }
 }
 ```
 
-#### 4. Admin Privileges
-- **Global ingredient promotion:** Convert user-created ingredients to global availability
-- **Duplicate ingredient merging:** Merge duplicate ingredients across the system
-- **System-wide data management:** Access to all user data for support purposes
-- **Audit logging:** All admin actions are logged with timestamp and user ID
+#### 4. Admin Privileges (Bar Manager)
+- **Inventory Management:** Add, update, and delete stock in `bar_inventory` (POST/PUT/DELETE)
+- **Ingredient Taxonomy:** Create, rename, merge, and hard-delete ingredients in the global catalog
+- **Ingredient Relationships:** Manage synonyms (`synonym`) and hierarchy (`is_a`) relationships
+- **Audit Logging:** All admin mutations are logged with timestamp and user ID
 
-#### 5. User Isolation
-- Standard users can only access and modify their own data (inventory, cocktails, favorites)
-- Multi-tenant isolation via `user_id` foreign keys in all user-specific tables
-- JWT tokens contain user ID and role for authorization decisions
+#### 5. Bartender Access
+- Bartenders can browse recipes, search cocktails, and view the global `bar_inventory`
+- Bartenders can submit "Prepare" orders via `POST /cocktails/:id/prepare` (which enqueues a BullMQ job)
+- Bartenders can view their own preparation history and undo recent preparations (within the 15-minute window)
+- Bartenders can manage their own favorites and profile settings

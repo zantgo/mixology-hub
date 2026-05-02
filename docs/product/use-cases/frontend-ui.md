@@ -57,13 +57,17 @@
 * **Then** it attempts to load the local `/uploads/...` path from `imageThumb`.
 * **And** if `imageThumb` is null, or if the local file was accidentally deleted causing a 404, it falls back to the default local image (`/assets/images/cocktails/default/cocktail-placeholder.jpg`).
 
-**UC 7.10: Optimistic Update Rollback**
-* **Given** the user clicks "Prepare" and the Signal optimistically deducts inventory.
-* **When** the backend returns a `500 Server Error` or network drops.
-* **Then** the UI Signal catches the error and instantly *reverts* the inventory quantities back to their previous state.
-* **And** displays an error toast.
-* **Architectural Decision: Optimistic State Desynchronization Trap**
-  * **Explicit Trade-off:** Because we strictly enforce the "No Concurrency / No Sync" mandates, we have removed all distributed idempotency locks and real-time state reconciliation. We explicitly accept that if an HTTP response drops in transit after the backend successfully commits a transaction, the frontend's optimistic rollback (reverting the UI to the pre-action state) will cause a silent Client-Server state desynchronization. If the user clicks "Retry", they will suffer a double-deduction. We trade robust, idempotent network recovery for absolute SPA architectural simplicity, relying on the user to manually refresh the browser or use the "Undo" feature to correct ledger inaccuracies.
+**UC 7.10: Async Preparation Status Polling**
+* **Given** a bartender clicks "Prepare" on a cocktail.
+* **When** the `POST /cocktails/:id/prepare` endpoint returns `202 Accepted` with `{ preparationLogId, statusUrl }`.
+* **Then** the UI displays a spinner/pending state on the drink card.
+* **And** begins polling `GET /preparations/:logId/status` every 1-2 seconds.
+* **When** the status transitions to `completed`, the UI shows a green checkmark and updates the inventory display.
+* **When** the status transitions to `failed_insufficient_stock`, the UI shows an error with the missing ingredient details.
+* **When** the status transitions to `failed_other`, the UI shows an infrastructure error with a retry suggestion.
+* **And** the polling stops once a terminal status is received.
+* **Architectural Decision: Polling over Optimistic UI for Inventory Mutations**
+  * **Explicit Trade-off:** Because inventory deductions now happen asynchronously inside a BullMQ worker (ADR 0017), optimistic UI updates for the "Prepare" action are no longer viable. The frontend must wait for the worker to confirm the deduction before displaying the result. We trade instant visual feedback for absolute inventory correctness and elimination of the "phantom deduction" desynchronization problem.
 
 **UC 7.11: Screen Reader Accessibility for Dynamic Forms**
 * **Given** a visually impaired user is using a screen reader on the custom cocktail form.

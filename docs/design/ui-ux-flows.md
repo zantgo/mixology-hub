@@ -67,10 +67,13 @@ MixologyHub is a utility app that blends utility (inventory math) with lifestyle
 *   **The "Prepare" Action**:
     1. User taps the sticky "Prepare Drink" FAB at the bottom.
     2. A modal confirms serving size: `[-] 1 [+] Servings` or `Total Volume [ 150 ] ml` for part-based drinks.
-     3. User confirms. **Optimistic UI Update**: The button turns into a green checkmark, and inventory decreases instantly.
-     4. **Undo Mechanism (UC 4.4)**: A sticky toast appears at the bottom: *"1 Margarita prepared. Stock deducted. [UNDO]"*. This toast persists in a "Recent Preparations" menu for 15 minutes.
-     * **Architectural Decision: Optimistic State Desynchronization Trap**
-       * **Explicit Trade-off:** Because we strictly enforce the "No Concurrency / No Sync" mandates, we have removed all distributed idempotency locks and real-time state reconciliation. We explicitly accept that if an HTTP response drops in transit after the backend successfully commits a transaction, the frontend's optimistic rollback (reverting the UI to the pre-action state) will cause a silent Client-Server state desynchronization. If the user clicks "Retry", they will suffer a double-deduction. We trade robust, idempotent network recovery for absolute SPA architectural simplicity, relying on the user to manually refresh the browser or use the "Undo" feature to correct ledger inaccuracies.
+    3. User confirms. The button shows a spinner and the text changes to "Queueing...". The backend returns `202 Accepted`.
+    4. The UI polls `GET /preparations/:logId/status` every 1-2 seconds.
+    5. When the BullMQ worker completes the deduction, the status changes to `completed`. The button turns into a green checkmark. Inventory display updates.
+    6. If status is `failed_insufficient_stock`, the UI shows an error with the missing ingredient.
+    7. **Undo Mechanism (UC 4.4)**: A sticky toast appears at the bottom: *"1 Margarita prepared. Stock deducted. [UNDO]"*. This toast persists in a "Recent Preparations" menu for 15 minutes.
+    * **Architectural Decision: Async Queue Processing over Optimistic UI**
+      * **Explicit Trade-off:** Because inventory deductions execute inside a single-threaded BullMQ worker (ADR 0017), the UI cannot display an instant "Stock Deducted" confirmation. A polling/spinner state replaces the old optimistic UI pattern. We trade instant visual feedback for absolute inventory correctness and elimination of the phantom-deduction/desynchronization problem.
 
 ## Flow 5: The AI Bartender (Domain 5)
 *   **Layout**: Conversational/Prompt interface.
@@ -133,14 +136,11 @@ When users create custom ingredients, the global catalog can get messy.
 
 # ⚡ 5. Critical UX Micro-Interactions & Edge Cases
 
-1.  **Network Error Handling (Online-Only Mandate)**:
+1.  **Network Error Handling**:
     *   *Trigger*: Browser loses network connection.
     *   *UI*: A red error banner drops down from the top: *"Network connection lost. Please check your internet connection."*
     *   *Behavior*: All API calls will fail with standard HTTP timeouts. The UI will display network error toasts with retry options for critical operations.
-    *   **Architectural Decision**: Total Eradication of Offline State Artifacts
-    *   **Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
-    *   **Architectural Decision: Phantom Deductions & Dumb Retry Risk**
-    *   **Explicit Trade-off:** To strictly enforce the Online-Only and No-Concurrency mandates, we have removed all distributed idempotency reconciliation. We explicitly accept that if a user loses network connectivity precisely during the HTTP response transit of a successful POST /prepare transaction, they will experience a "phantom deduction." If the user clicks the "Retry" button on the resulting error toast, it will execute a dumb re-POST, resulting in a double-deduction. We trade resilient network recovery and guaranteed idempotency for absolute SPA and backend simplicity, requiring the user to manually correct inventory mistakes.
+    *   **Note:** The `POST /prepare` endpoint returns a `202 Accepted` as soon as the job is enqueued to Redis. If network drops after this response, the preparation is still queued; the UI will pick up the status on reconnect via polling.
 2.  **Fractional Input Handling**:
     *   If a user types "1/3 oz", the UI displays "1/3 oz" (retained in `original_measure`), even though the backend converts it to `0.33` for math.
 3.  **Image Fallbacks (UC 7.9)**:
@@ -149,9 +149,9 @@ When users create custom ingredients, the global catalog can get messy.
     *   If a local image file is missing from `/uploads/cocktails/`, the Angular `(error)` directive instantly swaps the `src` to a beautifully designed local SVG placeholder of a cocktail glass, preventing broken UI frames.
 4.  **Debouncing & Skeletons (UC 7.2)**:
     *   Never show a "No results found" immediately while typing. Wait 300ms, show a pulsing skeleton grid for 100ms, *then* show the results or the empty state.
-5.  **Acceptance of Cross-Device Stale State (No Sync)**:
+5.  **Acceptance of Cross-Device Stale State**:
     *   **Architectural Decision: Acceptance of Cross-Device Stale State**
-    *   **Explicit Trade-off:** To strictly adhere to the "No Concurrency / No Sync" mandate, we explicitly strip out all WebSockets, polling, and BroadcastChannel implementations. We accept that users operating MixologyHub across multiple browser tabs or devices will experience visually stale inventory and favorites data. We trade cross-device real-time state cohesion for absolute frontend architectural simplicity. Users must manually refresh their browser to synchronize state.
+    *   **Explicit Trade-off:** We explicitly strip out all WebSockets, polling, and BroadcastChannel implementations for non-critical state (favorites, search). We accept that users operating MixologyHub across multiple browser tabs or devices will experience visually stale favorites data. Users must manually refresh their browser to synchronize non-inventory state. Note: Inventory state is server-authoritative and refreshed via the preparation status polling endpoint.
 6.  **Theme Switching UX**:
     *   **Location**: User profile/settings page → Appearance section
     *   **Selector Type**: Visual preview cards (Light/Dark/System) with icon indicators

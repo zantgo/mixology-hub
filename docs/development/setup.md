@@ -247,7 +247,7 @@ Upon the first initialization of the NestJS module, the seeder automatically che
 
 **Why this matters:**
 
-This ensures that core database relations—such as Foreign Key constraints for `Cocktails`, `Favorites`, and `UserInventory`—function immediately out of the box without requiring the developer to manually register a user or set up a JWT flow for every local test run.
+This ensures that core database relations—such as Foreign Key constraints for `Cocktails`, `Favorites`, and `BarInventory`—function immediately out of the box without requiring the developer to manually register a user or set up a JWT flow for every local test run.
 
 ---
 

@@ -1,5 +1,7 @@
 # Data Integrity Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference `UserInventoryService`. When the codebase is migrated, update to test `BarInventoryService` with the shared bar inventory model. Concurrency tests should verify BullMQ worker serialization, not basic `READ COMMITTED` behavior.
+
 *Note: Data integrity tests are covered in other domain-specific test files:*
 - **Decimal precision**: See `inventory-management-tests.md` (MeasureParserService tests)
 - **Unit conversion edge cases**: See `makeable-intelligence-tests.md` (UnitConverterService tests)

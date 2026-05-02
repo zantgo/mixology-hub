@@ -46,7 +46,7 @@ The system doesn't just list cocktails; it analyzes your stock to tell you what 
 
 ### The "Makeable" Algorithm:
 
-1. **Fetch:** Get all local recipes and the user's current `UserInventory` (Ingredients + Quantities).
+1. **Fetch:** Get all local recipes and the bar's current `BarInventory` (Ingredients + Quantities).
 
 2. **Filter (SQL):** Use a `HAVING` clause to discard any recipes where the user lacks any of the required ingredients.
 

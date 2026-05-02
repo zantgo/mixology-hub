@@ -15,25 +15,15 @@ MixologyHub uses **PostgreSQL** as its primary persistent data store, interfaced
 erDiagram
 
 USERS ||--o{ COCKTAILS : "creates"
-
-USERS ||--o{ USER_INVENTORY : "owns"
-
 USERS ||--o{ FAVORITES : "saves"
-
 USERS ||--o{ AI_RECIPES : "generates"
-
 USERS ||--|| USER_PROFILES : "has_preferences"
-
 COCKTAILS ||--o{ COCKTAIL_INGREDIENTS : "contains"
-
 INGREDIENTS ||--o{ COCKTAIL_INGREDIENTS : "used_in"
-
-INGREDIENTS ||--o{ USER_INVENTORY : "stocked_as"
+INGREDIENTS ||--|| BAR_INVENTORY : "stocked_as"
 INGREDIENTS ||--o{ INGREDIENT_RELATIONS : "has_children"
 INGREDIENTS ||--o{ INGREDIENT_RELATIONS : "has_parents"
-
 COCKTAILS ||--o{ FAVORITES : "is_favorited"
-
 USERS ||--o{ COCKTAIL_RATINGS : "rates"
 COCKTAILS ||--o{ COCKTAIL_RATINGS : "is_rated_by"
 USERS ||--o{ EXTERNAL_COCKTAIL_RATINGS : "rates_external"
@@ -54,7 +44,7 @@ USERS ||--o{ REFRESH_TOKENS : "has_sessions"
   string email UK
   string display_name
   string password_hash
-  string role DEFAULT 'user'
+  string role DEFAULT 'bartender'
   boolean is_email_verified DEFAULT false
   integer token_version DEFAULT 1
   timestamp last_logout_timestamp "nullable: true"
@@ -169,19 +159,15 @@ INGREDIENT_RELATIONS {
 
   
 
-   USER_INVENTORY {
+   BAR_INVENTORY {
 
   uuid id PK
 
-  uuid user_id FK "ON DELETE CASCADE"
-
-  uuid ingredient_id FK "ON DELETE CASCADE"
+  uuid ingredient_id FK "ON DELETE CASCADE, UNIQUE"
 
     decimal(10,4) quantity "CHECK (quantity >= 0)"
 
-  timestamp created_at
-
- timestamp updated_at
+  timestamp updated_at
 
  }
 
@@ -254,12 +240,13 @@ EXTERNAL_COCKTAIL_RATINGS {
 
 PREPARATION_LOGS {
   uuid id PK
-  uuid user_id FK "nullable: true, ON DELETE SET NULL"
+  uuid bartender_id FK "nullable: true, ON DELETE SET NULL"
   uuid cocktail_id FK "nullable: true, ON DELETE SET NULL"
   string external_cocktail_id "nullable: true"
   string cocktail_name_snapshot "Snapshot of the cocktail name at time of prep to prevent amnesia if original is deleted"
   integer servings
   jsonb deducted_ingredients "Stores exact IDs, amounts, units deducted"
+  string status DEFAULT 'queued' "enum: 'queued', 'completed', 'failed_insufficient_stock', 'failed_other'"
   boolean undone DEFAULT false
   timestamp created_at "Used for the 15-minute undo window"
 }
@@ -332,32 +319,31 @@ REPORTED_CONTENT {
 Handles authentication and relationship anchoring.
 
 - **Primary Key:** `UUID` (Standardized across all tables for security and distributed generation).
-
 - **Unique Constraint:** `email`.
-
-- **`role`:** String field with default value `'user'`. Supports role-based access control (RBAC) for admin features. Possible values: `'user'`, `'admin'`.
+- **`role`:** String field with default value `'bartender'`. Supports role-based access control (RBAC) for bar operations. Possible values: `'admin'` (Bar Manager — manages inventory, ingredient taxonomy), `'bartender'` (staff — browse recipes, check makeability, submit prepare orders).
 
   
 
 ### 2. `ingredients`
 
-The global catalog of all possible ingredients.
+The global catalog of all possible ingredients, managed exclusively by admins.
 
 - **`name`:** Stored in lowercase to prevent case-sensitive duplication (e.g., "Vodka" vs "vodka").
-
 - **`baseUnit`:** A critical field (e.g., `ml`, `g`). It dictates the mathematical baseline for unit conversions when checking inventory.
-
 - **`density`:** Decimal field (`decimal(5,4)`) with default value `1.0`. Used for mass-to-volume conversions (e.g., honey has density ≈ 1.42 g/ml). Enables the `UnitConverterService` to convert between mass and volume units for ingredients where both measurement types are valid.
+- **`created_by`:** FK to `users` (nullable). Tracks which admin created the ingredient. Set to NULL if the admin is deleted (`ON DELETE SET NULL`).
+- **`is_global`:** Boolean flag. In B2B mode, all ingredients in the catalog are globally available to all bartenders at the bar. Custom/private ingredients may still be flagged `is_global = false` if restricted to admin-only testing.
 
   
 
-### 3. `user_inventory`
+### 3. `bar_inventory`
 
-Tracks what a user physically owns.
+Tracks the global stock of ingredients for the entire bar. This is the single source of truth for all inventory operations.
 
-- **Composite Unique Constraint:** `['user_id', 'ingredient_id']`. A user cannot have two separate rows for "Vodka". If they add more, the existing row's quantity is updated mathematically via an `UPSERT` pattern.
-
+- **Unique Constraint:** `ingredient_id`. There is only ONE row per ingredient in the entire system. When admin adds more stock, the existing row's quantity is mathematically updated via an `UPSERT` pattern.
 - **`quantity`:** Uses PostgreSQL `decimal(10,4)` to match `COCKTAIL_INGREDIENTS.amount` precision and prevent truncation during inventory deductions. *Floating-point types (`float`, `real`) are strictly avoided* to prevent rounding errors during fractional unit conversions.
+- **No User Column:** Unlike the old B2C `user_inventory`, there is no `user_id`/`bartender_id` column. This is a single shared inventory pool. All bartenders see and deduct from the exact same stock.
+- **Admin-Only Mutations:** Only users with `role = 'admin'` may insert, update, or delete rows in this table.
 
 ### 4. `ingredient_relations`
 
@@ -456,22 +442,16 @@ The global `ingredients` table is initially populated via a migration or seeder 
   
 
 1. **Cascading Deletes (`ON DELETE CASCADE`) and Nullification (`ON DELETE SET NULL`):**
-
-- If a `User` is deleted, their `UserInventory`, `Favorites`, and custom `Cocktails` are automatically wiped.
-
+- If a `User` is deleted, their `Favorites`, and custom `Cocktails` are automatically wiped.
+- If an ingredient is removed from the global catalog, the corresponding `bar_inventory` row is cascade-deleted.
 - If a `Cocktail` is deleted (hard delete for system cleanup only), its `Cocktail_Ingredients` are cleanly removed, preventing orphaned relational rows.
-
 - **Note:** User-initiated cocktail deletion uses soft delete (`is_deleted = true`) not CASCADE DELETE, to preserve Favorites relationships (UC 10.4, UC 2.9).
-
 - If a `Cocktail` is hard-deleted, `PREPARATION_LOGS.cocktail_id` is set to `NULL` (`ON DELETE SET NULL`) to preserve preparation history and enable undo functionality even after the original cocktail is deleted.
 
 2. **Concurrency Control for `PREPARATION_LOGS`:**
-
+- The `status` column tracks job lifecycle: `queued` (awaiting BullMQ worker), `completed` (inventory deducted successfully), `failed_insufficient_stock` (not enough inventory), `failed_other` (infrastructure error).
+- All inventory deductions occur inside a single-threaded BullMQ Worker (`concurrency: 1`), which mathematically eliminates race conditions on `bar_inventory` rows.
 - The `undone` column in `PREPARATION_LOGS` is checked during undo operations to prevent duplicate undo (UC 4.19).
-
-- Implementation uses basic database constraints to prevent duplicate undo operations.
-
-- In MVP, concurrent undo requests may result in duplicate inventory restoration that users must manually correct.
 
 2. **Eager Loading Optimization:**
 
@@ -487,7 +467,7 @@ import { Decimal } from 'decimal.js';
 import { ColumnNumericTransformer } from '../utils/column-numeric.transformer';
 
 @Entity()
-export class UserInventory {
+export class BarInventory {
   @Column({
     type: 'decimal',
     precision: 10,

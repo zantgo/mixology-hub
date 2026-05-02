@@ -17,8 +17,8 @@
 * **When** a user makes requests.
 * **Then** the rate limiter applies different thresholds (e.g., 5/min for AI generation, 60/min for inventory updates).
 * **And** protects both cost-sensitive and performance-sensitive endpoints appropriately.
-* **Architectural Decision: Rate Limiter E2E Test Evasion**
-  * **Explicit Trade-off:** Because our ThrottlerGuard operates strictly in memory (per the "No Distributed State" mandate), parallel E2E testing pipelines (e.g., Playwright) running against a single test instance will instantly trigger 429 Too Many Requests blocks. We explicitly mandate that the ThrottlerGuard must instantly pass any request containing a specific pre-shared secret header (e.g., `x-test-bypass-ratelimit`) when `NODE_ENV=test`. We trade a microscopic production vulnerability (if `NODE_ENV` is accidentally misconfigured) for stable, parallelized CI/CD testing pipelines.
+  * **Architectural Decision: Rate Limiter E2E Test Evasion**
+  * **Explicit Trade-off:** Because our ThrottlerGuard operates strictly in local memory (not distributed via Redis), parallel E2E testing pipelines (e.g., Playwright) running against a single test instance will instantly trigger 429 Too Many Requests blocks. We explicitly mandate that the ThrottlerGuard must instantly pass any request containing a specific pre-shared secret header (e.g., `x-test-bypass-ratelimit`) when `NODE_ENV=test`. We trade a microscopic production vulnerability (if `NODE_ENV` is accidentally misconfigured) for stable, parallelized CI/CD testing pipelines.
 
 **UC 13.4: CSRF Protection for Refresh Token Endpoint**
 * **Given** the `/auth/refresh` endpoint utilizes an `HttpOnly` cookie to issue new Access Tokens.

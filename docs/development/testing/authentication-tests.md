@@ -1,5 +1,7 @@
 # Authentication Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference `UserInventoryService` and multi-tenant isolation. When the codebase is migrated, remove multi-tenant isolation tests. Account deletion no longer cascades to `bar_inventory` (shared bar asset). RBAC tests should verify `admin` vs `bartender` role guards.
+
 **Example TDD for Multi-Tenant Isolation (UC 9.1):**
 ```typescript
 describe('UserInventoryService - Multi-Tenant Isolation', () => {

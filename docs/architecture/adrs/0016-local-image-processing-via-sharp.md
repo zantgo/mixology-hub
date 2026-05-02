@@ -213,7 +213,7 @@ export class Cocktail {
 
  7. **Single-VM Scaling Mandate**:
     - **Architectural Decision: Single-VM Vertical Scaling Mandate**
-    - **Explicit Trade-off:** Because we enforce the "No Image URLs" mandate by storing assets on the local file system (`/uploads/cocktails/`), we explicitly forbid multi-VM horizontal scaling (e.g., deploying across multiple EC2 instances behind an AWS ALB without a shared EFS volume). To adhere to the "No Distributed State" mandate (which forbids shared network drives), the application MUST be scaled vertically on a single Virtual Machine, utilizing only the native Node.js cluster module to span multiple CPU cores across a shared physical disk. We trade cloud-native horizontal load balancing for absolute architectural simplicity and secure local asset storage.
+    - **Explicit Trade-off:** Because we enforce the "No Image URLs" mandate by storing assets on the local file system (`/uploads/cocktails/`), we explicitly forbid multi-VM horizontal scaling (e.g., deploying across multiple EC2 instances behind an AWS ALB without a shared EFS volume). The application MUST be scaled vertically on a single Virtual Machine, utilizing only the native Node.js cluster module to span multiple CPU cores across a shared physical disk. We trade cloud-native horizontal load balancing for absolute architectural simplicity and secure local asset storage.
 
  8. **Local Development Asset Proxying**:
     - **Architectural Decision: Static Asset Proxy Routing for Local Development**
@@ -233,7 +233,7 @@ export class Cocktail {
 3. **Processing Overhead**:
    - Sharp is highly optimized C++ library
    - Async processing prevents blocking event loop
-   - Due to the 'No Concurrency' mandate, message queues are forbidden. High-volume image processing must be managed via Node cluster horizontal scaling and load balancer rate-limiting.
+   - Image processing is handled synchronously per-request (no background queues needed for this task). For high-volume scenarios, BullMQ-based deferred processing can be added as a future enhancement.
 
 ## Future Evolution
 

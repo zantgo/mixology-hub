@@ -1,5 +1,7 @@
 # Cocktail Preparation Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference the old synchronous `UserInventoryService` model. When the codebase is migrated, preparation tests must cover: enqueuing to BullMQ, `202 Accepted` response, Worker-side ACID transaction, `bar_inventory` deduction, and status polling (`queued` → `completed` / `failed_*`).
+
 **Example TDD for Basic Preparation Logic:**
 ```typescript
 describe('Cocktail Preparation - Basic Logic', () => {

@@ -43,8 +43,8 @@
 * **And** issues a new access token and a new refresh token (rotating the token chain).
 * **And** marks the old refresh token as revoked in the database.
 * **And** if the same refresh token is presented again (replay attack), the entire token family is revoked for security.
-* **Architectural Decision: False-Positive Session Revocation on Concurrent Token Refresh**
-  * **Explicit Trade-off:** To strictly adhere to the "No Concurrency / No Distributed Locks" mandate, we explicitly refuse to implement atomic locking around the /auth/refresh endpoint. We acknowledge that benign concurrent network requests from a single client (e.g., rapid double-clicks or multi-tab loading on an expired token) may trigger the "Refresh Token Reuse" security protocol, resulting in a false-positive invalidation of the user's entire token family. We explicitly trade robust multi-tab session stability for absolute backend architectural simplicity and zero locking overhead.
+  * **Architectural Decision: False-Positive Session Revocation on Concurrent Token Refresh**
+  * **Explicit Trade-off:** To maintain backend architectural simplicity, we explicitly refuse to implement atomic locking around the /auth/refresh endpoint. We acknowledge that benign concurrent network requests from a single client (e.g., rapid double-clicks or multi-tab loading on an expired token) may trigger the "Refresh Token Reuse" security protocol, resulting in a false-positive invalidation of the user's entire token family. We explicitly trade robust multi-tab session stability for absolute backend architectural simplicity and zero locking overhead.
 
 * **Architectural Decision: Session Destruction on Network Drop during Token Rotation**
   * **Explicit Trade-off:** We explicitly accept that if an HTTP response containing a newly rotated HttpOnly refresh token is lost to network packet drop, the client's automated HTTP retry will present the invalidated token, triggering our Token Reuse Defense. This will immediately terminate all of the user's active sessions. We trade resilient connection recovery for absolute token theft protection and simplified, lock-free backend architecture.
@@ -72,7 +72,9 @@
  * **Given** an authenticated user.
  * **When** they trigger the `DELETE /users/me` endpoint.
  * **Then** the system permanently deletes their `users` row.
- * **And** cascades to delete their `user_inventory`, `favorites`, and private `cocktails`.
+ * **And** cascades to delete their `favorites`, and private `cocktails`.
+ * **And** their `bartender_id` in `PREPARATION_LOGS` is set to NULL (`ON DELETE SET NULL`), preserving preparation history.
+ * **Note:** The shared `bar_inventory` is NOT affected by bartender account deletion, as it belongs to the bar, not any individual user.
  * **And** anonymizes (or soft-deletes) any public Custom Cocktails they authored (setting `created_by = NULL`).
  * **And** anonymizes AI_RECIPES by setting `created_by = NULL` (preserving AI training data while severing user association).
  * **And** returns a `204 No Content` to confirm deletion.
@@ -203,7 +205,7 @@
 * **And** allows the user to log in immediately with their new password without waiting the remaining 15 minutes.
 * **And** sends a security notification email confirming the password reset and lockout clearance.
   * **Architectural Decision: Local Lockout Clearance & Cluster Bypass Risk**
-    * **Explicit Trade-off:** Because we enforce the "No Concurrency" mandate by storing brute-force lockouts in a local in-memory Map rather than Redis, clearing a lockout via a password reset only clears the block on the specific Node.js worker process that handled the request. We explicitly accept that a user could theoretically remain temporarily locked out on other worker processes in the cluster. We trade absolute cross-cluster state synchronization for the complete elimination of distributed caching.
+    * **Explicit Trade-off:** Because we store brute-force lockouts in a local in-memory Map rather than Redis, clearing a lockout via a password reset only clears the block on the specific Node.js worker process that handled the request. We explicitly accept that a user could theoretically remain temporarily locked out on other worker processes in the cluster. We trade absolute cross-cluster state synchronization for the complete elimination of distributed caching for brute-force protection.
 
 **UC 9.26: Unverified User State (Grace Period)**
 * **Context:** New users have `is_email_verified: false` by default. Business decision: Allow limited functionality during 24-hour grace period.
@@ -216,13 +218,13 @@
   - Add ingredients to inventory (up to 10 items)
   - View makeable cocktails based on their inventory
 * **And** the system enforces a 24-hour grace period after registration, after which ALL endpoints (except email verification) are blocked until verification is complete.
-* **Architectural Decision: Abandonment of Time-Delayed Transactional Emails**
-  * **Explicit Trade-off:** Because we have explicitly forbidden the use of asynchronous message queues (Redis/BullMQ) to maintain a zero-concurrency architecture, exact time-delayed executions are impossible. We explicitly abandon the 12-hour and 23-hour unverified email reminders. We trade automated user-retention marketing loops for absolute backend architectural purity and the total elimination of background workers.
+ * **Architectural Decision: Abandonment of Time-Delayed Transactional Emails**
+   * **Explicit Trade-off:** We explicitly abandon the 12-hour and 23-hour unverified email reminders. We trade automated user-retention marketing loops for absolute backend architectural purity.
 
 **UC 9.27: Emergency Global Session Revocation (Admin Protocol)**
 * **Given** a suspected system-wide breach or JWT secret compromise.
 * **When** an Admin triggers the emergency global logout via `POST /admin/security/global-revoke`.
 * **Then** the system increments the `global_token_salt_version` persisted in the `SYSTEM_SETTINGS` PostgreSQL table.
 * **And** logs the emergency action with full admin audit trail including IP, timestamp, and reason.
-* **Architectural Decision: Database-Only Global Revocation (Removal of Redis Pub/Sub)**
-  * **Explicit Trade-off:** To adhere to the "No Concurrency / No Distributed Eventing" mandate, we explicitly strip out the Redis Pub/Sub architecture previously used for instant cross-instance cache invalidation. Emergency global session revocation will simply increment a `global_token_salt_version` in the PostgreSQL database. We explicitly accept that the backend must query the database on every authenticated request (or rely on short TTL local caches) to verify the salt version. We trade immediate, sub-millisecond global memory synchronization for a radically simplified, concurrency-free authentication architecture.
+ * **Architectural Decision: Database-Only Global Revocation**
+   * **Explicit Trade-off:** Emergency global session revocation increments a `global_token_salt_version` in the PostgreSQL database. We explicitly accept that the backend must query the database on every authenticated request (or rely on short TTL local caches) to verify the salt version. We trade immediate, sub-millisecond global memory synchronization for a radically simplified authentication architecture.

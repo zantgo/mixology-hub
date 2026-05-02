@@ -28,7 +28,7 @@ describe('CocktailSearchComponent - RxJS Debounce', () => {
 **Example TDD for Angular Signals UI Update (UC 7.1):**
 ```typescript
 describe('InventoryStore - Signal Reactivity', () => {
-  it('should optimistically update inventory signal on preparation', () => {
+  it('should poll inventory signal on preparation and update on completion', () => {
     const inventoryStore = TestBed.inject(InventoryStore);
     const Decimal = require('decimal.js');
     

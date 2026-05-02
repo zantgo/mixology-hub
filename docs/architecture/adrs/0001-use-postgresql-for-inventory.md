@@ -1,7 +1,9 @@
 # ADR 0001: Use PostgreSQL for Inventory Management
 
 ## Status
-Accepted
+**Deprecated (Superseded by [ADR 0017](./0017-b2b-shared-inventory-bullmq-concurrency.md))**
+
+> **Note:** This ADR's original decision to use PostgreSQL as the primary database remains valid. However, the "Acceptance of Race Conditions via READ COMMITTED" trade-off documented below is **DEPRECATED and replaced by ADR 0017**. The system no longer accepts race conditions as a trade-off; concurrency is now actively managed via single-threaded BullMQ queue processing.
 
 ## Context
 MixologyHub needs to store highly relational data including:

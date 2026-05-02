@@ -23,8 +23,8 @@ Each ADR follows this structure:
 ## Current ADRs
 
 ### [ADR 0001: Use PostgreSQL for Inventory Management](./0001-use-postgresql-for-inventory.md)
-**Status**: Accepted  
-**Summary**: Decision to use PostgreSQL with TypeORM for relational data storage, emphasizing ACID compliance for inventory management.
+**Status**: Deprecated (Superseded by ADR 0017)  
+**Summary**: Decision to use PostgreSQL with TypeORM for relational data storage. The concurrency section ("Acceptance of Race Conditions via READ COMMITTED") is deprecated by ADR 0017. PostgreSQL as the primary database remains in effect.
 
 ### [ADR 0002: Agnostic LLM Integration via Dependency Inversion](./0002-agnostic-llm-integration.md)
 **Status**: Accepted  
@@ -39,8 +39,8 @@ Each ADR follows this structure:
 **Summary**: Decision to accept O(N) CPU-bound in-memory math for makeability validation in MVP, with plans to migrate to PostgreSQL stored functions in Phase 4.
 
 ### [ADR 0005: Rate Limiter Failure State Strategy (Redis Degradation)](./0005-rate-limiter-failure-state-strategy.md)
-**Status**: Accepted  
-**Summary**: Hybrid fail-safe strategy for Redis degradation: in-memory fallback for rate limiting, fail-closed for AI quotas, fail-open for idempotency and sessions.
+**Status**: Accepted (Amended by ADR 0017)  
+**Summary**: Hybrid fail-safe strategy for Redis degradation. Local-only rate limiting remains for ThrottlerGuard. However, Redis is now a critical infrastructure dependency for BullMQ queues (ADR 0017).
 
 ### [ADR 0006: Last Write Wins vs. Delta-Only Sync for Offline Operations](./0006-last-write-wins-vs-delta-only-sync.md)
 **Status**: Deprecated  
@@ -85,6 +85,10 @@ Each ADR follows this structure:
 ### [ADR 0016: Local Image Processing via Sharp](./0016-local-image-processing-via-sharp.md)
 **Status**: Accepted  
 **Summary**: Decision to replace URL-based image fetching with secure local file upload system using Sharp for image processing, eliminating SSRF and IP leakage risks.
+
+### [ADR 0017: B2B Shared Inventory with BullMQ Serialized Concurrency](./0017-b2b-shared-inventory-bullmq-concurrency.md)
+**Status**: Accepted  
+**Summary**: Architectural pivot from B2C isolated inventories to B2B single-bar shared inventory. Implements Redis-backed BullMQ with `concurrency: 1` for the `bar-orders` queue to guarantee mathematical elimination of race conditions and deadlocks for cocktail preparation. Supersedes ADR 0001's concurrency trade-off and reinstates Redis as a critical infrastructure dependency.
 
 ## How to Create a New ADR
 

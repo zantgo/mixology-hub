@@ -24,5 +24,5 @@
 * **Then** a synchronous database INSERT logs the "Zero Result Query" to the analytics table.
 * **And** this allows Admins to see highly requested missing ingredients/cocktails to manually add to the global catalog.
 * **And** tracks search patterns to identify gaps in the ingredient/cocktail database for product improvement.
-* **Architectural Decision: Synchronous Analytics Blocking**
-  * **Explicit Trade-off:** Because we have strictly banned all asynchronous eventing, message queues, and un-awaited "fire-and-forget" background promises to maintain a zero-concurrency architecture, all analytics tracking (e.g., logging Zero-Result queries, tracking preparation events) must execute synchronously during the active HTTP request. We explicitly accept that executing database INSERT operations for telemetry will increase API latency for the end-user. We trade blazing-fast, detached telemetry for absolute backend architectural purity and single-threaded predictability.
+ * **Architectural Decision: Synchronous Analytics Blocking**
+  * **Explicit Trade-off:** All analytics tracking (e.g., logging Zero-Result queries, tracking preparation events) executes synchronously during the active HTTP request. We explicitly accept that executing database INSERT operations for telemetry will increase API latency for the end-user. We trade blazing-fast, detached telemetry for absolute backend architectural purity and single-threaded predictability.

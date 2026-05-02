@@ -90,7 +90,7 @@ npm run test:e2e    # Run Playwright E2E tests (requires backend running)
 | `UnitConverterService`   | 100%            | Core business logic for inventory math, incompatible unit detection, base unit normalization, serving size scaling. |
 | `MeasureParserService`   | 100%            | Fraction parsing, recurring decimal handling, qualitative measures. |
 | `CocktailAggregatorService` | >80%         | Unified search and external API fallback, detailed external cocktail lookup, unified pagination, category filtering, Redis caching, dangling favorite handling. |
-| `UserInventoryService`   | >80%            | ACID transactions, race condition prevention, concurrent request handling, zero quantity management, multi-tenant isolation, batch preparation. |
+| `BarInventoryService`    | >80%            | ACID transactions (inside BullMQ Worker), queue serialization, zero quantity management, batch preparation. |
 | `MakeableCocktailsService` | >80%         | Makeable detection, almost makeable logic, optional ingredients, serving size scaling. |
 | `IngredientService`      | >90%            | Name normalization, deduplication, custom ingredient creation, case-insensitive matching. |
 | AI Module                | >70%            | Prompt construction, JSON parsing, prompt injection defense, retry exhaustion handling, rate limiting, timeout handling, inventory-based generation. |

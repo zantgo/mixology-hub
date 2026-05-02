@@ -116,8 +116,8 @@
 * **Then** the Aggregator Service catches the 429 error.
 * **And** gracefully falls back to returning *only* local database and Redis-cached results.
 * **And** temporarily trips a Circuit Breaker to stop pinging the external API for X seconds to prevent an IP ban.
-* **Architectural Decision: Localized Circuit Breaking for External APIs**
-  * **Explicit Trade-off:** To strictly adhere to the "No Concurrency / No Distributed State" mandate, we explicitly refuse to back our Circuit Breakers with Redis. We accept that in a horizontally scaled environment, circuit breaker states are isolated to individual Node.js processes. If an external API issues a 429 Rate Limit, each backend instance must independently fail and trip its own breaker. We trade immediate, cluster-wide external API protection for the absolute eradication of distributed state coordination.
+ * **Architectural Decision: Localized Circuit Breaking for External APIs**
+   * **Explicit Trade-off:** We explicitly refuse to back our Circuit Breakers with Redis. We accept that in a horizontally scaled environment, circuit breaker states are isolated to individual Node.js processes. If an external API issues a 429 Rate Limit, each backend instance must independently fail and trip its own breaker. We trade immediate, cluster-wide external API protection for the absolute eradication of distributed state coordination.
 
 **UC 2.17: Public Cocktail Integrity**
 * **Given** User A creates a public "Mojito" and User B favorites it.

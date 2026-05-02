@@ -63,12 +63,12 @@ export class ColumnNumericTransformer {
 
 ### Entity Configuration
 ```typescript
-// src/users/entities/user-inventory.entity.ts
+// src/ingredients/entities/bar-inventory.entity.ts
 import { Decimal } from 'decimal.js';
 import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
-@Entity('user_inventory')
-export class UserInventory {
+@Entity('bar_inventory')
+export class BarInventory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
@@ -173,10 +173,10 @@ describe('ColumnNumericTransformer', () => {
   });
 });
 
-describe('UserInventory Entity', () => {
+describe('BarInventory Entity', () => {
   test('quantity is always a Decimal instance', async () => {
-    const inventory = await userInventoryRepository.findOne({
-      where: { userId: 'test' }
+    const inventory = await barInventoryRepository.findOne({
+      where: { ingredientId: 'test' }
     });
     
     // This should pass with transformer

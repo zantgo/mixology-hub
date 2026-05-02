@@ -84,7 +84,7 @@ This document outlines the strategic direction and planned features for Mixology
 ## Phase 4: Enterprise & Scale (Q1 2027)
 
 ### Architectural Decision: Phase 4 Identity Mutation
-**Explicit Trade-off:** Phase 4 represents a complete, destructive departure from the application's foundational identity (Single-VM, No Concurrency, Monolithic State). We explicitly mandate that no MVP code should be abstracted, engineered, or "future-proofed" to accommodate Phase 4. We trade future migration ease for absolute development velocity and strict adherence to the current non-concurrent mandates today.
+**Explicit Trade-off:** Phase 4 represents a significant evolution from the application's foundational architecture. We explicitly mandate that no MVP code should be abstracted, engineered, or "future-proofed" to accommodate Phase 4. We trade future migration ease for absolute development velocity today.
 
 ### 4.1 Multi-Tenancy & White Label
 - **Bar/Brand Customization**: White-label versions for bars/restaurants
@@ -126,7 +126,7 @@ This document outlines the strategic direction and planned features for Mixology
 
 ### Long-term (Q4 2026+)
 - Migrate to microservices architecture
-- Implement event-driven architecture (Note: Represents architectural departure from current "No Concurrency" mandate)
+- Implement event-driven architecture for advanced workflows
 - Add advanced monitoring and APM
 - Implement blue-green deployments
 - Add disaster recovery procedures

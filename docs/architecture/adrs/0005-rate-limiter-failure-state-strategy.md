@@ -1,10 +1,12 @@
-# ADR 0005: Local-Only Rate Limiting Strategy (Removal of Redis Dependency)
+# ADR 0005: Local-Only Rate Limiting Strategy (Redis Dependency Reintroduced)
 
 ## Status
-Accepted
+Accepted (Amended by [ADR 0017](./0017-b2b-shared-inventory-bullmq-concurrency.md))
+
+> **Important Amendment (May 2026):** As of ADR 0017 (B2B Shared Inventory + BullMQ Concurrency), **Redis is reinstated as a critical core infrastructure dependency** for the BullMQ-based `bar-orders` queue. Redis downtime now means NO cocktail preparation is possible. The local-only rate limiting strategy in this ADR remains in effect for the `ThrottlerGuard` specifically, but Redis is no longer optional for the system as a whole. See ADR 0017 for full context.
 
 ## Context
-The system originally relied on Redis for critical security and financial protection mechanisms. However, to adhere to the "No Concurrency / No Distributed State" mandate, we have simplified the architecture:
+The system originally relied on Redis for critical security and financial protection mechanisms. The original ADR simplified the architecture to remove the Redis dependency for rate limiting and AI quota tracking. **Note:** The "No Concurrency / No Distributed State" mandate referenced below has been **superseded by ADR 0017**, which reintroduces Redis as a critical infrastructure dependency for BullMQ queue processing. The local-only rate limiting approach described here remains in effect for the `ThrottlerGuard` only.
 
 1. **Local Rate Limiting (UC 13.3)**: `ThrottlerGuard` uses in-memory storage only, preventing API abuse per Node.js instance
 2. **AI Quota Enforcement**: Uses PostgreSQL directly, bypassing Redis for quota tracking
@@ -12,10 +14,10 @@ The system originally relied on Redis for critical security and financial protec
 UC 11.4 defines "Redis Graceful Degradation" stating the system bypasses the cache if Redis is down. However, with the simplified architecture, we have eliminated the Redis dependency for rate limiting entirely, avoiding the security dilemma:
 
 - **Local-Only**: Rate limiting is per-process, not global across instances
-- **No Redis Dependency**: Rate limiting continues to function even if Redis is unavailable
+- **Rate Limiter Resilient**: Rate limiting continues to function even if Redis is unavailable
 
 ## Decision
-We implement a **local-only rate limiting strategy** to adhere to the "No Concurrency" mandate:
+We implement a **local-only rate limiting strategy** (amended by ADR 0017):
 
 1. **Primary**: In-memory Map storage per Node.js process
 2. **No Distributed State**: No Redis synchronization across instances

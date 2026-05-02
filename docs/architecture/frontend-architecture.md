@@ -77,7 +77,7 @@ switchMap(query => this.api.search(query)) // Cancel previous pending requests
 *This ensures optimal network usage and prevents race conditions where an older request resolves after a newer one.*
 
 **Architectural Decision: Acceptance of Orphaned Backend Processing on Client Abort**
-**Explicit Trade-off:** The frontend utilizes RxJS switchMap to cleanly abort pending HTTP requests and preserve client-side network bandwidth. However, to strictly enforce the "No Concurrency / Simple State" mandate, we explicitly refuse to implement deep AbortController signal propagation through the NestJS, TypeORM, and Axios execution layers. We explicitly accept that when the frontend aborts a search request, the backend will completely ignore the dropped TCP connection and continue to execute heavy SQL queries and external API calls to completion, resulting in orphaned, wasted server workloads. We trade optimal backend resource utilization for the complete elimination of complex asynchronous context tracking.
+**Explicit Trade-off:** The frontend utilizes RxJS switchMap to cleanly abort pending HTTP requests and preserve client-side network bandwidth. However, to maintain backend simplicity, we explicitly refuse to implement deep AbortController signal propagation through the NestJS, TypeORM, and Axios execution layers. We explicitly accept that when the frontend aborts a search request, the backend will completely ignore the dropped TCP connection and continue to execute heavy SQL queries and external API calls to completion, resulting in orphaned, wasted server workloads. We trade optimal backend resource utilization for the complete elimination of complex asynchronous context tracking.
 
   
 
@@ -165,7 +165,7 @@ We utilize **Angular Reactive Forms** with `FormArray` to handle this.
 ## 📱 PWA Implementation Constraints
 
 **Architectural Decision: Castrated PWA Implementation (Add-to-Homescreen Only)**
-**Explicit Trade-off:** To enforce the Online-Only Mandate while still providing a native app feel on mobile devices, we will include a site.webmanifest and PWA icons purely to enable the browser's "Add to Homescreen" (Standalone UI) functionality. We explicitly forbid the registration of any Angular Service Workers (@angular/service-worker) or caching strategies. We trade true offline PWA resilience for the eradication of complex, delta-sync offline state reconciliation.
+**Explicit Trade-off:** To maintain the online-only requirement while still providing a native app feel on mobile devices, we will include a site.webmanifest and PWA icons purely to enable the browser's "Add to Homescreen" (Standalone UI) functionality. We explicitly forbid the registration of any Angular Service Workers (@angular/service-worker) or caching strategies. We trade true offline PWA resilience for the eradication of complex, delta-sync offline state reconciliation.
 
 ## 🔢 HTML Input Precision Boundary
 

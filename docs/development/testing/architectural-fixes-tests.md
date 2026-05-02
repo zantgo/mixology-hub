@@ -119,10 +119,10 @@ describe('CocktailIngredient Precision', () => {
 });
 ```
 
-### 2. Network Error Handling Tests (Online-Only Mandate)
+### 2. Network Error Handling Tests
 
 **Architectural Decision**: Total Eradication of Offline State Artifacts
-**Explicit Trade-off**: To strictly enforce the Online-Only Mandate, we explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with idempotent retries) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity and the complete removal of the delta-sync state machine.
+**Explicit Trade-off**: We explicitly accept the total loss of graceful offline degradation. Any pre-existing offline UI banners, optimistic "sync pending" states, and enableOfflineMode preference toggles must be completely eradicated from the frontend and API contracts. If a user loses connectivity, standard HTTP timeouts and network error toasts (with retry options for idempotent endpoints) will be the only fallback. We trade graceful offline UX for absolute codebase simplicity.
 
 #### 2.1 Network Error Handling
 ```typescript

@@ -17,9 +17,9 @@
  
 
 ## 📖 Project Overview
- 
+  
 
-MixologyHub is a modern, enterprise-grade full-stack web application designed for cocktail enthusiasts and professional bartenders. It serves as a unified platform to discover new recipes, manage a personal ingredient inventory, and generate completely unique cocktail recipes using Generative AI.
+MixologyHub is a modern, enterprise-grade full-stack web application designed for professional bars and bartenders. It serves as a unified Point-of-Sale and inventory management platform to discover recipes, manage a shared bar ingredient inventory, and generate unique cocktail recipes using Generative AI.
  
 
 Built as a showcase of **Senior Full-Stack Engineering** practices, this project demonstrates clean architecture, scalable API design, third-party API aggregation, strict data modeling, and containerized deployment.
@@ -27,20 +27,22 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
 ## ✨ Key Features & Technical Highlights
  
 
-- **🧠 Agnostic AI Bartender:** Implements the Dependency Inversion principle to integrate LLMs (Large Language Models). Configured via environment variables, you can plug in **DeepSeek, OpenAI, Anthropic**, or any compatible API to generate strict JSON recipes based on a user's available ingredients.
+- **🧠 Agnostic AI Bartender:** Implements the Dependency Inversion principle to integrate LLMs (Large Language Models). Configured via environment variables, you can plug in **DeepSeek, OpenAI, Anthropic**, or any compatible API to generate strict JSON recipes based on the bar's available ingredients.
 
 - **🌍 Unified API Aggregation (Adapter Pattern):** Seamlessly merges local database user-recipes with thousands of public recipes from `TheCocktailDB`. The backend normalizes dirty external JSON into strict internal DTOs on the fly.
 
-- **📦 Smart Inventory & Math Engine:** Tracks user ingredients with strict base-unit conversions (e.g., converting ounces to milliliters mathematically). The system dynamically queries and calculates exactly which cocktails a user can make based on real-time stock.
+- **📦 B2B Shared Inventory & Math Engine:** A single shared `bar_inventory` table serves all bartenders. Strict base-unit conversions (e.g., ounces to milliliters) ensure mathematical precision. The system dynamically calculates exactly which cocktails the bar can make based on real-time stock.
+
+- **🔄 Queue-Based Concurrency (BullMQ):** Cocktail preparation orders are serialized through a Redis-backed BullMQ queue with `concurrency: 1`, mathematically eliminating race conditions and double-deductions when multiple bartenders operate simultaneously.
 
 - **⚡ High Performance Caching:** Integrates **Redis** to cache external API searches (TTL-based), drastically reducing third-party API calls and improving response times.
 
 - **🔐 Modern Reactive UI:** The frontend is built with **Angular 18+**, utilizing Standalone Components, the new Zoneless Change Detection (`provideZonelessChangeDetection`), Angular Signals for state management, and strict RxJS streams.
 
 
-> **🔐 Note on Authentication (MVP State):** To simplify the local developer experience and code review process, Auth is currently bypassed. A `SeederService` automatically provisions a mock user (`mock@test.com`) on boot to satisfy all Foreign Key database constraints. Full JWT/OAuth2 implementation is slated for the next roadmap phase.
+> **🔐 Note on Authentication (MVP State):** To simplify the local developer experience and code review process, Auth is currently bypassed. A `SeederService` automatically provisions a mock admin (`mock@test.com`) on boot to satisfy all Foreign Key database constraints. Full JWT/OAuth2 implementation with admin/bartender roles is slated for the next roadmap phase.
 
-> **🌐 Online-Only Mandate:** The application requires a persistent internet connection to function. All offline sync functionality has been removed to simplify architecture and eliminate synchronization complexities.
+> **🏢 B2B Single-Bar Architecture:** MixologyHub is now a Point-of-Sale system for a single physical bar. All bartenders share a single `bar_inventory`. Concurrency is managed via BullMQ queue serialization. The application requires a persistent internet connection to function.
 
   
 ## 🏗️ High-Level Architecture
@@ -54,18 +56,22 @@ graph TB
     end
     
     subgraph "Application Layer"
-        Frontend[Angular 18 SPA<br/>Signals • RxJS • Reactive] -->|REST API| Backend
+        Frontend[Angular 21 SPA<br/>Signals • RxJS • Reactive] -->|REST API| Backend
         Backend[NestJS Backend<br/>Gateway • Adapters • AI Prompts]
+        Worker[BullMQ Worker<br/>concurrency: 1]
     end
     
     subgraph "Data & External Services"
-        Backend --> PostgreSQL[(PostgreSQL<br/>Relational Data Model)]
-        Backend --> Redis[(Redis<br/>Cache & Rate Limiting)]
+        Backend -->|Enqueue| Worker
+        Worker --> PostgreSQL[(PostgreSQL<br/>Shared Bar Inventory)]
+        Backend --> Redis[(Redis<br/>Cache • BullMQ Queue)]
+        Worker --> Redis
         Backend --> External[External APIs<br/>TheCocktailDB • LLM Providers]
     end
     
     style Frontend fill:#dd0031,color:#fff
     style Backend fill:#e0234e,color:#fff
+    style Worker fill:#e0234e,color:#fff
     style PostgreSQL fill:#336791,color:#fff
     style Redis fill:#dc382d,color:#fff
     style External fill:#10a37f,color:#fff
@@ -167,10 +173,10 @@ To keep this README concise, detailed engineering documentation has been separat
  
 | Layer              | Technologies Used                                        |
 | ------------------ | -------------------------------------------------------- |
-| **Frontend**       | Angular, TypeScript, RxJS, Angular Signals, SCSS, Vitest |
-| **Backend**        | NestJS, Node.js, TypeORM, Swagger (OpenAPI)              |
+| **Frontend**       | Angular 21, TypeScript, RxJS, Signals, SCSS, Vitest      |
+| **Backend**        | NestJS, Node.js, TypeORM, BullMQ, Swagger (OpenAPI)      |
 | **Database**       | PostgreSQL                                               |
-| **Cache**          | Redis                                                    |
+| **Queue/Cache**    | Redis (BullMQ Queue + API Cache)                         |
 | **Infrastructure** | Docker, Docker Compose, Nginx                            |
   
 ## 👨‍💻 Author

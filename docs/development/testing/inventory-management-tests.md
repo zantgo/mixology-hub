@@ -1,5 +1,7 @@
 # Inventory Management Tests
 
+> **PENDING B2B MIGRATION:** These test specifications reference the old B2C `UserInventory` model. When the codebase is migrated, update all references: `UserInventoryService` → `BarInventoryService`, `getUserInventory` → `getBarInventory`. Test context shifts from per-user isolation to shared bar inventory.
+
 **Example TDD for `MeasureParserService` (Recurring Decimal Edge Case):**
 ```typescript
 // Test recurring decimals and database precision

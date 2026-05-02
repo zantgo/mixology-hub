@@ -151,10 +151,11 @@ We follow the **Conventional Commits** specification to ensure a clean, searchab
 ### Frontend Requirements
 - **Same Library, Same Precision:** The Angular frontend MUST use the same `decimal.js` library for all inventory-related calculations to maintain consistency with backend math.
 
- - **Explicit Architectural Trade-off (Bundle Size & DRY Violation):** Shipping a heavy math library like `decimal.js` (approx ~30kb minified/gzipped) to the client solely to calculate optimistic UI inventory updates is a heavy payload trade-off. Additionally, we must duplicate the entire `UnitConverterService` logic (conversion factors, precision handling, unit validation) across both Node.js backend and Angular frontend. This violates DRY (Don't Repeat Yourself) but is necessary because:
+ - **Explicit Architectural Trade-off (Bundle Size & DRY Violation):** Shipping a heavy math library like `decimal.js` (approx ~30kb minified/gzipped) to the client for frontend mathematical precision is a heavy payload trade-off. Additionally, we must duplicate the entire `UnitConverterService` logic (conversion factors, precision handling, unit validation) across both Node.js backend and Angular frontend. This violates DRY (Don't Repeat Yourself) but is necessary because:
 
-   1. **Mathematical Parity**: Both client and server must use identical conversion logic to prevent UI/server state desync.
-   2. **Maintenance Burden**: Any changes to unit conversion logic must be synchronized across both codebases.
+   1. **Mathematical Parity**: Both client and server must use identical conversion logic to prevent UI/server state desync when displaying converted units.
+   2. **Display Precision**: The frontend needs exact decimal arithmetic for displaying localized unit conversions (e.g., oz to ml), correct rounding of fractional measurements, and consistency with the backend math engine.
+   3. **Maintenance Burden**: Any changes to unit conversion logic must be synchronized across both codebases.
 
   We explicitly accept this duplication and bundle size increase to guarantee perfect mathematical parity between the Angular UI and PostgreSQL, prioritizing data integrity over minimal bundle size and DRY purity.
 
@@ -184,7 +185,7 @@ const quantity = new Decimal(response.quantity); // Preserves exact precision
   
   @Injectable()
   export class InventoryMathService {
-    // Optimistic UI updates must use decimal.js
+    // Frontend mathematical precision must use decimal.js
     calculateRemaining(current: number, required: number): number {
       return new Decimal(current).minus(new Decimal(required)).toNumber();
     }
