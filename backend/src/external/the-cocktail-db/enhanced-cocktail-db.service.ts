@@ -230,7 +230,7 @@ export class EnhancedTheCocktailDbService {
   }
 
   getCircuitBreakerState() {
-    return { ...this.circuitBreaker };
+    return Object.freeze({ ...this.circuitBreaker });
   }
 
   resetCircuitBreakerManually() {

@@ -2,6 +2,7 @@ import { Controller, Post, Delete, Get, Param, Body, UseGuards } from '@nestjs/c
 import { AdminService } from './admin.service';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AdminGuard } from '../auth/guards/admin.guard';
 import { ReviewReportDto } from './dto/review-report.dto';
 import { MergeIngredientsDto } from './dto/merge-ingredients.dto';
 import { HideExternalCocktailDto } from './dto/hide-external-cocktail.dto';
@@ -10,7 +11,7 @@ import { SetSettingDto } from './dto/set-setting.dto';
 @ApiTags('Admin')
 @ApiBearerAuth()
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 

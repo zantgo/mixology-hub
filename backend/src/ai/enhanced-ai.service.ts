@@ -11,6 +11,7 @@ import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.en
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { LlmAdapterService } from '../external/llm/llm-adapter.service';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 export interface AiRecipeRequest {
   ingredients: string[];
@@ -278,13 +279,15 @@ export class EnhancedAiService {
 
   async getAiRecipeHistory(
     userId: string,
-    pagination: { limit: number; offset: number },
+    pagination: PaginationQueryDto,
   ): Promise<{ data: any[]; total: number }> {
+    const { limit = 10, page = 1 } = pagination;
+    const offset = (page - 1) * limit;
     const [records, total] = await this.aiRepository.findAndCount({
       where: { user: { id: userId } },
       order: { created_at: 'DESC' },
-      skip: pagination.offset,
-      take: pagination.limit,
+      skip: offset,
+      take: limit,
     });
 
     const data = records.map(record => ({
@@ -855,10 +858,11 @@ export class EnhancedAiService {
     const lookupNames = ingredients.map((i) => i.name.toLowerCase());
 
     // Bulk lookup existing ingredients to avoid N+1 queries
+    const normalizedNames = lookupNames.map((n) => n.toUpperCase().trim());
     const existingIngredients = await this.ingredientRepository.find({
-      where: lookupNames.map((name) => ({ name })),
+      where: normalizedNames.map((name) => ({ normalizedName: name })),
     });
-    const ingredientMap = new Map(existingIngredients.map((i) => [i.name, i]));
+    const ingredientMap = new Map(existingIngredients.map((i) => [i.normalizedName.toLowerCase(), i]));
 
     for (const ingredient of ingredients) {
       const lookupName = ingredient.name.toLowerCase();

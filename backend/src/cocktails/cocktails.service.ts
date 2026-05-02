@@ -144,6 +144,7 @@ export class CocktailsService {
     const { limit = 10, page = 1 } = paginationQuery;
     const offset = (page - 1) * limit;
     const [data, total] = await this.cocktailRepository.findAndCount({
+      where: { is_deleted: false },
       relations: ['ingredients', 'ingredients.ingredient'],
       skip: offset,
       take: limit,
@@ -166,7 +167,7 @@ export class CocktailsService {
 
   async findOne(id: string) {
     const cocktail = await this.cocktailRepository.findOne({
-      where: { id },
+      where: { id, is_deleted: false },
       relations: ['ingredients', 'ingredients.ingredient'],
     });
     if (!cocktail) throw new NotFoundException(`Cocktail #${id} not found`);
@@ -190,8 +191,11 @@ export class CocktailsService {
     return await this.cocktailRepository.save(cocktail);
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string) {
     const cocktail = await this.findOne(id);
+    if (userId && cocktail.user?.id !== userId) {
+      throw new NotFoundException(`Cocktail #${id} not found or you don't have permission to delete it`);
+    }
     return await this.cocktailRepository.remove(cocktail);
   }
 }

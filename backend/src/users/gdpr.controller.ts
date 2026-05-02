@@ -1,8 +1,8 @@
 import { Controller, Post, Get, Delete, Body, Param, UseGuards, HttpCode, HttpStatus, Request } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import { User } from './entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
 @ApiTags('GDPR')
@@ -12,7 +12,7 @@ export class GdprController {
   constructor(private readonly gdprService: GdprDataRetentionService) {}
 
   @Get('export-data')
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Export all user data (GDPR right to access)' })
   @ApiResponse({ status: 200, description: 'User data exported successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -27,7 +27,7 @@ export class GdprController {
 
   @Post('request-deletion')
   @HttpCode(HttpStatus.ACCEPTED)
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Request account deletion (GDPR right to be forgotten)' })
   @ApiResponse({ status: 202, description: 'Deletion request accepted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

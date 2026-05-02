@@ -1,11 +1,11 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgFor, NgIf } from '@angular/common';
 import { UserService } from './core/services/user.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgIf, NgFor],
   template: `
     <div style="padding: 40px; font-family: system-ui, sans-serif; max-width: 800px; margin: auto;">
       <h1 style="color: #333;">👥 MixologyHub - User Manager</h1>

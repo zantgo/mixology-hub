@@ -304,7 +304,7 @@ export class GdprDataRetentionService {
         ingredientId: item.ingredient.id,
         ingredientName: item.ingredient.name,
         quantity: item.quantity,
-        unit: item.unit,
+        unit: item.ingredient.baseUnit,
       })),
       aiGeneratedRecipes: aiRecipes.map(recipe => ({
         id: recipe.id,

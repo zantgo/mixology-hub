@@ -85,7 +85,7 @@ export class Ingredient {
    * Default is 1.0 (water density)
    */
   @ApiProperty({ example: 1.0, description: 'Density in g/ml for mass-volume conversions' })
-  @Column({ type: 'decimal', precision: 5, scale: 4, default: 1.0, transformer: new ColumnNumericTransformer() })
+  @Column({ type: 'decimal', precision: 10, scale: 4, default: 1.0, transformer: new ColumnNumericTransformer() })
   density: Decimal;
 
   /**

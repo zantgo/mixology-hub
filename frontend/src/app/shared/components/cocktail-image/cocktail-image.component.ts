@@ -1,11 +1,9 @@
 import { Component, Input, OnInit, OnChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ImageService } from '../../core/services/image.service';
 
 @Component({
   selector: 'app-cocktail-image',
   standalone: true,
-  imports: [CommonModule],
   template: `
     <div class="cocktail-image-container">
       <img

@@ -429,7 +429,7 @@ export class UserInventoryService {
 
     return {
       totalItems,
-      totalVolumeMl: Math.round(totalVolume.toNumber()),
+      totalVolumeMl: totalVolume.toDecimalPlaces(1).toNumber(),
       categories: Array.from(categories),
       lowStockItems: inventory.filter(item => {
         if (item.ingredient.baseUnit === 'count') {

@@ -66,7 +66,7 @@ export class CocktailAggregatorService {
         // Cache miss - fetch fresh data
         cachedResults = await this.fetchSearchResults(sanitizedName, options, userId);
         // Cache results for 5 minutes
-        await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 300);
+        await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 300000);
       }
 
       // Apply pagination
@@ -488,9 +488,8 @@ export class CocktailAggregatorService {
   private async fetchExternalCocktails(name: string): Promise<any[]> {
     try {
       if (!name) {
-        // For empty search, get random cocktails
         const randomCocktails: any[] = [];
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 3; i++) {
           try {
             const random = await this.externalService.getRandomCocktail();
             if (random) randomCocktails.push(random);

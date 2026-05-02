@@ -1,6 +1,6 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, QueryFailedError } from 'typeorm';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { Ingredient } from './entities/ingredient.entity';
@@ -64,6 +64,13 @@ export class IngredientsService {
 
   async remove(id: string) {
     const ingredient = await this.findOne(id);
-    return await this.ingredientRepository.remove(ingredient);
+    try {
+      return await this.ingredientRepository.remove(ingredient);
+    } catch (error: any) {
+      if (error instanceof QueryFailedError && (error as any).code === '23503') {
+        throw new BadRequestException('Cannot delete ingredient: it is used in existing cocktail recipes. Remove references first or merge with another ingredient.');
+      }
+      throw error;
+    }
   }
 }

@@ -152,11 +152,8 @@ export class AuthService {
   }
 
   async logout(accessToken: string, refreshToken?: string) {
-    // Extract token from "Bearer <token>" format
-    const token = accessToken.replace('Bearer ', '');
-
-    // Blacklist access token
-    await this.blacklistToken(token, 'user_logout');
+    // Token is already extracted by the controller (stripped of 'Bearer ' prefix)
+    await this.blacklistToken(accessToken, 'user_logout');
 
     // Blacklist refresh token if provided
     if (refreshToken) {
@@ -265,9 +262,9 @@ export class AuthService {
     user.resetPasswordExpires = resetTokenExpiry;
     await this.userRepository.save(user);
 
-    // In a real application, send email with reset link
-    // For now, return the token (in production, this would be sent via email)
-    return { resetToken };
+      // In a real application, send email with reset link.
+      // WARNING: Do NOT return the token in the API response in production.
+      return { message: 'If the email is registered, a password reset link has been sent.' };
   }
 
   async resetPassword(token: string, newPassword: string) {

@@ -15,6 +15,7 @@ export class UnitConverterService {
     'count': new Decimal(1),
     'g': new Decimal(1),
     'kg': new Decimal(1000),
+    'parts': new Decimal(1),
   };
 
   convert(quantity: Decimal | number, fromUnit: string, toUnit: string, ingredient?: Ingredient): Decimal {

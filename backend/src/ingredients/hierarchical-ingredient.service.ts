@@ -267,6 +267,7 @@ export class HierarchicalIngredientService {
   private async findHierarchicalMatch(normalizedName: string): Promise<IngredientMatch | null> {
     const allIngredients = await this.ingredientRepository.find({
       relations: ['parent'],
+      take: 10000, // Safety cap to prevent unbounded memory usage
     });
 
     // Build an in-memory parent map to avoid per-ingredient DB queries
@@ -351,7 +352,9 @@ export class HierarchicalIngredientService {
   }
 
   private async findSynonymMatch(normalizedName: string): Promise<IngredientMatch | null> {
-    const allIngredients = await this.ingredientRepository.find();
+    const allIngredients = await this.ingredientRepository.find({
+      take: 10000, // Safety cap to prevent unbounded memory usage
+    });
 
     for (const ingredient of allIngredients) {
       // Check ingredient name
@@ -380,7 +383,9 @@ export class HierarchicalIngredientService {
   }
 
   private async findFuzzyMatch(normalizedName: string): Promise<IngredientMatch | null> {
-    const allIngredients = await this.ingredientRepository.find();
+    const allIngredients = await this.ingredientRepository.find({
+      take: 10000, // Safety cap to prevent unbounded memory usage
+    });
     let bestMatch: Ingredient | null = null;
     let bestScore = 0;
 

@@ -1,12 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('Ingredients')
+@ApiBearerAuth()
 @Controller('ingredients')
+@UseGuards(JwtAuthGuard)
 export class IngredientsController {
   constructor(private readonly ingredientsService: IngredientsService) {}
 
@@ -16,12 +20,14 @@ export class IngredientsController {
     return this.ingredientsService.create(createIngredientDto);
   }
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Get all available ingredients with pagination' })
   findAll(@Query() paginationQuery: PaginationQueryDto) {
     return this.ingredientsService.findAll(paginationQuery);
   }
 
+  @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific ingredient by ID' })
   findOne(@Param('id') id: string) {

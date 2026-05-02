@@ -66,10 +66,11 @@ export class AiService {
 
       // 2. Bulk lookup existing ingredients to avoid N+1 queries
       const ingredientNames = recipe.ingredients.map((item: any) => item.name.toLowerCase());
+      const normalizedNames = ingredientNames.map((n: string) => n.toUpperCase().trim());
       const existingIngredients = await em.find(Ingredient, {
-        where: ingredientNames.map((name: string) => ({ name })),
+        where: normalizedNames.map((name: string) => ({ normalizedName: name })),
       });
-      const ingredientMap = new Map(existingIngredients.map((i) => [i.name, i]));
+      const ingredientMap = new Map(existingIngredients.map((i) => [i.normalizedName.toLowerCase(), i]));
 
       for (const item of recipe.ingredients) {
         const lookupName = item.name.toLowerCase();
