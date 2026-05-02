@@ -311,7 +311,7 @@ export class CocktailAggregatorService {
       metadata: {
         complexityScore,
         ingredientCount: ingredients.length,
-        estimatedVolumeMl: Math.round(totalVolumeMl),
+        estimatedVolumeMl: totalVolumeMl.round().toNumber(),
         lastUpdated: new Date().toISOString(),
         source: 'thecocktaildb',
       }

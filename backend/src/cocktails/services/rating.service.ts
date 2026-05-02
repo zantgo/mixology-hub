@@ -61,22 +61,20 @@ export class RatingService {
       }
 
       // Auto-fork: Create local copy of external cocktail
-      const forkedCocktail = this.cocktailRepository.create({
-        name: externalCocktail.strDrink || externalCocktail.name,
-        description: externalCocktail.strInstructions || externalCocktail.instructions,
-        instructions: externalCocktail.strInstructions || externalCocktail.instructions || '',
-        source: 'api',
-        external_id: externalId,
-        image_full: null,
-        image_thumb: null,
-        user, // The user who forked it by rating
-        is_public: false, // Private to the user who forked it
-        is_deleted: false,
-      });
+      const raw = externalCocktail as Record<string, any>;
+      const forked = new Cocktail();
+      forked.name = raw.strDrink || raw.name || 'Unknown';
+      forked.description = raw.strInstructions || raw.instructions || '';
+      forked.instructions = raw.strInstructions || raw.instructions || '';
+      forked.source = 'api';
+      forked.external_id = externalId;
+      forked.user = user;
+      forked.is_public = false;
+      forked.is_deleted = false;
 
       // TODO: Also fork ingredients if needed
 
-      return await this.cocktailRepository.save(forkedCocktail);
+      return await this.cocktailRepository.save(forked);
     } catch (error) {
       console.error('Failed to fork external cocktail:', error);
       return null;
