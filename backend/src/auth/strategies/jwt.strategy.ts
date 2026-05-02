@@ -22,8 +22,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     // Extract token from request
     const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
     
-    // Validate user and check token blacklist
-    const user = await this.authService.validateUser(payload);
+    // Validate user and check token blacklist using actual token string
+    const user = await this.authService.validateUser(payload, token);
     
     if (!user) {
       throw new UnauthorizedException('Invalid or expired token');

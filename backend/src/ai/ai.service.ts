@@ -64,16 +64,24 @@ export class AiService {
       });
       const savedCocktail = await em.save(newCocktail);
 
-      // 2. Process ingredients within the transaction
+      // 2. Bulk lookup existing ingredients to avoid N+1 queries
+      const ingredientNames = recipe.ingredients.map((item: any) => item.name.toLowerCase());
+      const existingIngredients = await em.find(Ingredient, {
+        where: ingredientNames.map((name: string) => ({ name })),
+      });
+      const ingredientMap = new Map(existingIngredients.map((i) => [i.name, i]));
+
       for (const item of recipe.ingredients) {
-        let ingredient = await em.findOne(Ingredient, { where: { name: item.name.toLowerCase() } });
-        
+        const lookupName = item.name.toLowerCase();
+        let ingredient = ingredientMap.get(lookupName);
+
         if (!ingredient) {
           ingredient = em.create(Ingredient, {
-            name: item.name.toLowerCase(),
+            name: lookupName,
             baseUnit: this.determineBaseUnit(item.unit || 'count'),
           });
           ingredient = await em.save(ingredient);
+          ingredientMap.set(lookupName, ingredient);
         }
 
         // 3. Create the relationship using instances within the 'em' context
@@ -84,7 +92,7 @@ export class AiService {
           amount: item.amount || 1,
           unit: item.unit || 'count'
         });
-        
+
         await em.save(cocktailIngredient);
       }
       return savedCocktail;

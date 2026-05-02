@@ -9,6 +9,9 @@ export class UnitConverterService {
     'oz': new Decimal(29.57),
     'l': new Decimal(1000),
     'cl': new Decimal(10),
+    'tbsp': new Decimal(14.79),
+    'tsp': new Decimal(4.93),
+    'dash': new Decimal(0.92),
     'count': new Decimal(1),
     'g': new Decimal(1),
     'kg': new Decimal(1000),
@@ -87,6 +90,6 @@ export class UnitConverterService {
   }
 
   private isVolumeUnit(unit: string): boolean {
-    return ['ml', 'oz', 'l', 'cl'].includes(unit);
+    return ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash'].includes(unit);
   }
 }

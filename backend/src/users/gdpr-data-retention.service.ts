@@ -9,6 +9,7 @@ import { Ai } from '../ai/entities/ai.entity';
 import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
 import { Favorite } from '../favorites/entities/favorite.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
+import { TokenBlacklist } from '../auth/entities/token-blacklist.entity';
 import { ConfigService } from '@nestjs/config';
 
 export interface DataRetentionPolicy {
@@ -46,6 +47,8 @@ export class GdprDataRetentionService {
     private readonly favoriteRepository: Repository<Favorite>,
     @InjectRepository(Cocktail)
     private readonly cocktailRepository: Repository<Cocktail>,
+    @InjectRepository(TokenBlacklist)
+    private readonly tokenBlacklistRepository: Repository<TokenBlacklist>,
     private readonly configService: ConfigService,
   ) {
     // Load retention policy from config or use defaults
@@ -86,6 +89,10 @@ export class GdprDataRetentionService {
       
       // 4. Clean up old AI generated data
       results.deletedAiData = await this.cleanupOldAiData();
+
+      // 5. Clean up expired token blacklist entries
+      const deletedTokens = await this.cleanupExpiredTokens();
+      this.logger.log(`Cleaned up ${deletedTokens} expired tokens`);
 
       this.logger.log(`GDPR cleanup completed: ${JSON.stringify(results)}`);
       
@@ -196,6 +203,17 @@ export class GdprDataRetentionService {
     return result.affected || 0;
   }
 
+  async cleanupExpiredTokens(): Promise<number> {
+    const result = await this.tokenBlacklistRepository
+      .createQueryBuilder()
+      .delete()
+      .where('expires_at < NOW()')
+      .execute();
+
+    this.logger.log(`Cleaned up ${result.affected || 0} expired token blacklist entries`);
+    return result.affected || 0;
+  }
+
   /**
    * Anonymize a user's personal data
    */
@@ -223,6 +241,15 @@ export class GdprDataRetentionService {
    * Delete all data associated with a user
    */
   private async deleteUserData(userId: string): Promise<void> {
+    // Delete user-created cocktails first (hard delete via repository to respect cascade)
+    const userCocktails = await this.cocktailRepository.find({
+      where: { user: { id: userId } },
+      relations: ['ingredients'],
+    });
+    for (const cocktail of userCocktails) {
+      await this.cocktailRepository.remove(cocktail);
+    }
+
     // Delete user inventory
     await this.inventoryRepository.delete({ user: { id: userId } });
 
@@ -237,13 +264,6 @@ export class GdprDataRetentionService {
 
     // Delete AI quotas
     await this.quotaRepository.delete({ user: { id: userId } });
-
-    // Delete user-created cocktails (hard delete, bypassing soft-delete flag)
-    await this.cocktailRepository
-      .createQueryBuilder()
-      .delete()
-      .where('created_by = :userId', { userId })
-      .execute();
 
     this.logger.log(`Deleted all data for user ${userId}`);
   }

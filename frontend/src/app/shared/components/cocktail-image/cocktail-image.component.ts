@@ -1,4 +1,4 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { Component, Input, OnInit, OnChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ImageService } from '../../core/services/image.service';
 
@@ -35,7 +35,7 @@ import { ImageService } from '../../core/services/image.service';
     }
   `]
 })
-export class CocktailImageComponent implements OnInit {
+export class CocktailImageComponent implements OnInit, OnChanges {
   @Input() imageFull?: string;
   @Input() imageThumb?: string;
   @Input() cocktailName?: string;

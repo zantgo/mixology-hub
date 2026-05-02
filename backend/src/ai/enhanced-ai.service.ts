@@ -540,23 +540,44 @@ export class EnhancedAiService {
   }
 
   private parseAiResponse(rawResponse: any, request: AiRecipeRequest): AiRecipeResponse {
-    // This is a simplified parser - in reality, you'd need to handle
-    // various AI response formats and normalize them
-    
-    const defaultRecipe: AiRecipeResponse = {
+    // Try to extract structured data from AI response
+    if (typeof rawResponse === 'string') {
+      try {
+        const parsed = JSON.parse(rawResponse);
+        return this.buildRecipeFromParsed(parsed, request);
+      } catch (error) {
+        this.logger.error('AI returned unparseable response, raw:', rawResponse.substring(0, 300));
+        throw new InternalServerErrorException(
+          'AI returned an unrecognizable response format. Please try again.'
+        );
+      }
+    } else if (rawResponse && typeof rawResponse === 'object') {
+      return this.buildRecipeFromParsed(rawResponse, request);
+    }
+
+    this.logger.error('AI returned empty or invalid response');
+    throw new InternalServerErrorException(
+      'AI returned an empty response. Please try again.'
+    );
+  }
+
+  private buildRecipeFromParsed(parsed: any, request: AiRecipeRequest): AiRecipeResponse {
+    return {
       id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      name: `AI Generated ${request.theme ? request.theme + ' ' : ''}Cocktail`,
-      description: 'An AI-generated cocktail recipe',
-      instructions: ['Mix all ingredients together', 'Serve chilled'],
-      ingredients: request.ingredients.map((ing, index) => ({
+      name: parsed.name || `AI Generated ${request.theme ? request.theme + ' ' : ''}Cocktail`,
+      description: parsed.description || 'An AI-generated cocktail recipe',
+      instructions: Array.isArray(parsed.instructions)
+        ? parsed.instructions
+        : parsed.instructions ? [parsed.instructions] : [],
+      ingredients: parsed.ingredients || request.ingredients.map((ing, index) => ({
         name: ing,
-        amount: 1 + (index * 0.5),
-        unit: index % 2 === 0 ? 'oz' : 'ml',
+        amount: 1,
+        unit: 'oz',
         note: 'Adjust to taste',
       })),
       metadata: {
         difficulty: request.difficulty || 'medium',
-        preparationTime: '5 minutes',
+        preparationTime: parsed.metadata?.preparationTime || '5 minutes',
         servingSize: request.servingSize || 1,
         theme: request.theme,
         safetyWarnings: [],
@@ -570,27 +591,6 @@ export class EnhancedAiService {
         attempts: 1,
       },
     };
-
-    // Try to extract structured data from AI response
-    if (typeof rawResponse === 'string') {
-      try {
-        const parsed = JSON.parse(rawResponse);
-        if (parsed.name) defaultRecipe.name = parsed.name;
-        if (parsed.description) defaultRecipe.description = parsed.description;
-        if (parsed.instructions) defaultRecipe.instructions = Array.isArray(parsed.instructions) 
-          ? parsed.instructions 
-          : [parsed.instructions];
-        if (parsed.ingredients) defaultRecipe.ingredients = parsed.ingredients;
-      } catch (error) {
-        // If not JSON, try to parse as text
-        defaultRecipe.description = rawResponse.substring(0, 200) + '...';
-      }
-    } else if (rawResponse && typeof rawResponse === 'object') {
-      // Already an object, merge with defaults
-      Object.assign(defaultRecipe, rawResponse);
-    }
-
-    return defaultRecipe;
   }
 
   private async validateGeneratedRecipe(
@@ -852,21 +852,26 @@ export class EnhancedAiService {
     ingredients: Array<{ name: string; amount: number; unit: string }>,
   ): Promise<Ingredient[]> {
     const entities: Ingredient[] = [];
+    const lookupNames = ingredients.map((i) => i.name.toLowerCase());
+
+    // Bulk lookup existing ingredients to avoid N+1 queries
+    const existingIngredients = await this.ingredientRepository.find({
+      where: lookupNames.map((name) => ({ name })),
+    });
+    const ingredientMap = new Map(existingIngredients.map((i) => [i.name, i]));
 
     for (const ingredient of ingredients) {
-      // Try to find existing ingredient
-      let entity = await this.ingredientRepository.findOne({
-        where: { name: ingredient.name.toLowerCase() },
-      });
+      const lookupName = ingredient.name.toLowerCase();
+      let entity = ingredientMap.get(lookupName);
 
-      // If not found, create a new one (user-generated)
       if (!entity) {
         entity = this.ingredientRepository.create({
-          name: ingredient.name.toLowerCase(),
+          name: lookupName,
           baseUnit: this.determineBaseUnit(ingredient.unit),
-          createdBy: 'ai-generated', // Mark as AI-generated
+          createdBy: 'ai-generated',
         });
         entity = await this.ingredientRepository.save(entity);
+        ingredientMap.set(lookupName, entity);
       }
 
       entities.push(entity);

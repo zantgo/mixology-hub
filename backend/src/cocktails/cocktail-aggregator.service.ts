@@ -133,9 +133,11 @@ export class CocktailAggregatorService {
     return cocktails.filter(cocktail => {
       // Ingredient filter
       if (filters.ingredient) {
-        const hasIngredient = cocktail.ingredients.some((ing: any) =>
-          ing.ingredient.name.toLowerCase().includes(filters.ingredient!.toLowerCase())
-        );
+        const normalizedFilter = filters.ingredient.toLowerCase().trim();
+        const hasIngredient = cocktail.ingredients.some((ing: any) => {
+          const ingName = ing.ingredient?.name as string | undefined;
+          return ingName && ingName.toLowerCase().trim().includes(normalizedFilter);
+        });
         if (!hasIngredient) return false;
       }
 
@@ -198,10 +200,11 @@ export class CocktailAggregatorService {
     for (const cocktailIngredient of cocktail.ingredients) {
       const requiredIngredient = cocktailIngredient.ingredient;
       
-      // Check for direct match
+      // Check for direct match (ID first, then normalized name comparison)
+      const requiredName = requiredIngredient.name.toLowerCase().trim();
       const directMatch = inventory.find(item => 
         item.ingredient.id === requiredIngredient.id ||
-        item.ingredient.name.toLowerCase() === requiredIngredient.name.toLowerCase()
+        item.ingredient.name.toLowerCase().trim() === requiredName
       );
       
       if (directMatch) {

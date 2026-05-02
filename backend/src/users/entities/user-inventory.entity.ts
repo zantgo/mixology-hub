@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, Unique } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Unique } from 'typeorm';
 import { Decimal } from 'decimal.js';
 import { User } from './user.entity';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
@@ -14,13 +14,16 @@ export class UserInventory {
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @ManyToOne(() => Ingredient, { onDelete: 'CASCADE', eager: true })
+  @ManyToOne(() => Ingredient, { onDelete: 'RESTRICT', eager: true })
   @JoinColumn({ name: 'ingredient_id' })
   ingredient: Ingredient;
 
   @Column('decimal', { precision: 10, scale: 4, default: 0, transformer: new ColumnNumericTransformer() })
   quantity: Decimal;
 
-  @Column({ default: 'count' })
-  unit: string;
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt: Date;
 }

@@ -48,7 +48,14 @@ export class ImageService {
     };
   }
 
-  async processAndSaveBuffer(buffer: Buffer): Promise<{ full: string; thumb: string }> {
+  async processAndSaveBuffer(buffer: Buffer, mimetype?: string): Promise<{ full: string; thumb: string }> {
+    if (mimetype) {
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!allowedMimeTypes.includes(mimetype)) {
+        throw new BadRequestException('Invalid image format. Only JPG, PNG, and WebP are allowed.');
+      }
+    }
+
     const filename = uuidv4();
     const fullPath = path.join(this.UPLOAD_DIR, `${filename}-full.webp`);
     const thumbPath = path.join(this.UPLOAD_DIR, `${filename}-thumb.webp`);

@@ -75,13 +75,11 @@ export class UserInventoryService {
         ? quantityToStore
         : new Decimal(quantityToStore);
       inventoryItem.quantity = currentQty.plus(addQty);
-      inventoryItem.unit = ingredient.baseUnit;
     } else {
       inventoryItem = this.inventoryRepository.create({
         user: { id: userId },
         ingredient,
         quantity: quantityToStore,
-        unit: ingredient.baseUnit,
       });
     }
 
@@ -122,7 +120,6 @@ export class UserInventoryService {
     }
 
     item.quantity = quantityToStore instanceof Decimal ? quantityToStore : new Decimal(quantityToStore);
-    item.unit = item.ingredient.baseUnit;
 
     return await this.inventoryRepository.save(item);
   }
@@ -188,7 +185,7 @@ export class UserInventoryService {
     if (directMatch) {
       const hasEnough = this.unitConverter.hasEnoughStock(
         directMatch.quantity,
-        directMatch.unit,
+        directMatch.ingredient.baseUnit,
         requiredAmount,
         requiredUnit,
         requiredIngredient
@@ -213,7 +210,7 @@ export class UserInventoryService {
       if (substitutionMatch) {
         const hasEnough = this.unitConverter.hasEnoughStock(
           substitutionMatch.quantity,
-          substitutionMatch.unit,
+          substitutionMatch.ingredient.baseUnit,
           requiredAmount,
           requiredUnit,
           requiredIngredient
@@ -318,9 +315,11 @@ export class UserInventoryService {
       };
     }
 
-    const allCocktails = await this.cocktailRepository.find({
+    const candidateCocktails = await this.cocktailRepository.find({
       relations: ['ingredients', 'ingredients.ingredient'],
       where: { is_public: true },
+      take: 1000,
+      order: { created_at: 'DESC' },
     });
 
     const { limit = 10, page = 1 } = paginationQuery;
@@ -331,7 +330,7 @@ export class UserInventoryService {
     let iterations = 0;
 
     // Iterate through cocktails with a hard cap per ADR 0008
-    for (const cocktail of allCocktails) {
+    for (const cocktail of candidateCocktails) {
       if (iterations >= this.MAX_ITERATIONS) {
         break;
       }
@@ -401,10 +400,10 @@ export class UserInventoryService {
         const qty = item.quantity instanceof Decimal
           ? item.quantity.toNumber()
           : Number(item.quantity);
-        return new Decimal(sum).plus(qty);
+        return sum.plus(qty);
       }
       try {
-        const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
+        const volumeInMl = this.unitConverter.convert(item.quantity, item.ingredient.baseUnit, 'ml', item.ingredient);
         return sum.plus(volumeInMl);
       } catch {
         return sum;
@@ -440,7 +439,7 @@ export class UserInventoryService {
           return qty.lt(5);
         }
         try {
-          const volumeInMl = this.unitConverter.convert(item.quantity, item.unit, 'ml', item.ingredient);
+          const volumeInMl = this.unitConverter.convert(item.quantity, item.ingredient.baseUnit, 'ml', item.ingredient);
           return volumeInMl.lt(100);
         } catch {
           return false;
@@ -449,7 +448,7 @@ export class UserInventoryService {
         id: item.id,
         ingredientName: item.ingredient.name,
         quantity: item.quantity instanceof Decimal ? item.quantity.toNumber() : Number(item.quantity),
-        unit: item.unit,
+        unit: item.ingredient.baseUnit,
       })),
     };
   }

@@ -67,20 +67,27 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
-    if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
     // Check if account is locked
     if (user.accountLockedUntil && user.accountLockedUntil > new Date()) {
       throw new ForbiddenException('Account is temporarily locked due to too many failed attempts');
     }
 
+    // Verify password
+    const isPasswordValid = await bcrypt.compare(loginDto.password, user.passwordHash);
+    if (!isPasswordValid) {
+      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+      if (user.failedLoginAttempts >= 5) {
+        user.accountLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+        user.failedLoginAttempts = 0;
+      }
+      await this.userRepository.save(user);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     // Reset failed login attempts on successful login
-    if (user.failedLoginAttempts > 0) {
+    if (user.failedLoginAttempts > 0 || user.accountLockedUntil) {
       user.failedLoginAttempts = 0;
+      user.accountLockedUntil = null;
       await this.userRepository.save(user);
     }
 
@@ -121,8 +128,9 @@ export class AuthService {
         throw new UnauthorizedException('User not found');
       }
 
-      // Check if refresh token matches the one stored
-      if (user.refreshToken !== refreshTokenDto.refreshToken) {
+      // Check if refresh token matches the one stored (bcrypt compare)
+      const isTokenValid = await bcrypt.compare(refreshTokenDto.refreshToken, user.refreshToken);
+      if (!isTokenValid) {
         // Token reuse detected - blacklist all tokens for this user
         await this.blacklistAllUserTokens(user.id);
         throw new UnauthorizedException('Token reuse detected');
@@ -162,7 +170,7 @@ export class AuthService {
     await this.blacklistAllUserTokens(userId);
   }
 
-  async validateUser(payload: any): Promise<User | null> {
+  async validateUser(payload: any, token: string): Promise<User | null> {
     const user = await this.userRepository.findOne({
       where: { id: payload.sub },
     });
@@ -171,9 +179,9 @@ export class AuthService {
       return null;
     }
 
-    // Check if token is blacklisted
+    // Check if token is blacklisted by actual token value
     const isBlacklisted = await this.tokenBlacklistRepository.findOne({
-      where: { token: payload.jti },
+      where: { token },
     });
     if (isBlacklisted) {
       return null;
@@ -210,8 +218,9 @@ export class AuthService {
       }),
     ]);
 
-    // Store refresh token hash in database
-    user.refreshToken = refreshToken;
+    // Store HASHED refresh token in database (never store raw tokens)
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+    user.refreshToken = refreshTokenHash;
     await this.userRepository.save(user);
 
     return {

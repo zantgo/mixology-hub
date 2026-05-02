@@ -1,4 +1,4 @@
-import { IsOptional, IsPositive, Min, Max, IsString, IsNumber } from 'class-validator';
+import { IsOptional, IsPositive, Min, Max, IsInt } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -14,6 +14,7 @@ export class PaginationQueryDto {
   @ApiPropertyOptional({ description: 'Page number (default: 1, max: 100 to prevent database performance degradation)', minimum: 1, maximum: 100, default: 1 })
   @IsOptional()
   @Type(() => Number)
+  @IsInt()
   @Min(1)
   @Max(100, { message: 'Page number cannot exceed 100 to prevent database performance degradation.' })
   page?: number = 1;
