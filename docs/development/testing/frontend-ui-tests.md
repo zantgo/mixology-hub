@@ -1,5 +1,7 @@
 # Frontend UI Tests
 
+> **PENDING B2B MIGRATION:** The `InventoryStore.prepareDrink` synchronous pattern (lines 30-45) models the old B2C optimistic UI with immediate signal update. Update to B2B async flow: enqueue → 202 Accepted → poll `/cocktails/preparations/:logId/status` → update signal on completion.
+
 **Example TDD for RxJS Search Debouncing (UC 7.2):**
 ```typescript
 describe('CocktailSearchComponent - RxJS Debounce', () => {
