@@ -419,3 +419,76 @@ export class AdminInventoryController {
 - Bartenders can submit "Prepare" orders via `POST /cocktails/:id/prepare` (which enqueues a BullMQ job)
 - Bartenders can view their own preparation history and undo recent preparations (within the 15-minute window)
 - Bartenders can manage their own favorites and profile settings
+
+---
+
+## 🤖 MCP Agentic Architecture
+
+MixologyHub exposes itself as an **MCP (Model Context Protocol) Server** to LLM clients. Instead of stuffing entire inventories into prompts (the old "Context Stuffing" pattern), the LLM selectively invokes backend tools through structured MCP tool calls. This reduces token usage by >90% and eliminates the need for prompt truncation.
+
+### Architecture Overview
+
+```
+┌─────────┐  SSE/stdio   ┌──────────────┐   Tool Calls   ┌──────────────┐
+│  LLM    │─────MCP─────▶│  MCP Server   │──────────────▶│  Backend     │
+│ (Client)│◀────MCP──────│  (NestJS)     │◀──────────────│  Services    │
+└─────────┘              └──────────────┘               └──────────────┘
+                              │
+                              ▼
+                         ┌──────────┐
+                         │ Redis    │
+                         │ BullMQ   │──▶ BarOrders Worker
+                         └──────────┘     (concurrency: 1)
+```
+
+### Available MCP Tools
+
+| Tool Name | Type | Description | Audit |
+|-----------|------|-------------|-------|
+| `get_bar_inventory` | Read | Returns current bar stock levels | Sampled (10%) |
+| `search_cocktails` | Read | Unified search (local + external) | Sampled (10%) |
+| `get_cocktail_detail` | Read | Full recipe with ingredients + instructions | Sampled (10%) |
+| `convert_units` | Read | Convert between measurement units | No |
+| `prepare_cocktail` | Write | Enqueue a preparation order to BullMQ | Always |
+| `check_makeability` | Read | Check if a cocktail is makeable against bar stock | Sampled (10%) |
+
+### Transport Layer
+
+**1. SSE (Server-Sent Events) — Web LLMs:**
+- Endpoint: `GET /api/mcp/sse`
+- The LLM client connects via SSE and receives tool invocation events.
+- Tool results are returned via the SSE stream.
+- Used by web-based LLM providers (OpenAI, Anthropic, DeepSeek APIs).
+
+**2. stdio — Local LLMs:**
+- A standalone entrypoint (`mcp-server.ts`) communicates via stdin/stdout.
+- Supports Claude Desktop, Continue.dev, and other local MCP clients.
+- Uses the same tool definitions and service layer as the SSE transport.
+
+### Authentication
+
+LLM clients authenticate using a **one-time ticket** system:
+
+1. The frontend (or authenticated proxy) calls `POST /api/mcp/ticket` to generate a short-lived ticket.
+2. The ticket is valid for **30 seconds** and is single-use.
+3. The LLM client passes the ticket in the MCP handshake to establish a session.
+4. All subsequent tool calls in that session are attributed to the authenticated user for audit purposes.
+
+This prevents unauthenticated LLM tool access while avoiding the complexity of long-lived API keys.
+
+### AI Tool Audit (`AI_TOOL_AUDIT`)
+
+All tool invocations are logged for debugging, cost tracking, and abuse detection:
+- **Write operations** (`prepare_cocktail`): Logged unconditionally.
+- **Read operations** (`get_bar_inventory`, `search_cocktails`, etc.): Logged at a configurable sample rate (default 10%, via `AI_AUDIT_READ_SAMPLE_RATE` env var).
+- Each log entry records: tool name, arguments, result status (`success`, `error`), is_write flag, token usage estimate, and the triggering user ID.
+
+### Why Not Prompt Stuffing?
+
+The old approach injected the entire bar inventory (potentially hundreds of ingredients) into every LLM prompt. This caused:
+- **Token Bloat**: 100 ingredients × ~20 tokens each = 2,000+ tokens wasted per request
+- **Context Window Exhaustion**: Large inventories exceeded model context limits
+- **Hallucination Risk**: The LLM couldn't reliably track which ingredients it had already used across a multi-turn conversation
+- **Cost**: Every prompt iteration carried the full inventory payload
+
+MCP tool calling solves all four problems simultaneously. The LLM queries only what it needs, when it needs it.

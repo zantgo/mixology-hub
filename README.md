@@ -27,7 +27,7 @@ Built as a showcase of **Senior Full-Stack Engineering** practices, this project
 ## ✨ Key Features & Technical Highlights
  
 
-- **🧠 Agnostic AI Bartender:** Implements the Dependency Inversion principle to integrate LLMs (Large Language Models). Configured via environment variables, you can plug in **DeepSeek, OpenAI, Anthropic**, or any compatible API to generate strict JSON recipes based on the bar's available ingredients.
+- **🧠 MCP-Powered AI Bartender:** Uses the Model Context Protocol (MCP) instead of prompt stuffing. The LLM selectively invokes backend tools (`get_bar_inventory`, `search_cocktails`, `convert_units`, `prepare_cocktail`) to query only the data it needs, reducing token usage by >90% while maintaining mathematical accuracy.
 
 - **🌍 Unified API Aggregation (Adapter Pattern):** Seamlessly merges local database user-recipes with thousands of public recipes from `TheCocktailDB`. The backend normalizes dirty external JSON into strict internal DTOs on the fly.
 

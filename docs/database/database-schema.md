@@ -296,11 +296,22 @@ REPORTED_CONTENT {
   string setting_key PK "e.g., 'global_token_salt_version'"
   string setting_value "JSON or string value"
   timestamp updated_at
-   uuid updated_by FK "nullable: true, admin who changed it, ON DELETE SET NULL"
-}
+  uuid updated_by FK "nullable: true, admin who changed it, ON DELETE SET NULL"
+ }
 
--- SYNC_OPERATIONS table has been removed as part of the Online-Only Mandate
--- Offline sync functionality is no longer supported
+ AI_TOOL_AUDIT {
+   uuid id PK
+   string tool_name "e.g., 'get_bar_inventory', 'prepare_cocktail'"
+   jsonb arguments "Tool call parameters"
+   string result_status "enum: 'success', 'error'"
+   boolean is_write DEFAULT false "true = state-mutating call (logged unconditionally)"
+   integer tokens_used "nullable, LLM token cost estimate"
+   uuid triggered_by FK "nullable, user who initiated the AI session, ON DELETE SET NULL"
+   timestamp created_at
+ }
+
+ -- SYNC_OPERATIONS table has been removed as part of the Online-Only Mandate
+ -- Offline sync functionality is no longer supported
 
 ```
 
@@ -410,6 +421,17 @@ Stores user preferences and settings.
 - **`updated_at`:** Timestamp tracking when a user updates their rating (enables UPSERT operations).
 - **Relationship:** Many-to-many relationship between `USERS` and `COCKTAILS` tables.
 - **Cached Average:** The `cocktails.rating` column is a cached average calculated from all `cocktail_ratings.score` values for that cocktail.
+
+### 11. `ai_tool_audit` (MCP Tool Call Audit)
+
+Tracks every tool invocation from MCP-enabled LLM agents. Provides debugging visibility, cost tracking, and abuse detection for the agentic AI system.
+
+- **`tool_name`:** The MCP tool invoked (e.g., `get_bar_inventory`, `prepare_cocktail`, `search_cocktails`, `convert_units`).
+- **`arguments`:** JSONB column storing the full tool call parameters for forensic analysis.
+- **`result_status`:** Enum (`'success'`, `'error'`). Tracks whether the tool executed successfully.
+- **`is_write`:** Boolean flag. `true` for state-mutating calls (`prepare_cocktail`) which are logged unconditionally. `false` for read-only calls which are logged at a configurable sample rate (default 10%, configured via `AI_AUDIT_READ_SAMPLE_RATE` env var).
+- **`tokens_used`:** Nullable integer estimating LLM token cost for this invocation. Aggregated for cost monitoring.
+- **`triggered_by`:** FK to `users` (nullable, `ON DELETE SET NULL`). Tracks which user initiated the AI session.
 
   
 

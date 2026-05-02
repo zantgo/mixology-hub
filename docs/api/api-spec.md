@@ -835,6 +835,45 @@ Updates the status of a reported content item.
 
 ---
 
+### 9. MCP (Model Context Protocol)
+
+The backend exposes an MCP Server for AI agent tool calling. See ADR 0019.
+
+#### `POST /api/mcp/ticket`
+Generates a one-time authentication ticket for an MCP session. Requires a valid user JWT.
+
+- **Response (201 Created):**
+```json
+{
+  "ticket": "mcp_ticket_abc123...",
+  "expiresAt": "2026-05-02T12:00:30Z",
+  "ttlSeconds": 30
+}
+```
+- **Error (401):** Invalid or expired JWT.
+
+#### `GET /api/mcp/sse`
+Establishes an SSE (Server-Sent Events) stream for MCP tool communication. The client passes the ticket obtained from `POST /api/mcp/ticket` as a query parameter or header.
+
+- **Query Parameters:** `ticket` (required, single-use, 30-second TTL)
+- **Response (200):** SSE stream. The connection sends tool invocation events. The client responds with tool results over the same stream.
+- **Error (401):** Invalid, expired, or already-used ticket.
+
+**Available Tools:**
+
+| Tool | Type | Path | Auth |
+|------|------|------|------|
+| `get_bar_inventory` | Read | Internal | Session |
+| `search_cocktails` | Read | Internal | Session |
+| `get_cocktail_detail` | Read | Internal | Session |
+| `convert_units` | Read | Internal | Session |
+| `prepare_cocktail` | Write | Enqueues to BullMQ `bar-orders` | Session |
+| `check_makeability` | Read | Internal | Session |
+
+**Audit:** All tool calls (reads sampled, writes always) are logged to `AI_TOOL_AUDIT`.
+
+---
+
 ## 📄 Pagination Implementation Guide
 
 ### Page-based Pagination (Standard Implementation)

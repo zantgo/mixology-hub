@@ -90,6 +90,10 @@ Each ADR follows this structure:
 **Status**: Accepted  
 **Summary**: Architectural pivot from B2C isolated inventories to B2B single-bar shared inventory. Implements Redis-backed BullMQ with `concurrency: 1` for the `bar-orders` queue to guarantee mathematical elimination of race conditions and deadlocks for cocktail preparation. Supersedes ADR 0001's concurrency trade-off and reinstates Redis as a critical infrastructure dependency.
 
+### [ADR 0019: MCP Tool-Calling vs. Prompt Stuffing](./0019-mcp-tool-calling-vs-prompt-stuffing.md)
+**Status**: Accepted  
+**Summary**: Migration from Context Stuffing (injecting entire bar inventory into LLM prompts) to MCP tool calling. The backend exposes itself as an MCP Server with 6 tools. Reduces token usage by >90%, eliminates the 100-ingredient truncation limit, and provides auditable tool-call trails via `AI_TOOL_AUDIT`.
+
 ## How to Create a New ADR
 
 1. **Determine if an ADR is needed**: 

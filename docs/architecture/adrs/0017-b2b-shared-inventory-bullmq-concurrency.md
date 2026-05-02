@@ -119,5 +119,6 @@ export class BarOrdersWorker {
 ## Evolution Plan
 1. **Phase 1 (Current):** Implement BullMQ with `concurrency: 1` and polling-based status updates.
 2. **Phase 2:** Add WebSocket/SSE support for real-time preparation status notifications.
-3. **Phase 3:** Add queue monitoring dashboards and alerting for queue depth anomalies.
-4. **Phase 4:** Consider `concurrency` tuning based on real-world latency requirements (e.g., `concurrency: 2` if a single worker becomes a throughput bottleneck, with appropriate PostgreSQL isolation level adjustments).
+3. **Phase 3 (Agentic AI):** MCP-triggered preparations — the same `bar-orders` BullMQ worker processes AI-initiated orders alongside bartender-initiated ones. The worker is tool-agnostic; both human bartenders and AI agents enqueue to it identically. See ADR 0019 for the MCP tool-calling architecture.
+4. **Phase 4:** Add queue monitoring dashboards and alerting for queue depth anomalies.
+5. **Phase 5:** Consider `concurrency` tuning based on real-world latency requirements (e.g., `concurrency: 2` if a single worker becomes a throughput bottleneck, with appropriate PostgreSQL isolation level adjustments).
