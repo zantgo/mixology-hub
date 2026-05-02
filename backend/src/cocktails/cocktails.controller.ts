@@ -68,8 +68,17 @@ export class CocktailsController {
       }
       createCocktailDto = instance;
     } else {
-      // Regular JSON request — already validated by global ValidationPipe
-      createCocktailDto = body as CreateCocktailDto;
+      // Regular JSON request — validate manually since body is typed as `any`
+      const instance = plainToInstance(CreateCocktailDto, body);
+      const errors = await validate(instance, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      if (errors.length > 0) {
+        const messages = errors.flatMap(e => Object.values(e.constraints || {}));
+        throw new BadRequestException(['Validation failed', ...messages]);
+      }
+      createCocktailDto = instance;
     }
 
     let imagePaths: { full: string | null; thumb: string | null } = { full: null, thumb: null };
@@ -149,8 +158,17 @@ export class CocktailsController {
       }
       updateCocktailDto = instance;
     } else {
-      // Regular JSON request — already validated by global ValidationPipe
-      updateCocktailDto = body as UpdateCocktailDto;
+      // Regular JSON request — validate manually since body is typed as `any`
+      const instance = plainToInstance(UpdateCocktailDto, body);
+      const errors = await validate(instance, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      if (errors.length > 0) {
+        const messages = errors.flatMap(e => Object.values(e.constraints || {}));
+        throw new BadRequestException(['Validation failed', ...messages]);
+      }
+      updateCocktailDto = instance;
     }
 
     let imagePaths: { full: string | null; thumb: string | null } = { full: null, thumb: null };

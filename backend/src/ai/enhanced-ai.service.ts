@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, InternalServerErrorException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { ConfigService } from '@nestjs/config';
 import { Ai } from './entities/ai.entity';
 import { UserAiQuotas } from './entities/user-ai-quotas.entity';
@@ -582,7 +583,7 @@ export class EnhancedAiService {
     const issues: AiRecipeValidationResult['issues'] = [];
     const warnings: string[] = [];
     const suggestions: string[] = [];
-    let score = 1.0; // Start with perfect score
+    let score = new Decimal(1.0); // Start with perfect score
 
     // 1. Validate recipe structure
     if (!recipe.name || recipe.name.trim().length === 0) {
@@ -592,7 +593,7 @@ export class EnhancedAiService {
         message: 'Recipe name is missing',
         suggestion: 'Add a descriptive name for the cocktail',
       });
-      score -= 0.2;
+      score = score.minus(0.2);
     }
 
     if (!recipe.instructions || recipe.instructions.length === 0) {
@@ -602,7 +603,7 @@ export class EnhancedAiService {
         message: 'No instructions provided',
         suggestion: 'Add step-by-step preparation instructions',
       });
-      score -= 0.3;
+      score = score.minus(0.3);
     }
 
     if (!recipe.ingredients || recipe.ingredients.length === 0) {
@@ -612,7 +613,7 @@ export class EnhancedAiService {
         message: 'No ingredients specified',
         suggestion: 'Add at least one ingredient',
       });
-      score -= 0.5;
+      score = score.minus(0.5);
     }
 
     // 2. Validate ingredient amounts and units
@@ -624,7 +625,7 @@ export class EnhancedAiService {
           message: `Invalid amount for ${ingredient.name}: ${ingredient.amount}`,
           suggestion: 'Use positive amounts for ingredients',
         });
-        score -= 0.05;
+        score = score.minus(0.05);
       }
 
       if (!ingredient.unit || ingredient.unit.trim().length === 0) {
@@ -634,25 +635,25 @@ export class EnhancedAiService {
           message: `Missing unit for ${ingredient.name}`,
           suggestion: 'Specify a unit (ml, oz, dash, etc.)',
         });
-        score -= 0.02;
+        score = score.minus(0.02);
       }
 
       // Check for unrealistic amounts
       if (ingredient.unit === 'ml' && ingredient.amount > 1000) {
         warnings.push(`Large amount of ${ingredient.name}: ${ingredient.amount}ml`);
-        score -= 0.01;
+        score = score.minus(0.01);
       }
 
       if (ingredient.unit === 'oz' && ingredient.amount > 32) {
         warnings.push(`Large amount of ${ingredient.name}: ${ingredient.amount}oz`);
-        score -= 0.01;
+        score = score.minus(0.01);
       }
     }
 
     // 3. Check for safety issues
     const safetyIssues = this.checkForSafetyIssues(recipe);
     issues.push(...safetyIssues);
-    score -= safetyIssues.length * 0.1;
+    score = score.minus(new Decimal(safetyIssues.length).times(0.1));
 
     // 4. Check ingredient validity
     if (ingredientValidation.invalid.length > 0) {
@@ -662,22 +663,22 @@ export class EnhancedAiService {
         message: `Unrecognized ingredients: ${ingredientValidation.invalid.join(', ')}`,
         suggestion: 'Use common, recognized ingredient names',
       });
-      score -= ingredientValidation.invalid.length * 0.05;
+      score = score.minus(new Decimal(ingredientValidation.invalid.length).times(0.05));
     }
 
     // 5. Check for completeness
     if (recipe.instructions.length < 2) {
       warnings.push('Recipe instructions are very brief');
-      score -= 0.05;
+      score = score.minus(0.05);
     }
 
     if (recipe.ingredients.length < 2) {
       warnings.push('Recipe has very few ingredients');
-      score -= 0.05;
+      score = score.minus(0.05);
     }
 
     // 6. In strict mode, require higher standards
-    if (strict && score < 0.9) {
+    if (strict && score.lt(0.9)) {
       issues.push({
         type: 'format',
         severity: 'medium',
@@ -687,11 +688,11 @@ export class EnhancedAiService {
     }
 
     // Ensure score is between 0 and 1
-    score = Math.max(0, Math.min(1, score));
+    const finalScore = Decimal.max(0, Decimal.min(1, score)).toNumber();
 
     return {
-      isValid: issues.filter(i => i.severity === 'critical').length === 0 && score >= 0.7,
-      score,
+      isValid: issues.filter(i => i.severity === 'critical').length === 0 && finalScore >= 0.7,
+      score: finalScore,
       issues,
       warnings,
       suggestions: [...suggestions, ...ingredientValidation.suggestions.map(s => s.suggestion)],

@@ -85,12 +85,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Reset failed login attempts on successful login
+    // Update last login timestamp and reset failed attempts on successful login
+    user.lastLoginAt = new Date();
     if (user.failedLoginAttempts > 0 || user.accountLockedUntil) {
       user.failedLoginAttempts = 0;
       user.accountLockedUntil = null;
-      await this.userRepository.save(user);
     }
+    await this.userRepository.save(user);
 
     // Generate tokens
     const tokens = await this.generateTokens(user);

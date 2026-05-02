@@ -5,6 +5,7 @@ import { ReportedContent } from '../cocktails/entities/reported-content.entity';
 import { HiddenExternalCocktails } from '../cocktails/entities/hidden-external-cocktails.entity';
 import { SystemSettings } from '../users/entities/system-settings.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
 export class AdminService {
@@ -19,11 +20,27 @@ export class AdminService {
     private readonly ingredientRepository: Repository<Ingredient>,
   ) {}
 
-  async getReports() {
-    return this.reportRepository.find({
+  async getReports(paginationQuery: PaginationQueryDto) {
+    const { limit = 10, page = 1 } = paginationQuery;
+    const offset = (page - 1) * limit;
+    const [data, total] = await this.reportRepository.findAndCount({
       where: { status: 'pending' },
       order: { createdAt: 'DESC' },
+      skip: offset,
+      take: limit,
     });
+    const totalPages = Math.ceil(total / limit);
+    const hasNextPage = page < totalPages;
+    return {
+      data,
+      meta: {
+        currentPage: page,
+        nextPage: hasNextPage ? page + 1 : null,
+        itemsPerPage: limit,
+        totalItems: total,
+        totalPages,
+      },
+    };
   }
 
   async reviewReport(id: string, status: string, reviewedBy: string) {

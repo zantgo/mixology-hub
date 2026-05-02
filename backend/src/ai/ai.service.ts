@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateAiDto } from './dto/create-ai.dto';
@@ -34,10 +34,19 @@ export class AiService {
 
   async generateRecipe(createAiDto: CreateAiDto, user: User) {
     const aiProvider = this.getAiProvider();
-    const recipe = await aiProvider.generateRecipe(createAiDto.ingredients);
+    // Sanitize ingredients against prompt injection before passing to LLM
+    const sanitizedIngredients = createAiDto.ingredients.map((ing) => {
+      const truncated = ing.trim().slice(0, 500);
+      const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '').trim();
+      if (sanitized.length === 0) {
+        throw new BadRequestException('Ingredient name contains no valid characters');
+      }
+      return sanitized;
+    });
+    const recipe = await aiProvider.generateRecipe(sanitizedIngredients);
 
     const aiRecipe = this.aiRepository.create({
-      prompt: `Ingredients: ${createAiDto.ingredients.join(', ')}`,
+      prompt: `Ingredients: ${sanitizedIngredients.join(', ')}`,
       generated_recipe: recipe,
       user,
     });

@@ -65,8 +65,8 @@ export class CocktailAggregatorService {
       if (!cachedResults) {
         // Cache miss - fetch fresh data
         cachedResults = await this.fetchSearchResults(sanitizedName, options, userId);
-        // Cache results for 5 minutes
-        await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 300000);
+        // Cache results for 1 minute (reduced from 5 to prevent Redis memory bloat)
+        await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 60000);
       }
 
       // Apply pagination
@@ -300,7 +300,9 @@ export class CocktailAggregatorService {
       id: `ext-${drink.idDrink}`,
       externalId: drink.idDrink,
       name: drink.strDrink,
-      description: drink.strInstructions ? `Public recipe from TheCocktailDB: ${drink.strInstructions.substring(0, 100)}...` : 'Public recipe from TheCocktailDB',
+      description: drink.strInstructions
+        ? `Public recipe from TheCocktailDB: ${drink.strInstructions.length > 100 ? drink.strInstructions.substring(0, 100) + '...' : drink.strInstructions}`
+        : 'Public recipe from TheCocktailDB',
       instructions: drink.strInstructions || 'No instructions provided',
       is_public: true,
       source: 'api',

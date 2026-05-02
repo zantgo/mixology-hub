@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
@@ -16,8 +16,8 @@ export class IngredientsController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new ingredient in the global catalog' })
-  create(@Body() createIngredientDto: CreateIngredientDto) {
-    return this.ingredientsService.create(createIngredientDto);
+  create(@Request() req, @Body() createIngredientDto: CreateIngredientDto) {
+    return this.ingredientsService.create(createIngredientDto, req.user.id);
   }
 
   @Public()

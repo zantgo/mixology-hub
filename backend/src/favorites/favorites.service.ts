@@ -5,6 +5,7 @@ import { CreateFavoriteDto } from './dto/create-favorite.dto';
 import { UpdateFavoriteDto } from './dto/update-favorite.dto';
 import { Favorite } from './entities/favorite.entity';
 import { User } from '../users/entities/user.entity';
+import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @Injectable()
@@ -12,16 +13,24 @@ export class FavoritesService {
   constructor(
     @InjectRepository(Favorite) private readonly favoriteRepository: Repository<Favorite>,
     @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @InjectRepository(Cocktail) private readonly cocktailRepository: Repository<Cocktail>,
   ) {}
 
   async create(userId: string, dto: CreateFavoriteDto) {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
+    if (dto.cocktailId) {
+      const cocktail = await this.cocktailRepository.findOne({
+        where: { id: dto.cocktailId, is_deleted: false },
+      });
+      if (!cocktail) throw new NotFoundException(`Cocktail ${dto.cocktailId} not found`);
+    }
+
     const favorite = this.favoriteRepository.create({
       user: user,
-      cocktail: dto.cocktailId ? { id: dto.cocktailId } : undefined, // <--- FIX (undefined)
-      external_cocktail_id: dto.externalCocktailId || undefined,     // <--- FIX (undefined)
+      cocktail: dto.cocktailId ? { id: dto.cocktailId } : undefined,
+      external_cocktail_id: dto.externalCocktailId || undefined,
    });
 
     return await this.favoriteRepository.save(favorite);

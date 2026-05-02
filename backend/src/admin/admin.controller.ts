@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -7,6 +7,7 @@ import { ReviewReportDto } from './dto/review-report.dto';
 import { MergeIngredientsDto } from './dto/merge-ingredients.dto';
 import { HideExternalCocktailDto } from './dto/hide-external-cocktail.dto';
 import { SetSettingDto } from './dto/set-setting.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -18,8 +19,8 @@ export class AdminController {
   // Content moderation
 
   @Get('reports')
-  async getReports() {
-    return this.adminService.getReports();
+  async getReports(@Query() paginationQuery: PaginationQueryDto) {
+    return this.adminService.getReports(paginationQuery);
   }
 
   @Post('reports/:id/review')

@@ -22,9 +22,9 @@ export class UserInventoryController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get current user inventory' })
-  findAll(@Request() req) {
-    return this.inventoryService.getInventory(req.user.id);
+  @ApiOperation({ summary: 'Get current user inventory with pagination' })
+  findAll(@Request() req, @Query() paginationQuery: PaginationQueryDto) {
+    return this.inventoryService.getInventory(req.user.id, paginationQuery);
   }
 
   @Get('summary')

@@ -86,7 +86,33 @@ export class UserInventoryService {
     return await this.inventoryRepository.save(inventoryItem);
   }
 
-  async getInventory(userId: string): Promise<UserInventory[]> {
+  async getInventory(
+    userId: string,
+    paginationQuery?: PaginationQueryDto,
+  ): Promise<UserInventory[] | { data: UserInventory[]; meta: any }> {
+    if (paginationQuery) {
+      const { limit = 10, page = 1 } = paginationQuery;
+      const offset = (page - 1) * limit;
+      const [data, total] = await this.inventoryRepository.findAndCount({
+        where: { user: { id: userId } },
+        relations: ['ingredient', 'ingredient.parent'],
+        order: { ingredient: { name: 'ASC' } },
+        skip: offset,
+        take: limit,
+      });
+      const totalPages = Math.ceil(total / limit);
+      const hasNextPage = page < totalPages;
+      return {
+        data,
+        meta: {
+          currentPage: page,
+          nextPage: hasNextPage ? page + 1 : null,
+          itemsPerPage: limit,
+          totalItems: total,
+          totalPages,
+        },
+      };
+    }
     return await this.inventoryRepository.find({
       where: { user: { id: userId } },
       relations: ['ingredient', 'ingredient.parent'],
@@ -125,7 +151,7 @@ export class UserInventoryService {
   }
 
   async checkMakeability(userId: string, dto: CheckMakeabilityDto): Promise<MakeabilityResult> {
-    const inventory = await this.getInventory(userId);
+    const inventory = await this.getInventory(userId) as UserInventory[];
     const missingIngredients: MakeabilityResult['missingIngredients'] = [];
     const substitutions: MakeabilityResult['substitutions'] = [];
 
@@ -306,7 +332,7 @@ export class UserInventoryService {
   }
 
   async getMakeableCocktails(userId: string, paginationQuery: PaginationQueryDto) {
-    const inventory = await this.getInventory(userId);
+    const inventory = await this.getInventory(userId) as UserInventory[];
 
     if (inventory.length === 0) {
       const { limit = 10, page = 1 } = paginationQuery;
@@ -401,7 +427,7 @@ export class UserInventoryService {
   }
 
   async getInventorySummary(userId: string) {
-    const inventory = await this.getInventory(userId);
+    const inventory = await this.getInventory(userId) as UserInventory[];
 
     const totalItems = inventory.length;
     const totalVolume = inventory.reduce((sum, item) => {

@@ -13,11 +13,12 @@ export class IngredientsService {
     private readonly ingredientRepository: Repository<Ingredient>,
   ) {}
 
-  async create(createIngredientDto: CreateIngredientDto) {
+  async create(createIngredientDto: CreateIngredientDto, createdBy?: string) {
     try {
       const ingredient = this.ingredientRepository.create({
         name: createIngredientDto.name.toLowerCase().trim(),
-        baseUnit: createIngredientDto.baseUnit || 'ml', // Insertion of baseUnit if provided
+        baseUnit: createIngredientDto.baseUnit || 'ml',
+        createdBy: createdBy || null,
       });
       return await this.ingredientRepository.save(ingredient);
     } catch (error: any) {
