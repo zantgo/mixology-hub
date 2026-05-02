@@ -1,7 +1,8 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, effect } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { CocktailStore } from '../../core/stores/cocktail.store';
 import { InventoryStore } from '../../core/stores/inventory.store';
+import { OrderStore } from '../../core/stores/order.store';
 import { UiStore } from '../../core/stores/ui.store';
 import { CocktailImageComponent } from '../../shared/components/cocktail-image/cocktail-image.component';
 import { FavoriteButtonComponent } from '../../features/shared/favorite-button.component';
@@ -22,7 +23,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
     ButtonComponent,
     ModalComponent,
     SkeletonComponent,
-    IconComponent
+    IconComponent,
   ],
   template: `
     @if (cocktailStore.loading() || !cocktail()) {
@@ -105,7 +106,18 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           <p class="instructions-text">{{ cocktail()!.instructions }}</p>
         </section>
 
-        @if (cocktail()!.makeability === 'makeable' || cocktail()!.makeability === 'almost') {
+        @if (orderStore.status() === 'completed') {
+          <div class="prepare-area">
+            <app-badge type="makeable" label="Prepared!" icon="✓" />
+          </div>
+        } @else if (orderStore.polling()) {
+          <div class="prepare-area">
+            <app-button [loading]="true">
+              <app-icon name="glass-water" [size]="20" />
+              {{ orderStore.status() === 'queued' ? 'Queueing...' : 'Preparing...' }}
+            </app-button>
+          </div>
+        } @else if (cocktail()!.makeability === 'makeable' || cocktail()!.makeability === 'almost') {
           <div class="prepare-area">
             <app-button (action)="showPrepareModal = true">
               <app-icon name="glass-water" [size]="20" />
@@ -116,145 +128,176 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
       </div>
     }
 
-    <app-modal [open]="showPrepareModal" title="Prepare Cocktail" (close)="showPrepareModal = false">
-      <p style="margin-bottom: 1rem;">Are you sure you want to prepare this cocktail? This will deduct the required ingredients from your inventory.</p>
+    <app-modal [open]="showPrepareModal && !orderStore.polling()" title="Prepare Cocktail" (close)="showPrepareModal = false">
+      <p style="margin-bottom: 1rem;">
+        Your order will be queued and processed by the bar's inventory system. You'll see the status update here.
+      </p>
       <div style="display: flex; gap: 0.75rem;">
         <app-button variant="outline" (action)="showPrepareModal = false">Cancel</app-button>
-        <app-button [loading]="preparing" (action)="onPrepare()">Confirm Prepare</app-button>
+        <app-button (action)="onPrepare()">Send Order</app-button>
       </div>
     </app-modal>
   `,
-  styles: [`
-    .detail-page {
-      padding-bottom: var(--space-20);
-    }
+  styles: [
+    `
+      .detail-page {
+        padding-bottom: var(--space-20);
+      }
 
-    .hero-image {
-      position: relative;
-      width: 100%;
-      aspect-ratio: 1;
-      overflow: hidden;
-      border-radius: var(--border-radius-lg);
-      background: var(--color-bg-tertiary);
-      margin-bottom: var(--space-6);
-    }
+      .hero-image {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 1;
+        overflow: hidden;
+        border-radius: var(--border-radius-lg);
+        background: var(--color-bg-tertiary);
+        margin-bottom: var(--space-6);
+      }
 
-    .hero-favorite {
-      position: absolute;
-      top: var(--space-3);
-      right: var(--space-3);
-    }
+      .hero-favorite {
+        position: absolute;
+        top: var(--space-3);
+        right: var(--space-3);
+      }
 
-    .detail-header {
-      margin-bottom: var(--space-4);
-    }
+      .detail-header {
+        margin-bottom: var(--space-4);
+      }
 
-    .detail-title {
-      font-family: var(--font-family-heading);
-      font-size: var(--font-size-h1);
-      margin-bottom: var(--space-3);
-    }
+      .detail-title {
+        font-family: var(--font-family-heading);
+        font-size: var(--font-size-h1);
+        margin-bottom: var(--space-3);
+      }
 
-    .detail-meta {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: var(--space-3);
-      font-size: var(--font-size-body-small);
-      color: var(--color-text-secondary);
-    }
+      .detail-meta {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        font-size: var(--font-size-body-small);
+        color: var(--color-text-secondary);
+      }
 
-    .author, .rating {
-      display: flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
+      .author,
+      .rating {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
 
-    .detail-description {
-      font-size: var(--font-size-body);
-      color: var(--color-text-secondary);
-      line-height: var(--line-height-loose);
-      margin-bottom: var(--space-8);
-    }
+      .detail-description {
+        font-size: var(--font-size-body);
+        color: var(--color-text-secondary);
+        line-height: var(--line-height-loose);
+        margin-bottom: var(--space-8);
+      }
 
-    .detail-section {
-      margin-bottom: var(--space-8);
-    }
+      .detail-section {
+        margin-bottom: var(--space-8);
+      }
 
-    .section-title {
-      font-family: var(--font-family-heading);
-      font-size: var(--font-size-h4);
-      margin-bottom: var(--space-4);
-    }
+      .section-title {
+        font-family: var(--font-family-heading);
+        font-size: var(--font-size-h4);
+        margin-bottom: var(--space-4);
+      }
 
-    .ingredients-list {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-3);
-    }
+      .ingredients-list {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
 
-    .ingredient-item {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-      padding: var(--space-3);
-      background: var(--color-bg-tertiary);
-      border-radius: var(--border-radius-md);
+      .ingredient-item {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        background: var(--color-bg-tertiary);
+        border-radius: var(--border-radius-md);
+      }
 
-      &.missing {
+      .ingredient-item.missing {
         opacity: 0.6;
       }
-    }
 
-    .ingredient-check {
-      flex-shrink: 0;
-      display: flex;
-    }
-
-    .ingredient-name {
-      font-family: var(--font-family-mono);
-      font-size: var(--font-size-body-small);
-      color: var(--color-text-primary);
-      min-width: 80px;
-    }
-
-    .ingredient-type {
-      font-size: var(--font-size-body-small);
-      color: var(--color-text-secondary);
-      max-width: 150px;
-    }
-
-    .instructions-text {
-      font-size: var(--font-size-body);
-      color: var(--color-text-secondary);
-      line-height: var(--line-height-loose);
-      white-space: pre-line;
-    }
-
-    .prepare-area {
-      display: flex;
-      justify-content: center;
-      padding: var(--space-8) 0;
-      position: sticky;
-      bottom: calc(var(--bottom-nav-height) + var(--space-4));
-      background: var(--color-bg-primary);
-    }
-
-    @media (min-width: 768px) {
-      .prepare-area {
-        bottom: var(--space-4);
+      .ingredient-check {
+        flex-shrink: 0;
+        display: flex;
       }
-    }
-  `]
+
+      .ingredient-name {
+        font-family: var(--font-family-mono);
+        font-size: var(--font-size-body-small);
+        color: var(--color-text-primary);
+        min-width: 80px;
+      }
+
+      .ingredient-type {
+        font-size: var(--font-size-body-small);
+        color: var(--color-text-secondary);
+        max-width: 150px;
+      }
+
+      .instructions-text {
+        font-size: var(--font-size-body);
+        color: var(--color-text-secondary);
+        line-height: var(--line-height-loose);
+        white-space: pre-line;
+      }
+
+      .prepare-area {
+        display: flex;
+        justify-content: center;
+        padding: var(--space-8) 0;
+        position: sticky;
+        bottom: calc(var(--bottom-nav-height) + var(--space-4));
+        background: var(--color-bg-primary);
+      }
+
+      @media (min-width: 768px) {
+        .prepare-area {
+          bottom: var(--space-4);
+        }
+      }
+    `,
+  ],
 })
-export class CocktailDetailPage implements OnInit {
+export class CocktailDetailPage implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   readonly cocktailStore = inject(CocktailStore);
   readonly inventoryStore = inject(InventoryStore);
+  readonly orderStore = inject(OrderStore);
   readonly uiStore = inject(UiStore);
 
   showPrepareModal = false;
-  preparing = false;
+
+  constructor() {
+    effect(() => {
+      const status = this.orderStore.status();
+      if (status === 'completed') {
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: `${this.orderStore.cocktailName() || 'Cocktail'} prepared successfully!`,
+          type: 'success',
+        });
+        this.inventoryStore.load();
+      } else if (status === 'failed_insufficient_stock') {
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: 'Not enough stock. Please restock the bar inventory.',
+          type: 'error',
+        });
+      } else if (status === 'failed_other') {
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: 'Order failed due to a system error. Please try again.',
+          type: 'error',
+        });
+      }
+    });
+  }
 
   get cocktail() {
     return this.cocktailStore.currentCocktail;
@@ -267,11 +310,15 @@ export class CocktailDetailPage implements OnInit {
     }
   }
 
+  ngOnDestroy(): void {
+    this.orderStore.stopPolling();
+  }
+
   isMissing(name?: string): boolean {
     if (!name) return false;
-    const item = this.inventoryStore.items().find(
-      i => i.name?.toLowerCase() === name.toLowerCase()
-    );
+    const item = this.inventoryStore
+      .items()
+      .find((i) => i.name?.toLowerCase() === name.toLowerCase());
     return !item || item.quantity <= 0;
   }
 
@@ -279,34 +326,13 @@ export class CocktailDetailPage implements OnInit {
     const c = this.cocktail();
     if (!c) return;
 
-    this.preparing = true;
-    const ingredients = c.ingredients.map(ing => ({
-      ingredientId: ing.ingredient?.id || '',
-      amount: ing.amount,
-      unit: ing.unit
-    }));
+    this.showPrepareModal = false;
+    this.cocktailStore.prepareCocktail(c.id);
 
-    this.inventoryStore.deplete(ingredients).subscribe({
-      next: () => {
-        this.preparing = false;
-        this.showPrepareModal = false;
-        this.uiStore.addToast({
-          id: crypto.randomUUID(),
-          message: `${c.name} prepared. Stock deducted.`,
-          type: 'success',
-          action: 'undo'
-        });
-      },
-      error: () => {
-        this.preparing = false;
-        this.showPrepareModal = false;
-        this.uiStore.addToast({
-          id: crypto.randomUUID(),
-          message: 'Failed to prepare cocktail. Check your connection.',
-          type: 'error',
-          action: 'retry'
-        });
-      }
+    this.uiStore.addToast({
+      id: crypto.randomUUID(),
+      message: 'Order queued. Waiting for inventory confirmation...',
+      type: 'info',
     });
   }
 }

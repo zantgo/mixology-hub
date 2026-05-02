@@ -2,6 +2,7 @@ import { Injectable, signal, computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap, catchError, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { OrderStore } from './order.store';
 
 export interface CocktailIngredient {
   id?: string;
@@ -41,13 +42,20 @@ export interface PaginationMeta {
 @Injectable({ providedIn: 'root' })
 export class CocktailStore {
   private http = inject(HttpClient);
+  readonly orderStore = inject(OrderStore);
   private apiUrl = `${environment.apiUrl}/cocktails`;
 
   readonly cocktails = signal<Cocktail[]>([]);
   readonly makeable = signal<Cocktail[]>([]);
   readonly almostMakeable = signal<Cocktail[]>([]);
   readonly currentCocktail = signal<Cocktail | null>(null);
-  readonly pagination = signal<PaginationMeta>({ currentPage: 1, nextPage: null, itemsPerPage: 10, totalItems: 0, totalPages: 0 });
+  readonly pagination = signal<PaginationMeta>({
+    currentPage: 1,
+    nextPage: null,
+    itemsPerPage: 10,
+    totalItems: 0,
+    totalPages: 0,
+  });
   readonly loading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
   readonly searchQuery = signal<string>('');
@@ -60,21 +68,23 @@ export class CocktailStore {
     const params: any = { page, limit };
     if (query) params.name = query;
 
-    this.http.get<{ data: Cocktail[]; meta: PaginationMeta }>(this.apiUrl, { params }).subscribe({
-      next: (res) => {
-        if (page === 1) {
-          this.cocktails.set(res.data);
-        } else {
-          this.cocktails.update(arr => [...arr, ...res.data]);
-        }
-        this.pagination.set(res.meta);
-        this.loading.set(false);
-      },
-      error: (err) => {
-        this.error.set(err.message);
-        this.loading.set(false);
-      }
-    });
+    this.http
+      .get<{ data: Cocktail[]; meta: PaginationMeta }>(this.apiUrl, { params })
+      .subscribe({
+        next: (res) => {
+          if (page === 1) {
+            this.cocktails.set(res.data);
+          } else {
+            this.cocktails.update((arr) => [...arr, ...res.data]);
+          }
+          this.pagination.set(res.meta);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.error.set(err.message);
+          this.loading.set(false);
+        },
+      });
   }
 
   loadMore(): void {
@@ -86,18 +96,21 @@ export class CocktailStore {
 
   loadMakeable(page: number = 1, limit: number = 10): void {
     this.loading.set(true);
-    this.http.get<{ data: Cocktail[]; meta: PaginationMeta }>(`${environment.apiUrl}/user-inventory/makeable`, {
-      params: { page, limit }
-    }).subscribe({
-      next: (res) => {
-        this.makeable.set(res.data);
-        this.loading.set(false);
-      },
-      error: (err) => {
-        this.error.set(err.message);
-        this.loading.set(false);
-      }
-    });
+    this.http
+      .get<{ data: Cocktail[]; meta: PaginationMeta }>(
+        `${environment.apiUrl}/bar-inventory/makeable`,
+        { params: { page, limit } },
+      )
+      .subscribe({
+        next: (res) => {
+          this.makeable.set(res.data);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.error.set(err.message);
+          this.loading.set(false);
+        },
+      });
   }
 
   loadCocktail(id: string): void {
@@ -110,19 +123,29 @@ export class CocktailStore {
       error: (err) => {
         this.error.set(err.message);
         this.loading.set(false);
-      }
+      },
     });
   }
 
   getCocktail(id: string): Observable<Cocktail> {
     return this.http.get<Cocktail>(`${this.apiUrl}/${id}`).pipe(
-      tap(cocktail => {
+      tap((cocktail) => {
         this.currentCocktail.set(cocktail);
-      })
+      }),
     );
   }
 
-  prepareCocktail(cocktailId: string): Observable<any> {
-    return this.http.post(`${this.apiUrl}/${cocktailId}/prepare`, {});
+  prepareCocktail(cocktailId: string, servings: number = 1, force: boolean = false): void {
+    this.orderStore.submitOrder(cocktailId, servings, force).then((res) => {
+      this.orderStore.startPolling(res.preparationLogId);
+    }).catch((err) => {
+      this.error.set(err.message || 'Failed to queue preparation');
+    });
+  }
+
+  getPreparationStatus(logId: string): Observable<{ status: string }> {
+    return this.http.get<{ status: string }>(
+      `${this.apiUrl}/preparations/${logId}/status`,
+    );
   }
 }

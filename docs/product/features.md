@@ -72,7 +72,9 @@ Users can craft their own recipes using an interactive form:
 
 - **API Throughput:** We acknowledge that public APIs like *TheCocktailDB* have rate limits and latency issues. By implementing **Redis caching**, we ensure that repeat searches for the same cocktail return results in sub-10ms time without hitting the external provider.
 
-- **State Management:** The frontend uses **Angular Signals** to ensure the UI updates instantly when inventory changes (e.g., clicking "Prepare" causes the inventory list to decrement and the "Makeable" list to update immediately).
+- **State Management:** The frontend uses **Angular Signals** for reactive UI updates. When a bartender clicks "Prepare", the order is enqueued to BullMQ (202 Accepted), and the UI polls the status endpoint until the worker confirms completion.
+
+- **Inventory Management:** The Admin-only inventory page allows bar managers to add, update, and delete stock in the shared `bar_inventory`. All bartenders see the same inventory levels via the global bar inventory view.
 
   
 

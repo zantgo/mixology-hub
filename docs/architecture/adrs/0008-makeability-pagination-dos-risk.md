@@ -138,7 +138,7 @@ function validatePagination(limit: number, page: number): void {
 }
 
 // Makeability endpoint with page-based pagination
-@Get('/user-inventory/makeable')
+@Get('/bar-inventory/makeable')
 async getMakeableCocktails(
   @Query('limit', new DefaultValuePipe(10), new ParseIntPipe({ min: 1, max: 100 })) limit: number,
   @Query('page', new DefaultValuePipe(1), new ParseIntPipe({ min: 1, max: 100 })) page: number,
@@ -170,7 +170,7 @@ async getMakeableCocktails(
 ```
 
 ### Architectural Decision: Standardized Page-based Pagination
-* **Explicit Trade-off:** All endpoints now use standardized page-based pagination with consistent response format. The `GET /user-inventory/makeable` endpoint returns the same `meta` object as all other paginated endpoints, including `currentPage`, `nextPage`, `itemsPerPage`, `totalItems`, and `totalPages`, with additional makeability-specific fields (`iterations`, `maxIterations`, `warning`) included within the `meta` object. We trade cursor-based pagination performance benefits for API consistency and simplicity across all endpoints.
+* **Explicit Trade-off:** All endpoints now use standardized page-based pagination with consistent response format. The `GET /bar-inventory/makeable` endpoint returns the same `meta` object as all other paginated endpoints, including `currentPage`, `nextPage`, `itemsPerPage`, `totalItems`, and `totalPages`, with additional makeability-specific fields (`iterations`, `maxIterations`, `warning`) included within the `meta` object. We trade cursor-based pagination performance benefits for API consistency and simplicity across all endpoints.
 
 ## Consequences
 
@@ -229,7 +229,7 @@ async getMakeableCocktails(
 export class MakeabilityService {
   async getMakeableCocktails(page: number, limit: number = 10): Promise<Cocktail[]> {
     try {
-      return await this.http.get<Cocktail[]>('/user-inventory/makeable', {
+      return await this.http.get<Cocktail[]>('/bar-inventory/makeable', {
         params: { page, limit, sort: 'makeability' }
       }).toPromise();
      } catch (error) {
@@ -300,20 +300,20 @@ export class PaginationMonitorService {
 ### 1. Filtering Before Pagination
 ```typescript
 // Instead of page=100, filter by category first
-GET /user-inventory/makeable?category=tequila&sort=makeability&page=1
+GET /bar-inventory/makeable?category=tequila&sort=makeability&page=1
 ```
 
 ### 2. Export Functionality (Future)
 ```typescript
 // Synchronous export with same 200-iteration limit
-POST /user-inventory/makeable/export
+POST /bar-inventory/makeable/export
 // Returns truncated CSV immediately (no background processing)
 ```
 
 ### 3. Alternative Sort Options
 ```typescript
 // Use page-based pagination with chronological sort
-GET /user-inventory/makeable?sort=relevance&page=1&limit=10
+GET /bar-inventory/makeable?sort=relevance&page=1&limit=10
 ```
 
 ## Related Decisions

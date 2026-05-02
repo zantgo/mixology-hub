@@ -43,11 +43,14 @@ The Postman collection is organized by API resource:
 
 #### 1. **Cocktails**
 - `GET /cocktails` - Search cocktails with pagination
-- `POST /cocktails/:id/prepare` - Prepare cocktail (deducts inventory)
+- `POST /cocktails/:id/prepare` - Enqueue preparation order (202 Accepted)
+- `GET /cocktails/preparations/:logId/status` - Poll preparation status
 
-#### 2. **User Inventory**
-- `GET /user-inventory/makeable` - Get makeable cocktails
-- `POST /user-inventory` - Add/update inventory items
+#### 2. **Bar Inventory (Admin-Only Mutations)**
+- `GET /bar-inventory` - View shared bar inventory (all roles)
+- `GET /bar-inventory/makeable` - Get makeable cocktails
+- `POST /bar-inventory` - Add stock (admin only)
+- `DELETE /bar-inventory/:id` - Remove stock (admin only)
 
 #### 3. **AI Recipe Generation**
 - `POST /ai` - Generate recipe from ingredients

@@ -296,35 +296,41 @@ Deletes a custom cocktail. Only the original creator can delete their cocktail.
     
 #### `POST /cocktails/:id/prepare`
 
-Calculates required ingredient amounts, mathematically converts units to match the user's inventory, and deducts the stock within an ACID-compliant database transaction.
+Enqueues a preparation order into the BullMQ `bar-orders` queue. Returns `202 Accepted` immediately. The bar's shared inventory is deducted asynchronously by a single-threaded worker (`concurrency: 1`).
 
-**Request Body (optional):**
+**Query Parameters:**
+- `servings`: Optional number of servings (default: 1)
+- `force`: Optional boolean to force preparation with partial ingredients (default: false)
+
+**Response (202 Accepted):**
 ```json
 {
-  "servings": 1,
-  "totalVolumeMl": "120.00"
+  "message": "Cocktail preparation queued",
+  "preparationLogId": "uuid-of-preparation-log",
+  "jobId": "bull-job-id",
+  "status": "queued",
+  "statusUrl": "/cocktails/preparations/uuid-of-preparation-log/status"
 }
 ```
 
-**Parameters:**
-- `servings`: Optional number of servings (default: 1, min: 1, max: 1000)
-- `totalVolumeMl`: Optional total volume in ml for part-based recipes, serialized as a string to preserve decimal precision (no default, min: "1", max: "10000")
+#### `GET /cocktails/preparations/:logId/status`
 
-**Architectural Decision: Volume-Over-Servings Precedence for Part-Based Math**
-**Explicit Trade-off:** To resolve mathematical ambiguity during API requests, we dictate that if a recipe uses ratio/parts, the `totalVolumeMl` parameter represents the **absolute total yield** of the transaction. If `servings` is also provided, it is treated strictly as analytical metadata (stored in `PREPARATION_LOGS` for user history) and is mathematically ignored during inventory deduction. We trade dynamic per-serving multiplication on part-based drinks for strict, predictable total-volume deductions.
-
-**Architectural Decision: Volume Scaling Exclusivity for Part-Based Recipes**
-**Explicit Trade-off:** We explicitly restrict the `totalVolumeMl` parameter exclusively to part/ratio-based cocktails. If a client passes `totalVolumeMl` to a fixed-unit recipe (e.g., standard ounces or ml), the backend will entirely ignore the volume request and scale strictly using the `servings` multiplier integer. We trade the flexibility of "make exactly 500ml of Margarita" for rigid, predictable mathematical integrity of classic culinary ratios.
+Polls the status of a queued preparation. Used by the frontend to display spinner/pending state and update UI on completion.
 
 **Response (200 OK):**
 ```json
 {
-  "message": "Cocktail Mojito prepared successfully!",
-  "preparationId": "uuid-of-preparation-log",
+  "preparationLogId": "uuid",
+  "cocktailName": "Mojito",
+  "servings": 1,
+  "status": "completed",
   "deductedIngredients": [
-    {
-      "ingredientId": "rum-uuid",
-      "ingredientName": "Rum",
+    { "ingredientId": "rum-uuid", "ingredientName": "Rum", "amount": "60.00", "unit": "ml" }
+  ],
+  "undone": false,
+  "createdAt": "2026-05-02T12:00:00Z"
+}
+```
       "amount": "2",
       "unit": "oz",
       "remainingStock": "480"
@@ -333,34 +339,26 @@ Calculates required ingredient amounts, mathematically converts units to match t
 }
 ```
 
-
-
-**Error (400 Bad Request):**
+**Error (404 Not Found):**
 ```json
 {
-  "statusCode": 400,
-  "message": "Not enough stock for ingredient: light rum",
-  "error": "Bad Request",
-  "timestamp": "2026-04-08T10:30:00.000Z",
-  "path": "/cocktails/123/prepare",
-  "details": {
-    "ingredient": "light rum",
-    "required": "2",
-    "available": "1.5",
-    "unit": "oz"
-  }
+  "statusCode": 404,
+  "message": "Cocktail not found",
+  "error": "Not Found"
 }
 ```
 
-**Error (400 Bad Request - Total Volume):**
-```json
-{
-  "statusCode": 400,
-  "message": "Total volume (50.0 L) exceeds maximum allowed (10.0 L)",
-  "error": "Bad Request",
-  "timestamp": "2026-04-08T10:30:00.000Z",
-  "path": "/cocktails/123/prepare"
-}
+**Status Values:**
+- `queued`: Order enqueued, awaiting worker processing
+- `completed`: Inventory deducted successfully
+- `failed_insufficient_stock`: Not enough stock in the shared bar inventory
+- `failed_other`: Infrastructure error (Redis failure, worker crash)
+
+---
+
+### 2. Bar Inventory (Shared Global)
+
+#### `GET /bar-inventory`
 ```
 
   
@@ -369,27 +367,27 @@ Calculates required ingredient amounts, mathematically converts units to match t
 
   
 
-### 2. User Inventory & Algorithm
+### 2. Bar Inventory (Shared Global)
 
-  
+> **B2B Architecture:** The bar has a single shared `bar_inventory` table. All bartenders see the same stock. Only admins may add, update, or delete inventory.
 
-#### `GET /user-inventory/makeable`
+#### `GET /bar-inventory/makeable`
 
-The core business logic endpoint. Evaluates the user's current inventory against all local cocktail recipes. Uses a complex SQL `HAVING` clause to find recipes where the user owns all required ingredients, followed by mathematical quantity validation.
+The core business logic endpoint. Evaluates the bar's current inventory against all local cocktail recipes. Uses a complex SQL `HAVING` clause to find recipes where the bar owns all required ingredients, followed by mathematical quantity validation.
 
-  
+   
 
 - **Query Parameters:** `limit`, `page`
 
 - **Response (200 OK):** List of fully prepare-able `Cocktail` objects with pagination metadata.
 
-  
+   
 
-#### `POST /user-inventory`
+#### `POST /bar-inventory`
 
-Adds or updates an ingredient in the user's inventory. Uses an `UPSERT` pattern (updates quantity if the ingredient already exists).
+Adds or updates an ingredient in the shared bar inventory. Admin only. Uses an `UPSERT` pattern (updates quantity if the ingredient already exists).
 
-  
+   
 
  - **Request Body:**
 
@@ -401,9 +399,7 @@ Adds or updates an ingredient in the user's inventory. Uses an `UPSERT` pattern 
 
 "quantity": "500",
 
- "unit": "ml", // Must match INGREDIENTS.baseUnit for the given ingredientId
-
- "sourceCocktailId": "uuid-string" // Optional: allows adding private ingredients from public recipes (UC 10.8)
+ "unit": "ml",
 
  }
 
@@ -413,7 +409,7 @@ Adds or updates an ingredient in the user's inventory. Uses an `UPSERT` pattern 
    "id": "uuid-string",
    "ingredientId": "uuid-string",
    "quantity": "500",
-   "unit": "ml", // Derived from INGREDIENTS.baseUnit via JOIN
+   "unit": "ml",
    "ingredient": {
      "id": "uuid-string",
      "name": "Vodka",
@@ -423,8 +419,8 @@ Adds or updates an ingredient in the user's inventory. Uses an `UPSERT` pattern 
   }
   ```
 
-#### `POST /user-inventory/bulk` (Bulk Add Inventory Items)
-Adds or updates multiple ingredients in the user's inventory within a single all-or-nothing transaction.
+#### `POST /bar-inventory/bulk` (Bulk Add Inventory Items)
+Adds or updates multiple ingredients in the bar inventory within a single all-or-nothing transaction. Admin only.
 
 - **Request Body:**
 ```json
@@ -477,7 +473,7 @@ Adds or updates multiple ingredients in the user's inventory within a single all
 - **Error (401 Unauthorized):** User not authenticated
 - **Error (422 Unprocessable Entity):** Transaction rolled back due to validation error in one or more items
 
-#### `DELETE /user-inventory/bulk` (Bulk Delete Inventory Items)
+#### `DELETE /bar-inventory/bulk` (Bulk Delete Inventory Items)
 Deletes multiple inventory items within a single transaction.
 
 - **Request Body:**

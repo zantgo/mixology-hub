@@ -157,10 +157,21 @@ We utilize **Angular Reactive Forms** with `FormArray` to handle this.
 
 - **Why?** Reactive forms provide synchronous access to form state, making it easy to dynamically add/remove ingredient rows in the UI while maintaining strict validation rules (e.g., ensuring `measure` and `ingredientId` are provided before enabling the "Save" button).
 
+## 🔄 Async Preparation Flow
+
+Cocktail preparation is asynchronous via the BullMQ queue system (ADR 0017). The frontend implements a polling-based status tracking pattern:
+
+1. **Submit:** Bartender clicks "Prepare" → `POST /cocktails/:id/prepare` returns `202 Accepted` with `{ preparationLogId, statusUrl }`.
+2. **Pending State:** The UI shows a spinner with "Queueing..." on the drink card. The `OrderStore` tracks the current job.
+3. **Polling:** The frontend polls `GET /cocktails/preparations/:logId/status` every 1.5 seconds.
+4. **Resolution:** On `completed`, inventory display refreshes and a success toast appears. On `failed_insufficient_stock` or `failed_other`, an error toast explains the reason.
+
+This replaces the old optimistic UI pattern, which is incompatible with server-side serialized queue processing.
+
 ## 🚫 Cross-Device & Cross-Tab Sync Limitations
 
-**Architectural Decision: No Real-Time Sync**
-**Explicit Trade-off:** The MVP does not implement cross-tab or cross-device synchronization. Users opening the application in multiple browser tabs or on different devices will see stale inventory data until they manually refresh. We trade real-time synchronization for architectural simplicity and faster MVP delivery.
+**Architectural Decision: No Real-Time Sync for Non-Inventory State**
+**Explicit Trade-off:** The frontend does not implement cross-tab or cross-device synchronization for non-critical state (favorites, search). Inventory state is server-authoritative and refreshed via preparation status polling and explicit data loads. Cross-tab inventory staleness is addressed by reloading data on tab focus where applicable.
 
 ## 📱 PWA Implementation Constraints
 

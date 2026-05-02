@@ -142,17 +142,17 @@
 * **And** when the user navigates back to the AI Bartender view, the generated recipe is preserved and rendered instead of being lost.
 * **And** the recipe remains available for 1 hour or until the user generates a new one.
 
-**UC 7.25: SIMPLIFIED - No Cross-Tab Synchronization**
- * **Given** a user has MixologyHub open in Tab A and Tab B.
- * **When** the user clicks "Prepare Drink" in Tab A, deducting 50ml of Vodka.
- * **Then** Tab B does not automatically update.
- * **Architectural Decision: Trading Seamless Multi-Tab UX for SPA Simplicity**
-   * **Explicit Trade-off:** We explicitly strip out cross-tab synchronization, `BroadcastChannel`, and race condition prevention mechanisms. We trade seamless multi-tab user experience for strict Single Page Application architectural simplicity. Users must manually refresh browser tabs to synchronize state across sessions.
+**UC 7.25: Async Preparation Status Across Tabs**
+ * **Given** a bartender has MixologyHub open in Tab A and Tab B.
+ * **When** they click "Prepare Drink" in Tab A, which enqueues the order and starts polling for status.
+ * **Then** Tab B does not automatically reflect the queued order.
+ * **Architectural Decision: Server-Authoritative Inventory State**
+   * **Explicit Trade-off:** Inventory state is server-authoritative. Tabs must be manually refreshed or load fresh data on focus to see updated stock levels after a preparation completes.
 
-**UC 7.26: SIMPLIFIED - Network Error Handling**
- * **Given** a user clicks "Prepare Drink" and the UI optimistically deducts 50ml of Vodka.
- * **And** the network drops *while* the request is in-flight to the server.
- * **When** the frontend times out, it rolls back the UI to the previous state (Vodka +50ml).
- * **Then** shows error toast: "Network error: Preparation failed. Please try again."
- * **Architectural Decision: Trading Resilient Networking for SPA Simplicity**
-   * **Explicit Trade-off:** We explicitly strip out automatic retry logic and idempotency mechanisms for network error handling. We trade resilient networking with automatic recovery for strict Single Page Application architectural simplicity. Users must manually retry failed operations.
+**UC 7.26: Network Error Handling for Async Preparation**
+ * **Given** a bartender clicks "Prepare Drink" and the order is enqueued (202 Accepted).
+ * **And** the network drops *after* the 202 response but before polling confirms completion.
+ * **When** the network reconnects, the UI resumes polling `GET /cocktails/preparations/:logId/status`.
+ * **Then** the final status (completed or failed) is displayed, and inventory refreshes accordingly.
+ * **Architectural Decision: Async Queue Resilience**
+   * **Explicit Trade-off:** Because the preparation is queued server-side in Redis/BullMQ, a network drop after 202 is recoverable — the job still processes and the UI catches up on reconnect. We trade the simplicity of "retry on error" for the robustness of server-side queue persistence.

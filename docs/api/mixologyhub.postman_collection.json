@@ -126,11 +126,11 @@
                 "prepare"
               ]
             },
-            "description": "Prepare a cocktail (deducts ingredients from inventory)"
+            "description": "Enqueue a cocktail preparation order (returns 202 Accepted, poll for status)"
           },
           "response": [
             {
-              "name": "Successful Preparation",
+              "name": "Order Queued (202 Accepted)",
               "originalRequest": {
                 "method": "POST",
                 "header": [
@@ -155,8 +155,8 @@
                   ]
                 }
               },
-              "status": "OK",
-              "code": 200,
+              "status": "Accepted",
+              "code": 202,
               "_postman_previewlanguage": "json",
               "header": [
                 {
@@ -165,10 +165,10 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"message\": \"Cocktail Margarita prepared successfully!\"\n}"
+              "body": "{\n  \"message\": \"Cocktail preparation queued\",\n  \"preparationLogId\": \"uuid-string\",\n  \"jobId\": \"bull-job-id\",\n  \"status\": \"queued\",\n  \"statusUrl\": \"/cocktails/preparations/uuid-string/status\"\n}"
             },
             {
-              "name": "Insufficient Inventory",
+              "name": "Cocktail Not Found",
               "originalRequest": {
                 "method": "POST",
                 "header": [
@@ -193,8 +193,8 @@
                   ]
                 }
               },
-              "status": "Bad Request",
-              "code": 400,
+              "status": "Not Found",
+              "code": 404,
               "_postman_previewlanguage": "json",
               "header": [
                 {
@@ -203,14 +203,14 @@
                 }
               ],
               "cookie": [],
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Not enough stock for ingredient: tequila\",\n  \"error\": \"Bad Request\",\n  \"timestamp\": \"2026-04-08T10:30:00.000Z\",\n  \"path\": \"/cocktails/11000/prepare\"\n}"
+              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Cocktail not found\",\n  \"error\": \"Not Found\",\n  \"timestamp\": \"2026-05-02T10:30:00.000Z\",\n  \"path\": \"/cocktails/11000/prepare\"\n}"
             }
           ]
         }
       ]
     },
     {
-      "name": "User Inventory",
+      "name": "bar inventory",
       "item": [
         {
           "name": "Get Makeable Cocktails",
@@ -218,7 +218,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/user-inventory/makeable?limit=10",
+              "raw": "{{base_url}}/bar-inventory/makeable?limit=10",
               "host": [
                 "{{base_url}}"
               ],
@@ -243,7 +243,7 @@
                 "method": "GET",
                 "header": [],
                 "url": {
-                  "raw": "{{base_url}}/user-inventory/makeable?limit=10",
+                  "raw": "{{base_url}}/bar-inventory/makeable?limit=10",
                   "host": [
                     "{{base_url}}"
                   ],
@@ -293,7 +293,7 @@
               }
             },
             "url": {
-              "raw": "{{base_url}}/user-inventory",
+              "raw": "{{base_url}}/bar-inventory",
               "host": [
                 "{{base_url}}"
               ],
@@ -319,7 +319,7 @@
                   "raw": "{\n  \"ingredientId\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"quantity\": \"500\",\n  \"unit\": \"ml\"\n}"
                 },
                 "url": {
-                  "raw": "{{base_url}}/user-inventory",
+                  "raw": "{{base_url}}/bar-inventory",
                   "host": [
                     "{{base_url}}"
                   ],

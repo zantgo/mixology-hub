@@ -1,11 +1,13 @@
-# 🔐 Domain 9: Authentication & Multi-Tenant Isolation
+# 🔐 Domain 9: Authentication & Access Control
 
-**UC 9.1: Multi-tenant Inventory Isolation**
-* **Given** User A has `500 ml` of "Vodka" in their inventory.
-* **And** User B has an empty inventory.
-* **When** User B logs in and requests their inventory.
-* **Then** the system returns an empty array.
-* **And** User A's data is strictly protected via `user_id` foreign key scoping.
+> **B2B CONTEXT:** All authenticated users share the same global `bar_inventory`. There is no per-user inventory isolation. RBAC distinguishes `admin` (Bar Manager) from `bartender` (staff).
+
+**UC 9.1: Role-Based Access to Shared Inventory**
+* **Given** an admin has stocked `500 ml` of "Vodka" in the shared `bar_inventory`.
+* **And** a bartender logs in and views the bar inventory.
+* **Then** the system returns `500 ml` of Vodka — all staff see the same stock.
+* **And** the bartender cannot add, update, or delete inventory (admin-only operations).
+* **And** the `AdminGuard` enforces role restrictions on POST/PUT/DELETE `/bar-inventory`.
 
 **UC 9.2: Protecting protected endpoints (JWT/Auth)**
 * **Given** an unauthenticated client.
@@ -212,12 +214,11 @@
 * **Given** a user has registered but not clicked their email verification link.
 * **When** they attempt to call costly endpoints like `POST /ai/generate` or create custom cocktails via `POST /cocktails`.
 * **Then** the Auth Guard rejects the request with `403 Forbidden: Email verification required`.
-* **Architectural Decision:** Unverified users can ONLY:
-  - View public cocktails and search results
-  - Browse ingredient catalog
-  - Add ingredients to inventory (up to 10 items)
-  - View makeable cocktails based on their inventory
-* **And** the system enforces a 24-hour grace period after registration, after which ALL endpoints (except email verification) are blocked until verification is complete.
+ * **Architectural Decision:** Unverified users can ONLY:
+   - View public cocktails and search results
+   - Browse ingredient catalog
+   - View makeable cocktails based on the bar inventory
+ * **And** the system enforces a 24-hour grace period after registration, after which ALL endpoints (except email verification) are blocked until verification is complete.
  * **Architectural Decision: Abandonment of Time-Delayed Transactional Emails**
    * **Explicit Trade-off:** We explicitly abandon the 12-hour and 23-hour unverified email reminders. We trade automated user-retention marketing loops for absolute backend architectural purity.
 
