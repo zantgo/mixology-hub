@@ -12,10 +12,26 @@ export class UnitConverterService {
     'tbsp': new Decimal(14.79),
     'tsp': new Decimal(4.93),
     'dash': new Decimal(0.92),
+    'dashes': new Decimal(0.92),
     'count': new Decimal(1),
     'g': new Decimal(1),
     'kg': new Decimal(1000),
     'parts': new Decimal(1),
+    'part': new Decimal(1),
+    'drops': new Decimal(1),
+    'drop': new Decimal(1),
+    'splashes': new Decimal(1),
+    'splash': new Decimal(1),
+    'slices': new Decimal(1),
+    'slice': new Decimal(1),
+    'wedges': new Decimal(1),
+    'wedge': new Decimal(1),
+    'twists': new Decimal(1),
+    'twist': new Decimal(1),
+    'sprigs': new Decimal(1),
+    'sprig': new Decimal(1),
+    'leaves': new Decimal(1),
+    'leaf': new Decimal(1),
   };
 
   convert(quantity: Decimal | number, fromUnit: string, toUnit: string, ingredient?: Ingredient): Decimal {
@@ -91,6 +107,6 @@ export class UnitConverterService {
   }
 
   private isVolumeUnit(unit: string): boolean {
-    return ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash'].includes(unit);
+    return ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes'].includes(unit);
   }
 }

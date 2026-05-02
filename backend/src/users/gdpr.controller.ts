@@ -1,6 +1,5 @@
-import { Controller, Post, Get, Delete, Body, Param, UseGuards, HttpCode, HttpStatus, Request } from '@nestjs/common';
+import { Controller, Post, Get, UseGuards, HttpCode, HttpStatus, Request } from '@nestjs/common';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
-import { User } from './entities/user.entity';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
@@ -44,7 +43,7 @@ export class GdprController {
   }
 
   @Get('retention-stats')
-  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Get data retention statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Retention statistics retrieved' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -61,7 +60,7 @@ export class GdprController {
 
   @Post('run-cleanup')
   @HttpCode(HttpStatus.ACCEPTED)
-  @UseGuards(AuthGuard('jwt'), AdminGuard)
+  @UseGuards(JwtAuthGuard, AdminGuard)
   @ApiOperation({ summary: 'Manually trigger GDPR data cleanup (Admin only)' })
   @ApiResponse({ status: 202, description: 'Cleanup triggered successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })

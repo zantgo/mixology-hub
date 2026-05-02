@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cocktail } from '../entities/cocktail.entity';
@@ -11,6 +11,7 @@ export interface RatingDto {
 
 @Injectable()
 export class RatingService {
+  private readonly logger = new Logger(RatingService.name);
   constructor(
     @InjectRepository(Cocktail)
     private cocktailRepository: Repository<Cocktail>,
@@ -37,18 +38,7 @@ export class RatingService {
       throw new NotFoundException('Cocktail not found');
     }
 
-    // TODO: Implement actual rating logic
-    // This would involve:
-    // 1. Creating/updating rating in COCKTAIL_RATINGS table
-    // 2. Calculating new average rating
-    // 3. Updating cached rating on cocktail
-    // 4. Triggering async job for rating recalculation
-
-    // For now, return mock data
-    return {
-      averageRating: 4.2,
-      userRating: ratingDto.score,
-    };
+    throw new BadRequestException('Rating functionality is not yet implemented');
   }
 
   private async handleExternalCocktailRating(user: User, externalId: string): Promise<Cocktail | null> {
@@ -76,7 +66,7 @@ export class RatingService {
 
       return await this.cocktailRepository.save(forked);
     } catch (error) {
-      console.error('Failed to fork external cocktail:', error);
+      this.logger.error('Failed to fork external cocktail:', error);
       return null;
     }
   }

@@ -30,8 +30,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     // Add token to user object for potential blacklisting in controllers
+    // Only whitelist safe fields — never expose passwordHash, refreshToken, etc.
     return {
-      ...user,
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      lastLoginAt: user.lastLoginAt,
+      createdAt: user.createdAt,
       token,
     };
   }

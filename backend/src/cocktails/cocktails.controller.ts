@@ -11,14 +11,12 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ImageService } from '../images/image.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Public } from '../auth/decorators/public.decorator';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 
 @ApiTags('Cocktails')
 @ApiBearerAuth()
 @Controller('cocktails')
-@UseGuards(JwtAuthGuard)
 export class CocktailsController {
   private static readonly IMAGE_FILE_FILTER = (req: any, file: Express.Multer.File, cb: Function) => {
     if (file && file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
@@ -37,6 +35,7 @@ export class CocktailsController {
   ) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Create a new personal cocktail recipe' })
   @ApiConsumes('application/json', 'multipart/form-data')
   @UseInterceptors(FileInterceptor('image', {
@@ -59,7 +58,10 @@ export class CocktailsController {
       }
       // Re-validate the parsed JSON through DTO validation
       const instance = plainToInstance(CreateCocktailDto, createCocktailDto);
-      const errors = await validate(instance);
+      const errors = await validate(instance, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
       if (errors.length > 0) {
         const messages = errors.flatMap(e => Object.values(e.constraints || {}));
         throw new BadRequestException(['Validation failed', ...messages]);
@@ -84,6 +86,7 @@ export class CocktailsController {
   }
 
   @Post(':id/prepare')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Prepare a cocktail and deplete inventory' })
   prepare(
     @Param('id') id: string,
@@ -92,7 +95,6 @@ export class CocktailsController {
     return this.cocktailsService.prepare(id, user.id);
   }
 
-  @Public()
   @Get()
   @ApiOperation({ summary: 'List cocktails with pagination. Supports unified external search.' })
   @ApiQuery({ name: 'name', required: false, description: 'Search term for unified search' })
@@ -106,7 +108,6 @@ export class CocktailsController {
     return this.cocktailsService.findAll(paginationQuery);
   }
 
-  @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Get local cocktail by ID' })
   findOne(@Param('id') id: string) {
@@ -114,6 +115,7 @@ export class CocktailsController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update a personal cocktail recipe' })
   @ApiConsumes('application/json', 'multipart/form-data')
   @UseInterceptors(FileInterceptor('image', {
@@ -137,7 +139,10 @@ export class CocktailsController {
       }
       // Re-validate the parsed JSON through DTO validation
       const instance = plainToInstance(UpdateCocktailDto, updateCocktailDto);
-      const errors = await validate(instance);
+      const errors = await validate(instance, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
       if (errors.length > 0) {
         const messages = errors.flatMap(e => Object.values(e.constraints || {}));
         throw new BadRequestException(['Validation failed', ...messages]);
@@ -162,6 +167,7 @@ export class CocktailsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Delete a personal cocktail recipe' })
   remove(@Param('id') id: string, @GetUser() user: User) {
     return this.cocktailsService.remove(id, user.id);

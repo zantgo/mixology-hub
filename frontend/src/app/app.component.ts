@@ -1,47 +1,47 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { NgFor, NgIf } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { UserService } from './core/services/user.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [NgIf, NgFor],
+  imports: [DatePipe],
   template: `
     <div style="padding: 40px; font-family: system-ui, sans-serif; max-width: 800px; margin: auto;">
-      <h1 style="color: #333;">👥 MixologyHub - User Manager</h1>
+      <h1 style="color: #333;">MixologyHub - User Manager</h1>
 
       <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
         <h3>Create a new User</h3>
         <button
           (click)="createRandomUser()"
           style="padding: 10px 15px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
-          ➕ Auto-Generate Random User
+          Auto-Generate Random User
         </button>
       </div>
 
       <h2>Registered Users ({{ users().length }})</h2>
 
-      <div *ngIf="users().length > 0; else noData">
-        <div *ngFor="let user of users()"
-             style="background: white; border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+      @if (users().length > 0) {
+        @for (user of users(); track user.id) {
+          <div
+            style="background: white; border: 1px solid #ddd; padding: 15px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
 
-          <div>
-            <strong style="font-size: 1.1em; color: #007bff;">{{ user.email }}</strong><br>
-            <small style="color: gray;">ID: {{ user.id }}</small><br>
-            <small style="color: gray;">Created: {{ user.created_at | date:'short' }}</small>
+            <div>
+              <strong style="font-size: 1.1em; color: #007bff;">{{ user.email }}</strong><br>
+              <small style="color: gray;">ID: {{ user.id }}</small><br>
+              <small style="color: gray;">Created: {{ user.created_at | date:'short' }}</small>
+            </div>
+
+            <button
+              (click)="deleteUser(user.id)"
+              style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
+              Delete
+            </button>
           </div>
-
-          <button
-            (click)="deleteUser(user.id)"
-            style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer;">
-            🗑️ Delete
-          </button>
-        </div>
-      </div>
-
-      <ng-template #noData>
+        }
+      } @else {
         <p style="color: #666; font-style: italic;">No users found in the database. Generate one!</p>
-      </ng-template>
+      }
     </div>
   `
 })

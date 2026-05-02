@@ -253,12 +253,11 @@ export class HierarchicalIngredientService {
     }
 
     const ingredient = await this.ingredientRepository.findOne({
-      where: { name: normalizedName },
+      where: { normalizedName: normalizedName.toUpperCase() },
     });
 
     if (ingredient) {
-      // Cache in Redis with TTL
-      await this.cacheManager.set(cacheKey, ingredient, this.CACHE_TTL * 1000);
+      await this.cacheManager.set(cacheKey, this.toPlainIngredient(ingredient), this.CACHE_TTL * 1000);
     }
 
     return ingredient;
@@ -267,7 +266,7 @@ export class HierarchicalIngredientService {
   private async findHierarchicalMatch(normalizedName: string): Promise<IngredientMatch | null> {
     const allIngredients = await this.ingredientRepository.find({
       relations: ['parent'],
-      take: 10000, // Safety cap to prevent unbounded memory usage
+      take: 2000, // Safety cap — aligned with ADR 0008 spirit
     });
 
     // Build an in-memory parent map to avoid per-ingredient DB queries
@@ -353,7 +352,7 @@ export class HierarchicalIngredientService {
 
   private async findSynonymMatch(normalizedName: string): Promise<IngredientMatch | null> {
     const allIngredients = await this.ingredientRepository.find({
-      take: 10000, // Safety cap to prevent unbounded memory usage
+      take: 2000, // Safety cap — aligned with ADR 0008 spirit
     });
 
     for (const ingredient of allIngredients) {
@@ -384,7 +383,7 @@ export class HierarchicalIngredientService {
 
   private async findFuzzyMatch(normalizedName: string): Promise<IngredientMatch | null> {
     const allIngredients = await this.ingredientRepository.find({
-      take: 10000, // Safety cap to prevent unbounded memory usage
+      take: 2000, // Safety cap — aligned with ADR 0008 spirit
     });
     let bestMatch: Ingredient | null = null;
     let bestScore = 0;
@@ -512,8 +511,7 @@ export class HierarchicalIngredientService {
     });
 
     if (ingredient) {
-      // Cache in Redis with TTL
-      await this.cacheManager.set(cacheKey, ingredient, this.CACHE_TTL * 1000);
+      await this.cacheManager.set(cacheKey, this.toPlainIngredient(ingredient), this.CACHE_TTL * 1000);
     }
 
     return ingredient;
@@ -534,14 +532,26 @@ export class HierarchicalIngredientService {
     }
 
     const ancestors: Ingredient[] = [];
+    const visited = new Set<string>();
     let currentId: string | null = ingredientId;
 
     while (currentId) {
+      if (visited.has(currentId)) {
+        this.logger.warn(`Circular reference detected in ingredient hierarchy at ${currentId}. Breaking traversal.`);
+        break;
+      }
+      visited.add(currentId);
+
       const ingredient = await this.getIngredientById(currentId);
       if (!ingredient || !ingredient.parentId) break;
 
       const parent = await this.getIngredientById(ingredient.parentId);
       if (!parent) break;
+
+      if (visited.has(parent.id)) {
+        this.logger.warn(`Circular reference detected in ingredient hierarchy at ${parent.id}. Breaking traversal.`);
+        break;
+      }
 
       ancestors.push(parent);
       currentId = parent.id;
@@ -692,13 +702,42 @@ export class HierarchicalIngredientService {
     };
   }
 
+  private toPlainIngredient(ingredient: Ingredient): Partial<Ingredient> {
+    return {
+      id: ingredient.id,
+      name: ingredient.name,
+      baseUnit: ingredient.baseUnit,
+      parentId: ingredient.parentId,
+      normalizedName: ingredient.normalizedName,
+      synonyms: ingredient.synonyms,
+      density: ingredient.density,
+      allowMassVolumeConversion: ingredient.allowMassVolumeConversion,
+      isGlobal: ingredient.isGlobal,
+      hierarchyLevel: ingredient.hierarchyLevel,
+    };
+  }
+
   // Cache management
   async clearCache(): Promise<void> {
-    // Redis doesn't have a simple "clear by prefix" in cache-manager
-    // In production, you might want to use Redis SCAN command
-    // For now, we'll just log that cache should be cleared at Redis level
-    this.logger.log('Note: For Redis cache clearing, use Redis CLI or restart Redis service');
-    this.logger.log('In-memory cache methods are deprecated, using Redis with TTL');
+    try {
+      const store = (this.cacheManager as any).store;
+      if (store?.client?.scanIterator) {
+        // Redis store: delete all keys matching our prefix
+        let cleared = 0;
+        for await (const key of store.client.scanIterator({
+          MATCH: `${this.CACHE_PREFIX}*`,
+          COUNT: 100,
+        })) {
+          await this.cacheManager.del(key);
+          cleared++;
+        }
+        this.logger.log(`Cleared ${cleared} ingredient hierarchy cache entries`);
+      } else {
+        this.logger.log('Cache store does not support prefix scanning; keys will expire via TTL');
+      }
+    } catch (error) {
+      this.logger.warn('Failed to clear ingredient hierarchy cache:', error.message);
+    }
   }
 
   async warmupCache(): Promise<void> {
@@ -714,8 +753,8 @@ export class HierarchicalIngredientService {
       const nameCacheKey = `${this.CACHE_PREFIX}name:${this.normalizeName(ingredient.name)}`;
       
       await Promise.all([
-        this.cacheManager.set(idCacheKey, ingredient, this.CACHE_TTL * 1000),
-        this.cacheManager.set(nameCacheKey, ingredient, this.CACHE_TTL * 1000),
+        this.cacheManager.set(idCacheKey, this.toPlainIngredient(ingredient), this.CACHE_TTL * 1000),
+        this.cacheManager.set(nameCacheKey, this.toPlainIngredient(ingredient), this.CACHE_TTL * 1000),
       ]);
     });
 

@@ -29,22 +29,13 @@ export class CocktailsService {
     private readonly unitConverter: UnitConverterService,
   ) {}
 
-  async create(createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string }, userId?: string): Promise<Cocktail> {
-    let user: User | null;
-    
-    if (userId) {
-      user = await this.userRepository.findOne({ 
-        where: { id: userId } 
-      });
-    } else {
-      // Fallback to mock user for backward compatibility
-      user = await this.userRepository.findOne({ 
-        where: { email: 'mock@test.com' } 
-      });
-    }
+  async create(createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string }, userId: string): Promise<Cocktail> {
+    const user = await this.userRepository.findOne({ 
+      where: { id: userId } 
+    });
 
     if (!user) {
-      throw new NotFoundException('User not found in database');
+      throw new NotFoundException('User not found');
     }
 
     const cocktail = await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
@@ -69,7 +60,7 @@ export class CocktailsService {
           throw new NotFoundException(`Ingredient with ID ${item.ingredientId} not found`);
         }
 
-        const cocktailIngredient = this.cocktailIngredientRepository.create({
+        const cocktailIngredient = transactionalEntityManager.create(CocktailIngredient, {
           cocktail: savedCocktail,
           ingredient: ingredient,
           measure: item.measure,
@@ -86,7 +77,7 @@ export class CocktailsService {
     // Load the complete cocktail with relations
     const completeCocktail = await this.cocktailRepository.findOne({
       where: { id: cocktail.id },
-      relations: ['ingredients', 'ingredients.ingredient', 'user'],
+      relations: ['ingredients', 'user'],
     });
 
     if (!completeCocktail) {
@@ -100,7 +91,7 @@ export class CocktailsService {
     return await this.cocktailRepository.manager.transaction(async (transactionalEntityManager) => {
       const cocktail = await transactionalEntityManager.findOne(Cocktail, {
         where: { id: cocktailId },
-        relations: ['ingredients', 'ingredients.ingredient'],
+        relations: ['ingredients'],
       });
 
       if (!cocktail) {
@@ -136,6 +127,14 @@ export class CocktailsService {
         }
       }
 
+      await transactionalEntityManager
+        .createQueryBuilder()
+        .delete()
+        .from(UserInventory)
+        .where('user_id = :userId', { userId })
+        .andWhere('quantity <= 0')
+        .execute();
+
       return { message: `Cocktail ${cocktail.name} prepared successfully!` };
     });
   }
@@ -145,7 +144,7 @@ export class CocktailsService {
     const offset = (page - 1) * limit;
     const [data, total] = await this.cocktailRepository.findAndCount({
       where: { is_deleted: false },
-      relations: ['ingredients', 'ingredients.ingredient'],
+      relations: ['ingredients'],
       skip: offset,
       take: limit,
     });
@@ -168,7 +167,7 @@ export class CocktailsService {
   async findOne(id: string) {
     const cocktail = await this.cocktailRepository.findOne({
       where: { id, is_deleted: false },
-      relations: ['ingredients', 'ingredients.ingredient'],
+      relations: ['ingredients'],
     });
     if (!cocktail) throw new NotFoundException(`Cocktail #${id} not found`);
     return cocktail;
@@ -196,6 +195,7 @@ export class CocktailsService {
     if (userId && cocktail.user?.id !== userId) {
       throw new NotFoundException(`Cocktail #${id} not found or you don't have permission to delete it`);
     }
-    return await this.cocktailRepository.remove(cocktail);
+    cocktail.is_deleted = true;
+    return await this.cocktailRepository.save(cocktail);
   }
 }

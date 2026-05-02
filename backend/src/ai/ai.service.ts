@@ -32,17 +32,14 @@ export class AiService {
     return this.llmAdapterService;
   }
 
-  async generateRecipe(createAiDto: CreateAiDto) {
-    const mockUser = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
-    if (!mockUser) throw new NotFoundException('Mock user not found.');
-
+  async generateRecipe(createAiDto: CreateAiDto, user: User) {
     const aiProvider = this.getAiProvider();
     const recipe = await aiProvider.generateRecipe(createAiDto.ingredients);
 
     const aiRecipe = this.aiRepository.create({
       prompt: `Ingredients: ${createAiDto.ingredients.join(', ')}`,
       generated_recipe: recipe,
-      user: mockUser,
+      user,
     });
     
     return await this.aiRepository.save(aiRecipe);
@@ -111,10 +108,15 @@ export class AiService {
     return unitMap[unit.toLowerCase()] || 'count';
   }
 
-  async findAll(paginationQuery: PaginationQueryDto) {
+  async findAll(paginationQuery: PaginationQueryDto, userId?: string) {
     const { limit = 10, page = 1 } = paginationQuery;
     const offset = (page - 1) * limit;
+    const where: any = {};
+    if (userId) {
+      where.user = { id: userId };
+    }
     const [data, total] = await this.aiRepository.findAndCount({
+      where,
       relations: ['user'],
       skip: offset,
       take: limit,
@@ -135,20 +137,24 @@ export class AiService {
     };
   }
 
-  async findOne(id: string) {
-    const aiRecipe = await this.aiRepository.findOne({ where: { id }, relations: ['user'] });
+  async findOne(id: string, userId?: string) {
+    const where: any = { id };
+    if (userId) {
+      where.user = { id: userId };
+    }
+    const aiRecipe = await this.aiRepository.findOne({ where, relations: ['user'] });
     if (!aiRecipe) throw new NotFoundException(`AI generated recipe with ID ${id} not found`);
     return aiRecipe;
   }
 
-  async update(id: string, updateAiDto: UpdateAiDto) {
-    const aiRecipe = await this.findOne(id);
+  async update(id: string, updateAiDto: UpdateAiDto, userId?: string) {
+    const aiRecipe = await this.findOne(id, userId);
     Object.assign(aiRecipe, updateAiDto);
     return await this.aiRepository.save(aiRecipe);
   }
 
-  async remove(id: string) {
-    const aiRecipe = await this.findOne(id);
+  async remove(id: string, userId?: string) {
+    const aiRecipe = await this.findOne(id, userId);
     return await this.aiRepository.remove(aiRecipe);
   }
 }

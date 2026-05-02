@@ -219,7 +219,7 @@ export class GdprDataRetentionService {
    */
   private async anonymizeUser(user: User): Promise<void> {
     // Generate anonymous identifier
-    const anonymousId = `anon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const anonymousId = `anon_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     
     // Anonymize personal data
     user.email = `${anonymousId}@anonymized.mixologyhub`;

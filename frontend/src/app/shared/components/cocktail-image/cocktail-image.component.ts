@@ -71,6 +71,9 @@ export class CocktailImageComponent implements OnInit, OnChanges {
   }
 
   onImageError() {
+    if (this.errorCount >= this.maxRetries) {
+      return;
+    }
     this.errorCount++;
     this.currentImageUrl = this.imageService.getDefaultCocktailImage(this.cocktailName);
   }

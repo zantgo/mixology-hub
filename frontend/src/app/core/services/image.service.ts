@@ -77,12 +77,21 @@ export class ImageService {
       }
 
       const img = new Image();
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
+      let settled = false;
+
+      const settle = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+
+      img.onload = () => settle(true);
+      img.onerror = () => settle(false);
       img.src = url;
       
       // Timeout after 5 seconds
-      setTimeout(() => resolve(false), 5000);
+      const timer = setTimeout(() => settle(false), 5000);
     });
   }
 }

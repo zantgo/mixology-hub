@@ -216,7 +216,7 @@ export class CocktailAggregatorService {
       // For now, we'll skip this advanced matching
     }
 
-    return matchedIngredients / cocktail.ingredients.length;
+    return new Decimal(matchedIngredients).div(cocktail.ingredients.length).toNumber();
   }
 
   private sortCocktails(cocktails: any[], sortBy?: string, sortOrder?: string): any[] {
@@ -391,21 +391,20 @@ export class CocktailAggregatorService {
   }
 
   private calculateComplexityScore(ingredientCount: number, totalVolumeMl: number): number {
-    // Simple complexity scoring algorithm
-    let score = 0;
+    let score = new Decimal(0);
     
     // Based on ingredient count
-    if (ingredientCount <= 3) score += 1;
-    else if (ingredientCount <= 5) score += 2;
-    else if (ingredientCount <= 7) score += 3;
-    else score += 4;
+    if (ingredientCount <= 3) score = score.plus(1);
+    else if (ingredientCount <= 5) score = score.plus(2);
+    else if (ingredientCount <= 7) score = score.plus(3);
+    else score = score.plus(4);
     
     // Based on total volume (proxy for preparation time)
-    if (totalVolumeMl > 200) score += 1;
-    if (totalVolumeMl > 300) score += 1;
+    if (totalVolumeMl > 200) score = score.plus(1);
+    if (totalVolumeMl > 300) score = score.plus(1);
     
     // Normalize to 0-5 scale
-    return Math.min(5, score);
+    return Decimal.min(5, score).toNumber();
   }
 
   private generateSearchCacheKey(

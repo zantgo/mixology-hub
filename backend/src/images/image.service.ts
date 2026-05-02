@@ -8,16 +8,10 @@ import { v4 as uuidv4 } from 'uuid';
 export class ImageService {
   private readonly UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'cocktails');
 
-  constructor() {
-    this.ensureDirectoryExists();
-  }
-
-  private async ensureDirectoryExists() {
-    await fs.mkdir(this.UPLOAD_DIR, { recursive: true });
-  }
-
   async processAndSaveImage(file: Express.Multer.File): Promise<{ full: string | null; thumb: string | null }> {
     if (!file) return { full: null, thumb: null };
+
+    await fs.mkdir(this.UPLOAD_DIR, { recursive: true });
 
     // Validate MIME Type (Redundant safety check)
     const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
@@ -55,6 +49,8 @@ export class ImageService {
         throw new BadRequestException('Invalid image format. Only JPG, PNG, and WebP are allowed.');
       }
     }
+
+    await fs.mkdir(this.UPLOAD_DIR, { recursive: true });
 
     const filename = uuidv4();
     const fullPath = path.join(this.UPLOAD_DIR, `${filename}-full.webp`);

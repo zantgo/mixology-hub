@@ -7,6 +7,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
 import { v4 as uuidv4 } from 'uuid';
@@ -247,6 +248,10 @@ export class AuthService {
     }
   }
 
+  private hashToken(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex');
+  }
+
   async requestPasswordReset(email: string) {
     const user = await this.userRepository.findOne({ where: { email } });
     if (!user) {
@@ -254,23 +259,25 @@ export class AuthService {
       return;
     }
 
-    // Generate reset token
-    const resetToken = uuidv4();
+    // Generate strong reset token (32 random bytes = 256 bits of entropy)
+    const resetToken = crypto.randomBytes(32).toString('hex');
     const resetTokenExpiry = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
 
-    user.resetPasswordToken = resetToken;
+    // Store SHA-256 hash so raw token is never exposed in the database
+    user.resetPasswordToken = this.hashToken(resetToken);
     user.resetPasswordExpires = resetTokenExpiry;
     await this.userRepository.save(user);
 
-      // In a real application, send email with reset link.
+      // In a real application, send email with reset link containing the raw token.
       // WARNING: Do NOT return the token in the API response in production.
       return { message: 'If the email is registered, a password reset link has been sent.' };
   }
 
   async resetPassword(token: string, newPassword: string) {
+    const tokenHash = this.hashToken(token);
     const user = await this.userRepository.findOne({
       where: {
-        resetPasswordToken: token,
+        resetPasswordToken: tokenHash,
         resetPasswordExpires: MoreThan(new Date()),
       },
     });

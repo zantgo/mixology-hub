@@ -1,6 +1,8 @@
-import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, ValidateNested, IsNumber, IsPositive, IsBoolean, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+
+const ALLOWED_UNITS = ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes', 'count', 'g', 'kg', 'parts', 'part', 'drops', 'drop', 'splashes', 'splash', 'slices', 'slice', 'wedges', 'wedge', 'twists', 'twist', 'sprigs', 'sprig', 'leaves', 'leaf'];
 
 /**
  * DTO for the ingredient structure within a cocktail creation.
@@ -20,6 +22,7 @@ class CreateCocktailIngredientDto {
   @ApiProperty({ example: 'oz', description: 'Unit used for calculation (ml, oz, grams)' })
   @IsString()
   @IsNotEmpty()
+  @IsIn(ALLOWED_UNITS)
   unit: string;
 
   @ApiProperty({ example: '2 oz', description: 'Full string for display purposes (UI label)' })

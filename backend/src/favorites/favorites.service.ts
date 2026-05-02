@@ -14,8 +14,8 @@ export class FavoritesService {
     @InjectRepository(User) private readonly userRepository: Repository<User>,
   ) {}
 
-  async create(dto: CreateFavoriteDto) {
-    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
+  async create(userId: string, dto: CreateFavoriteDto) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
     const favorite = this.favoriteRepository.create({
@@ -27,17 +27,19 @@ export class FavoritesService {
     return await this.favoriteRepository.save(favorite);
   }
 
-  async findAll(paginationQuery: PaginationQueryDto) {
-    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
+  async findAll(userId: string, paginationQuery: PaginationQueryDto) {
     const { limit = 10, page = 1 } = paginationQuery;
     const offset = (page - 1) * limit;
 
-    const [data, total] = await this.favoriteRepository.findAndCount({
-      where: { user: { id: user?.id } },
-      relations: ['cocktail'],
-      skip: offset,
-      take: limit,
-    });
+    const qb = this.favoriteRepository
+      .createQueryBuilder('favorite')
+      .leftJoinAndSelect('favorite.cocktail', 'cocktail')
+      .where('favorite.user_id = :userId', { userId })
+      .andWhere('(cocktail.id IS NULL OR cocktail.is_deleted = false)')
+      .skip(offset)
+      .take(limit);
+
+    const [data, total] = await qb.getManyAndCount();
     
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;
@@ -54,9 +56,9 @@ export class FavoritesService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(userId: string, id: string) {
     const favorite = await this.favoriteRepository.findOne({ 
-      where: { id },
+      where: { id, user: { id: userId } },
       relations:['user', 'cocktail'] 
     });
     
@@ -67,8 +69,8 @@ export class FavoritesService {
     return favorite;
   }
 
-  async update(id: string, updateFavoriteDto: UpdateFavoriteDto) {
-    const favorite = await this.findOne(id);
+  async update(userId: string, id: string, updateFavoriteDto: UpdateFavoriteDto) {
+    const favorite = await this.findOne(userId, id);
 
     if (updateFavoriteDto.cocktailId !== undefined) {
       favorite.cocktail = updateFavoriteDto.cocktailId ? { id: updateFavoriteDto.cocktailId } as any : null;
@@ -81,8 +83,8 @@ export class FavoritesService {
     return await this.favoriteRepository.save(favorite);
   }
 
-  async remove(id: string) {
-    const favorite = await this.findOne(id); 
+  async remove(userId: string, id: string) {
+    const favorite = await this.findOne(userId, id);
     return await this.favoriteRepository.remove(favorite);
   }
 }

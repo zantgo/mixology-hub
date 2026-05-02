@@ -26,7 +26,8 @@ export class EnhancedTheCocktailDbService {
   private readonly circuitBreakerResetTimeout = 60000; // 1 minute
   private readonly rateLimitWindow = 60000; // 1 minute
   private readonly rateLimitMaxRequests = 30; // 30 requests per minute
-  private requestTimestamps: number[] = [];
+  private rateLimitCounter = 0;
+  private rateLimitWindowStart = Date.now();
 
   constructor(
     private readonly httpService: HttpService,
@@ -264,8 +265,9 @@ export class EnhancedTheCocktailDbService {
 
       const sanitizedDrink: any = {};
       
-      // Only include expected fields and sanitize strings
-      const stringFields = ['strDrink', 'strInstructions', 'strDrinkThumb', 'strImageSource', 'strImageAttribution'];
+      // ADR 0016: Exclude image fields — never expose external image URLs.
+      // Retain metadata fields used for filtering/display (category, glass, tags, alcoholic).
+      const stringFields = ['strDrink', 'strInstructions', 'strCategory', 'strAlcoholic', 'strGlass', 'strTags'];
       const idFields = ['idDrink'];
       
       stringFields.forEach(field => {
@@ -348,24 +350,21 @@ export class EnhancedTheCocktailDbService {
 
   private checkRateLimit(): boolean {
     const now = Date.now();
-    const windowStart = now - this.rateLimitWindow;
-    
-    // Remove old timestamps
-    this.requestTimestamps = this.requestTimestamps.filter(timestamp => timestamp > windowStart);
-    
-    // Check if we're under the limit
-    if (this.requestTimestamps.length >= this.rateLimitMaxRequests) {
-      return false;
+    // Reset window if expired
+    if (now - this.rateLimitWindowStart >= this.rateLimitWindow) {
+      this.rateLimitCounter = 0;
+      this.rateLimitWindowStart = now;
     }
-    
-    return true;
+    return this.rateLimitCounter < this.rateLimitMaxRequests;
   }
 
   private recordRequest(): void {
-    this.requestTimestamps.push(Date.now());
-    
-    // Keep only recent timestamps (last 2 minutes worth)
-    const twoMinutesAgo = Date.now() - 120000;
-    this.requestTimestamps = this.requestTimestamps.filter(timestamp => timestamp > twoMinutesAgo);
+    const now = Date.now();
+    // Reset window if expired
+    if (now - this.rateLimitWindowStart >= this.rateLimitWindow) {
+      this.rateLimitCounter = 0;
+      this.rateLimitWindowStart = now;
+    }
+    this.rateLimitCounter++;
   }
 }

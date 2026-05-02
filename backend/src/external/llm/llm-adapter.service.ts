@@ -26,7 +26,7 @@ export class LlmAdapterService implements IAiProvider {
     // Sanitize each ingredient against prompt injection
     const sanitizedIngredients = ingredients.map(ing => this.sanitizeUserInput(ing));
 
-    const theme = options?.theme ? ` with a ${options.theme} theme` : '';
+    const theme = options?.theme ? ` with a ${this.sanitizeUserInput(options.theme)} theme` : '';
     const difficulty = options?.difficulty ? ` suitable for ${options.difficulty} skill level` : '';
     const language = options?.language || 'English';
 

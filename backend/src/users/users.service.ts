@@ -53,13 +53,6 @@ export class UsersService {
     return await this.userRepository.save(user);
   }
 
-  // Returns the seeded mock user (Simulating Auth Context)
-  async getMockUser(): Promise<User> {
-    const user = await this.userRepository.findOne({ where: { email: 'mock@test.com' } });
-    if (!user) throw new NotFoundException('Mock user not found. Ensure seeder has run.');
-    return user;
-  }
-
   async remove(id: string) {
     const user = await this.findOne(id);
     return await this.userRepository.remove(user);

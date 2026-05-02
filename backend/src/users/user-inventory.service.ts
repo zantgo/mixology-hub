@@ -129,11 +129,15 @@ export class UserInventoryService {
     const missingIngredients: MakeabilityResult['missingIngredients'] = [];
     const substitutions: MakeabilityResult['substitutions'] = [];
 
+    const ingredientIds = dto.ingredients.map(i => i.ingredientId);
+    const requiredIngredients = await this.ingredientRepository.find({
+      where: ingredientIds.map(id => ({ id })),
+      relations: ['parent'],
+    });
+    const ingredientMap = new Map(requiredIngredients.map(i => [i.id, i]));
+
     for (const required of dto.ingredients) {
-      const requiredIngredient = await this.ingredientRepository.findOne({
-        where: { id: required.ingredientId },
-        relations: ['parent'],
-      });
+      const requiredIngredient = ingredientMap.get(required.ingredientId);
       if (!requiredIngredient) {
         throw new NotFoundException(`Ingredient ${required.ingredientId} not found`);
       }
@@ -235,11 +239,14 @@ export class UserInventoryService {
     try {
       const depletedItems: Array<{ ingredientId: string; amountDepleted: number }> = [];
 
-      for (const required of dto.ingredients) {
-        const requiredIngredient = await this.ingredientRepository.findOne({
-          where: { id: required.ingredientId },
-        });
+      const ingredientIds = dto.ingredients.map(i => i.ingredientId);
+      const requiredIngredients = await this.ingredientRepository.find({
+        where: ingredientIds.map(id => ({ id })),
+      });
+      const ingredientMap = new Map(requiredIngredients.map(i => [i.id, i]));
 
+      for (const required of dto.ingredients) {
+        const requiredIngredient = ingredientMap.get(required.ingredientId);
         if (!requiredIngredient) {
           throw new NotFoundException(`Ingredient ${required.ingredientId} not found`);
         }
@@ -362,7 +369,8 @@ export class UserInventoryService {
     }
 
     // Check for pagination overshoot per ADR 0008
-    if (iterations >= this.MAX_ITERATIONS && makeableCocktails.length > 0 && makeableCocktails.length <= offset) {
+    const wasCapped = iterations >= this.MAX_ITERATIONS;
+    if (wasCapped && makeableCocktails.length <= offset) {
       throw new BadRequestException(
         'Pagination overshoot: Requested page exceeds available results due to computation limits.',
         'PAGINATION_OVERSHOOT'
@@ -381,11 +389,12 @@ export class UserInventoryService {
         nextPage: hasNextPage ? page + 1 : null,
         itemsPerPage: limit,
         totalItems,
-        totalPages,
+        totalPages: totalItems > 0 ? totalPages : 0,
         iterations,
         maxIterations: this.MAX_ITERATIONS,
-        warning: iterations >= this.MAX_ITERATIONS
-          ? 'Results limited by computation constraints. Try filtering to reduce candidates.'
+        incomplete: wasCapped,
+        warning: wasCapped
+          ? 'Results may be incomplete due to computation constraints. Try filtering to reduce candidates.'
           : null,
       }
     };

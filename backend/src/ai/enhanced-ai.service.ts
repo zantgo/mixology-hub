@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, InternalServerErrorException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, QueryFailedError } from 'typeorm';
+import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Ai } from './entities/ai.entity';
 import { UserAiQuotas } from './entities/user-ai-quotas.entity';
@@ -107,11 +107,11 @@ export class EnhancedAiService {
     userId: string,
     request: AiRecipeRequest,
   ): Promise<AiRecipeResponse> {
-    // 1. Rate limiting and quota check
-    await this.checkUserQuota(userId);
-
-    // 2. Validate and sanitize inputs
+    // 1. Validate and sanitize inputs (cheap, do before consuming quota)
     const sanitizedRequest = this.sanitizeAndValidateRequest(request);
+
+    // 2. Atomically consume quota BEFORE generation (prevents TOCTOU race)
+    await this.consumeUserQuota(userId);
 
     // 3. Check for banned content
     this.checkForBannedContent(sanitizedRequest);
@@ -207,9 +207,6 @@ export class EnhancedAiService {
 
     // 15. Store generation record (without saving the recipe itself)
     await this.recordGeneration(userId, bestRecipe, bestValidation);
-
-    // 16. Increment user quota
-    await this.incrementUserQuota(userId);
 
     return bestRecipe;
   }
@@ -323,56 +320,26 @@ export class EnhancedAiService {
     return validation;
   }
 
-  private async checkUserQuota(userId: string): Promise<void> {
+  private async consumeUserQuota(userId: string): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
 
-    let quota = await this.quotaRepository.findOne({
-      where: { user: { id: userId }, quotaDate: today },
-    });
+    const result = await this.quotaRepository.manager.query(
+      `INSERT INTO user_ai_quotas (user_id, quota_date, usage_count, last_updated_at)
+       VALUES ($1, $2, 1, NOW())
+       ON CONFLICT (user_id, quota_date)
+       DO UPDATE SET usage_count = user_ai_quotas.usage_count + 1,
+                     last_updated_at = NOW()
+       RETURNING usage_count`,
+      [userId, today],
+    );
 
-    if (!quota) {
-      // Use an atomic INSERT to prevent TOCTOU race condition.
-      // If two concurrent requests both try to create the row,
-      // the second will fail on the UNIQUE(user_id, quota_date) constraint.
-      try {
-        quota = this.quotaRepository.create({
-          user: { id: userId },
-          quotaDate: today,
-          usageCount: 0,
-        });
-        await this.quotaRepository.save(quota);
-      } catch (error) {
-        // UNIQUE constraint violation — another request created the row first.
-        if (error instanceof QueryFailedError && (error as any).code === '23505') {
-          quota = await this.quotaRepository.findOne({
-            where: { user: { id: userId }, quotaDate: today },
-          });
-          if (!quota) {
-            throw new InternalServerErrorException('Failed to check AI quota');
-          }
-        } else {
-          throw error;
-        }
-      }
-    }
-
-    if (quota.usageCount >= this.MAX_RECIPES_PER_DAY) {
+    const newCount: number = result[0]?.usage_count ?? 1;
+    if (newCount > this.MAX_RECIPES_PER_DAY) {
       throw new ForbiddenException(
         `Daily limit of ${this.MAX_RECIPES_PER_DAY} AI recipes exceeded. ` +
-        `Please try again tomorrow.`
+        `Please try again tomorrow.`,
       );
     }
-  }
-
-  private async incrementUserQuota(userId: string): Promise<void> {
-    const today = new Date().toISOString().split('T')[0];
-
-    await this.quotaRepository
-      .createQueryBuilder()
-      .update(UserAiQuotas)
-      .set({ usageCount: () => 'usage_count + 1' })
-      .where('user_id = :userId AND quota_date = :today', { userId, today })
-      .execute();
   }
 
   private sanitizeAndValidateRequest(request: AiRecipeRequest): AiRecipeRequest {
@@ -424,10 +391,21 @@ export class EnhancedAiService {
     // Sanitize theme
     let sanitizedTheme: string | undefined;
     if (request.theme) {
-      sanitizedTheme = request.theme.trim();
-      if (sanitizedTheme.length > 200) {
+      const trimmed = request.theme.trim();
+      if (trimmed.length > 200) {
         throw new BadRequestException('Theme cannot exceed 200 characters');
       }
+      // Apply same character whitelist and blocked patterns as ingredients
+      const sanitized = trimmed.slice(0, 200).replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '').trim();
+      if (sanitized.length === 0) {
+        throw new BadRequestException('Theme contains no valid characters');
+      }
+      for (const pattern of blockedPatterns) {
+        if (pattern.test(sanitized)) {
+          throw new BadRequestException('Input contains blocked patterns');
+        }
+      }
+      sanitizedTheme = sanitized;
     }
 
     // Validate difficulty
@@ -566,7 +544,7 @@ export class EnhancedAiService {
 
   private buildRecipeFromParsed(parsed: any, request: AiRecipeRequest): AiRecipeResponse {
     return {
-      id: `ai-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       name: parsed.name || `AI Generated ${request.theme ? request.theme + ' ' : ''}Cocktail`,
       description: parsed.description || 'An AI-generated cocktail recipe',
       instructions: Array.isArray(parsed.instructions)
@@ -770,11 +748,14 @@ export class EnhancedAiService {
     // Simple duplicate check based on ingredient names
     const ingredientNames = recipe.ingredients.map(ing => ing.name.toLowerCase()).sort();
     
-    // Check local database for similar recipes
+    // Check a capped set of recent AI recipes to avoid unbounded memory
     const similarRecipes = await this.cocktailRepository
       .createQueryBuilder('cocktail')
-      .innerJoin('cocktail.ingredients', 'ingredient')
+      .innerJoinAndSelect('cocktail.ingredients', 'ci')
+      .innerJoinAndSelect('ci.ingredient', 'ingredient')
       .where('cocktail.source = :source', { source: 'ai' })
+      .orderBy('cocktail.created_at', 'DESC')
+      .take(50)
       .getMany();
 
     for (const similarRecipe of similarRecipes) {
@@ -782,7 +763,6 @@ export class EnhancedAiService {
         .map(ing => ing.ingredient.name.toLowerCase())
         .sort();
       
-      // Simple similarity check (could be enhanced with more sophisticated algorithm)
       const intersection = ingredientNames.filter(name => 
         similarIngredientNames.includes(name)
       );
