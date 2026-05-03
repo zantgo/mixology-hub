@@ -1,6 +1,8 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, Query, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException, UseGuards } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiQuery, ApiConsumes, ApiBearerAuth } from '@nestjs/swagger';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CocktailsService } from './cocktails.service';
 import { CocktailAggregatorService } from './cocktail-aggregator.service';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
@@ -10,6 +12,10 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ImageService } from '../images/image.service';
+import { RatingService } from './services/rating.service';
+import { RateCocktailDto } from './dto/rate-cocktail.dto';
+import { ReportCocktailDto } from './dto/report-cocktail.dto';
+import { ReportedContent } from './entities/reported-content.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
@@ -32,6 +38,9 @@ export class CocktailsController {
     private readonly cocktailsService: CocktailsService,
     private readonly aggregatorService: CocktailAggregatorService,
     private readonly imageService: ImageService,
+    private readonly ratingService: RatingService,
+    @InjectRepository(ReportedContent)
+    private readonly reportRepository: Repository<ReportedContent>,
   ) {}
 
   @Post()
@@ -127,6 +136,50 @@ export class CocktailsController {
   @ApiOperation({ summary: 'Undo a completed preparation (returns 202 Accepted)' })
   undo(@Param('logId') logId: string) {
     return this.cocktailsService.undo(logId);
+  }
+
+  @Post(':id/rate')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Rate a cocktail (1-5)' })
+  rateCocktail(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() rateDto: RateCocktailDto,
+  ) {
+    return this.ratingService.rateCocktail(user, id, rateDto);
+  }
+
+  @Get(':id/my-rating')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get current user rating for a cocktail' })
+  getMyRating(@Param('id') id: string, @GetUser() user: User) {
+    return this.ratingService.getUserRating(user, id);
+  }
+
+  @Get(':id/average-rating')
+  @ApiOperation({ summary: 'Get average rating for a cocktail' })
+  getAverageRating(@Param('id') id: string) {
+    return this.ratingService.getCocktailAverageRating(id);
+  }
+
+  @Post(':id/report')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Report a cocktail for inappropriate content' })
+  async reportCocktail(
+    @Param('id') id: string,
+    @GetUser() user: User,
+    @Body() reportDto: ReportCocktailDto,
+  ) {
+    const report = this.reportRepository.create({
+      reportedBy: user,
+      cocktail: { id } as any,
+      reportReason: reportDto.reportReason,
+      details: reportDto.details || null,
+      status: 'pending',
+    });
+    return this.reportRepository.save(report);
   }
 
   @Get()

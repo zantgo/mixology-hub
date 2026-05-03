@@ -15,6 +15,7 @@ import { UtilsModule } from './utils/utils.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { InventoryModule } from './inventory/inventory.module';
+import { McpModule } from './mcp/mcp.module';
 
 @Module({
   imports:[
@@ -47,6 +48,7 @@ import { InventoryModule } from './inventory/inventory.module';
     UtilsModule,
     AuthModule,
     AdminModule,
+    McpModule,
   ],
   providers: [
     {

@@ -1,17 +1,14 @@
 import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
-import { AuthStore } from '../stores/auth.store';
 import { UiStore } from '../stores/ui.store';
 
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
-  const authStore = inject(AuthStore);
   const uiStore = inject(UiStore);
 
   return next(req).pipe(
     catchError((error: HttpErrorResponse) => {
       if (error.status === 401) {
-        authStore.logout();
         uiStore.addToast({
           id: crypto.randomUUID(),
           message: 'Session expired. Please log in again.',

@@ -44,6 +44,7 @@
     "cache-manager-redis-yet": "^5.1.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "cookie-parser": "^1.4.7",
     "decimal.js": "^10.6.0",
     "helmet": "^8.1.0",
     "multer": "^2.1.1",

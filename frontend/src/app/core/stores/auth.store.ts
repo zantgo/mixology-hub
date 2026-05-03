@@ -1,6 +1,6 @@
-import { Injectable, signal, computed, inject } from '@angular/core';
+import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, catchError, throwError } from 'rxjs';
+import { Observable, tap, catchError, throwError, of } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface UserProfile {
@@ -10,43 +10,47 @@ export interface UserProfile {
   role: 'user' | 'admin';
 }
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
-export interface AuthState {
-  user: UserProfile | null;
-  isAuthenticated: boolean;
-  isAdmin: boolean;
-  isMockAuth: boolean;
-  loading: boolean;
-  error: string | null;
-}
-
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
   private http = inject(HttpClient);
   private apiUrl = `${environment.apiUrl}/auth`;
 
   readonly user = signal<UserProfile | null>(null);
-  readonly isAuthenticated = signal<boolean>(!!localStorage.getItem('access_token'));
+  readonly isAuthenticated = signal<boolean>(false);
   readonly isAdmin = signal<boolean>(false);
   readonly loading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
-  get isMockAuth(): boolean {
-    return !localStorage.getItem('access_token');
+  private accessToken: string | null = null;
+  private refreshInProgress: Promise<boolean> | null = null;
+
+  initialize(): Observable<boolean> {
+    return new Observable<boolean>((subscriber) => {
+      this.silentRefresh().subscribe({
+        next: (success) => {
+          subscriber.next(success);
+          subscriber.complete();
+        },
+        error: () => {
+          subscriber.next(false);
+          subscriber.complete();
+        },
+      });
+    });
+  }
+
+  getAccessToken(): string | null {
+    return this.accessToken;
   }
 
   login(email: string, password: string): Observable<any> {
     this.loading.set(true);
     this.error.set(null);
-    return this.http.post<{ user: UserProfile; accessToken: string; refreshToken: string }>(
-      `${this.apiUrl}/login`, { email, password }
+    return this.http.post<{ user: UserProfile; accessToken: string }>(
+      `${this.apiUrl}/login`, { email, password }, { withCredentials: true }
     ).pipe(
       tap(res => {
-        this.storeTokens(res);
+        this.accessToken = res.accessToken;
         this.user.set(res.user);
         this.isAuthenticated.set(true);
         this.isAdmin.set(res.user.role === 'admin');
@@ -63,11 +67,11 @@ export class AuthStore {
   register(email: string, password: string, displayName?: string): Observable<any> {
     this.loading.set(true);
     this.error.set(null);
-    return this.http.post<{ user: UserProfile; accessToken: string; refreshToken: string }>(
-      `${this.apiUrl}/register`, { email, password, displayName }
+    return this.http.post<{ user: UserProfile; accessToken: string }>(
+      `${this.apiUrl}/register`, { email, password, displayName }, { withCredentials: true }
     ).pipe(
       tap(res => {
-        this.storeTokens(res);
+        this.accessToken = res.accessToken;
         this.user.set(res.user);
         this.isAuthenticated.set(true);
         this.isAdmin.set(res.user.role === 'admin');
@@ -79,6 +83,41 @@ export class AuthStore {
         return throwError(() => err);
       })
     );
+  }
+
+  silentRefresh(): Observable<boolean> {
+    if (this.refreshInProgress) {
+      return new Observable<boolean>((subscriber) => {
+        this.refreshInProgress!.then((result) => {
+          subscriber.next(result);
+          subscriber.complete();
+        });
+      });
+    }
+
+    this.refreshInProgress = new Promise<boolean>((resolve) => {
+      this.http.post<{ accessToken: string }>(
+        `${this.apiUrl}/refresh`, {}, { withCredentials: true }
+      ).subscribe({
+        next: (res) => {
+          this.accessToken = res.accessToken;
+          this.isAuthenticated.set(true);
+          this.refreshInProgress = null;
+          resolve(true);
+        },
+        error: () => {
+          this.refreshInProgress = null;
+          resolve(false);
+        },
+      });
+    });
+
+    return new Observable<boolean>((subscriber) => {
+      this.refreshInProgress!.then((result) => {
+        subscriber.next(result);
+        subscriber.complete();
+      });
+    });
   }
 
   loadProfile(): Observable<UserProfile> {
@@ -98,21 +137,12 @@ export class AuthStore {
   }
 
   logout(): void {
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (refreshToken) {
-      this.http.post(`${this.apiUrl}/logout`, { refreshToken }).subscribe();
-    }
+    this.http.post(`${this.apiUrl}/logout`, {}, { withCredentials: true }).subscribe();
     this.clearState();
   }
 
-  private storeTokens(res: { accessToken: string; refreshToken: string }): void {
-    localStorage.setItem('access_token', res.accessToken);
-    localStorage.setItem('refresh_token', res.refreshToken);
-  }
-
-  private clearState(): void {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
+  clearState(): void {
+    this.accessToken = null;
     this.user.set(null);
     this.isAuthenticated.set(false);
     this.isAdmin.set(false);

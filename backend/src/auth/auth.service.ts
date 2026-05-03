@@ -107,16 +107,16 @@ export class AuthService {
     };
   }
 
-  async refreshToken(refreshTokenDto: RefreshTokenDto) {
+  async refreshToken(refreshToken: string) {
     try {
       // Verify refresh token
-      const payload = await this.jwtService.verifyAsync(refreshTokenDto.refreshToken, {
+      const payload = await this.jwtService.verifyAsync(refreshToken, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
 
       // Check if token is blacklisted
       const isBlacklisted = await this.tokenBlacklistRepository.findOne({
-        where: { token: refreshTokenDto.refreshToken },
+        where: { token: refreshToken },
       });
       if (isBlacklisted) {
         throw new UnauthorizedException('Token has been revoked');
@@ -131,7 +131,7 @@ export class AuthService {
       }
 
       // Check if refresh token matches the one stored (bcrypt compare)
-      const isTokenValid = await bcrypt.compare(refreshTokenDto.refreshToken, user.refreshToken);
+      const isTokenValid = await bcrypt.compare(refreshToken, user.refreshToken);
       if (!isTokenValid) {
         // Token reuse detected - blacklist all tokens for this user
         await this.blacklistAllUserTokens(user.id);
@@ -142,7 +142,7 @@ export class AuthService {
       const tokens = await this.generateTokens(user);
 
       // Blacklist the old refresh token
-      await this.blacklistToken(refreshTokenDto.refreshToken, 'refresh_token_replaced');
+      await this.blacklistToken(refreshToken, 'refresh_token_replaced');
 
       return tokens;
     } catch (error) {

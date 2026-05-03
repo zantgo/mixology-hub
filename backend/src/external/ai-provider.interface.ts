@@ -26,6 +26,12 @@ export interface AiRecipe {
 
 export interface IAiProvider {
   generateRecipe(ingredients: string[], options?: AiGenerationOptions): Promise<AiRecipe>;
+  generateWithTools?(
+    ingredients: string[],
+    tools: Array<{ type: 'function'; function: { name: string; description: string; parameters: any } }>,
+    toolExecutor: (toolName: string, args: any) => Promise<any>,
+    options?: AiGenerationOptions,
+  ): Promise<AiRecipe>;
   validateContent(content: string): Promise<{ isValid: boolean; issues: string[] }>;
   getModelInfo(): { name: string; version: string; capabilities: string[] };
 }

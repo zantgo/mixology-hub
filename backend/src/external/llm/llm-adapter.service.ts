@@ -152,7 +152,6 @@ export class LlmAdapterService implements IAiProvider {
     const model = this.configService.get<string>('AI_MODEL') || 'deepseek-chat';
     const apiUrl = this.configService.get<string>('AI_API_URL') || '';
 
-    // Determine provider based on API URL
     let provider = 'Generic LLM';
     if (apiUrl.includes('openai')) provider = 'OpenAI';
     else if (apiUrl.includes('anthropic')) provider = 'Anthropic';
@@ -166,9 +165,112 @@ export class LlmAdapterService implements IAiProvider {
         'content-moderation',
         'json-output',
         'multi-language',
-        'theme-customization'
+        'theme-customization',
+        'tool-calling',
       ]
     };
+  }
+
+  /**
+   * Generate a recipe using MCP-style tool calling.
+   * The LLM receives tool definitions and can call them during generation.
+   * @param ingredients User-provided ingredient names
+   * @param tools Tool definitions in OpenAI function-calling format
+   * @param toolExecutor Callback that executes tool calls and returns results
+   * @param options Generation options
+   */
+  async generateWithTools(
+    ingredients: string[],
+    tools: Array<{ type: 'function'; function: { name: string; description: string; parameters: any } }>,
+    toolExecutor: (toolName: string, args: any) => Promise<any>,
+    options?: AiGenerationOptions,
+  ): Promise<AiRecipe> {
+    const apiUrl = this.configService.get<string>('AI_API_URL');
+    const apiKey = this.configService.get<string>('AI_API_KEY');
+    const model = this.configService.get<string>('AI_MODEL') || 'deepseek-chat';
+
+    if (!apiUrl || !apiKey) {
+      throw new BadGatewayException('AI Service is not configured.');
+    }
+
+    const sanitized = ingredients.map((i) => this.sanitizeUserInput(i));
+    const theme = options?.theme ? ` with a ${this.sanitizeUserInput(options.theme)} theme` : '';
+    const language = options?.language || 'English';
+
+    const systemPrompt = `Act as a professional bartender. Create a cocktail${theme} using the user's bar inventory.
+You have access to tools to check inventory, search for recipes, and convert units.
+Use the tools as needed, then respond with a complete cocktail recipe as a raw JSON object.
+Return ONLY a raw JSON object: {"name":"string","description":"string","instructions":["step1"],"ingredients":[{"name":"string","amount":number,"unit":"string","note":"optional"}],"metadata":{"difficulty":"easy|medium|hard","preparationTime":"string","servingSize":number}}`;
+
+    const userMessage = `Create a cocktail using these available ingredients: ${sanitized.join(', ')}. Respond in ${language}.`;
+
+    const messages: any[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ];
+
+    try {
+      const headers = { Authorization: `Bearer ${apiKey}` };
+      let response = await firstValueFrom(
+        this.httpService.post(apiUrl, {
+          model,
+          messages,
+          tools,
+          tool_choice: 'auto',
+          max_tokens: options?.maxTokens || 2000,
+          temperature: options?.temperature || 0.7,
+        }, { headers }),
+      );
+
+      const choice = response.data.choices[0];
+      const message = choice.message;
+
+      // Handle tool calls loop
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        messages.push(message);
+
+        for (const tc of message.tool_calls) {
+          const toolName = tc.function.name;
+          const args = JSON.parse(tc.function.arguments);
+          const toolResult = await toolExecutor(toolName, args);
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(toolResult),
+          });
+        }
+
+        // Get final response after tool calls
+        response = await firstValueFrom(
+          this.httpService.post(apiUrl, {
+            model,
+            messages,
+            max_tokens: options?.maxTokens || 2000,
+            temperature: options?.temperature || 0.7,
+          }, { headers }),
+        );
+
+        const finalChoice = response.data.choices[0];
+        const finalContent = finalChoice.message.content;
+        return this.extractRecipeJson(finalContent);
+      }
+
+      // No tool calls — direct response
+      return this.extractRecipeJson(message.content);
+    } catch (error: any) {
+      this.logger.error('Failed to generate AI recipe with tools', error.message);
+      throw new BadGatewayException('LLM Provider failed to generate recipe.');
+    }
+  }
+
+  private extractRecipeJson(rawContent: string): AiRecipe {
+    const startIdx = rawContent.indexOf('{');
+    const endIdx = rawContent.lastIndexOf('}');
+    if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+      throw new BadGatewayException('LLM response does not contain valid JSON');
+    }
+    return JSON.parse(rawContent.substring(startIdx, endIdx + 1));
   }
 
   private sanitizeUserInput(input: string): string {

@@ -6,6 +6,7 @@ import { OrderStore } from '../../core/stores/order.store';
 import { UiStore } from '../../core/stores/ui.store';
 import { CocktailImageComponent } from '../../shared/components/cocktail-image/cocktail-image.component';
 import { FavoriteButtonComponent } from '../../features/shared/favorite-button.component';
+import { StarRatingComponent } from '../../shared/components/star-rating/star-rating.component';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
 import { ButtonComponent } from '../../shared/components/button/button.component';
 import { ModalComponent } from '../../shared/components/modal/modal.component';
@@ -19,6 +20,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
     RouterLink,
     CocktailImageComponent,
     FavoriteButtonComponent,
+    StarRatingComponent,
     BadgeComponent,
     ButtonComponent,
     ModalComponent,
@@ -59,11 +61,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             }
             @if (cocktail()!.rating) {
               <span class="rating">
-                <app-icon name="star" [size]="14" [color]="'#FFD700'" />
-                {{ cocktail()!.rating }}
-                @if (cocktail()!.ratingCount) {
-                  ({{ cocktail()!.ratingCount }})
-                }
+                <app-star-rating [value]="cocktail()!.rating" [count]="cocktail()!.ratingCount ?? 0" />
               </span>
             }
             @if (cocktail()!.makeability) {
@@ -104,6 +102,17 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
         <section class="detail-section">
           <h3 class="section-title">Instructions</h3>
           <p class="instructions-text">{{ cocktail()!.instructions }}</p>
+        </section>
+
+        <section class="detail-section">
+          <h3 class="section-title">Rate This Cocktail</h3>
+          <app-star-rating
+            [value]="cocktail()!.rating ?? 0"
+            [count]="cocktail()!.ratingCount ?? 0"
+            [cocktailId]="cocktail()!.id"
+            [interactive]="true"
+            (rated)="onRated($event)"
+          />
         </section>
 
         @if (orderStore.status() === 'completed') {
@@ -320,6 +329,14 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
       .items()
       .find((i) => i.name?.toLowerCase() === name.toLowerCase());
     return !item || item.quantity <= 0;
+  }
+
+  onRated(event: { score: number; average: number; count: number }): void {
+    this.uiStore.addToast({
+      id: crypto.randomUUID(),
+      message: `Rated ${event.score} star${event.score > 1 ? 's' : ''}!`,
+      type: 'success',
+    });
   }
 
   onPrepare(): void {

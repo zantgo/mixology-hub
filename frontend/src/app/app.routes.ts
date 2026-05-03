@@ -45,6 +45,20 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'create',
+    loadComponent: () =>
+      import('./pages/create/create.page').then(
+        (m) => m.CreatePage,
+      ),
+  },
+  {
+    path: 'admin',
+    loadComponent: () =>
+      import('./pages/admin/admin.page').then(
+        (m) => m.AdminPage,
+      ),
+  },
+  {
     path: 'auth/login',
     loadComponent: () =>
       import('./pages/auth/login.page').then(

@@ -1,9 +1,9 @@
-import { Controller, Post, Body, UseGuards, Request, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Request, Get, Param, Res, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
+import { Response, Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 
@@ -18,8 +18,14 @@ export class AuthController {
   @ApiResponse({ status: 201, description: 'User successfully registered' })
   @ApiResponse({ status: 409, description: 'User already exists' })
   @ApiResponse({ status: 400, description: 'Invalid input' })
-  async register(@Body() registerDto: RegisterDto) {
-    return this.authService.register(registerDto);
+  async register(@Body() registerDto: RegisterDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.register(registerDto);
+    this.setRefreshCookie(res, result.refreshToken);
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+      accessTokenExpiresIn: result.accessTokenExpiresIn,
+    };
   }
 
   @Public()
@@ -28,8 +34,14 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'User successfully logged in' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   @ApiResponse({ status: 403, description: 'Account locked' })
-  async login(@Body() loginDto: LoginDto) {
-    return this.authService.login(loginDto);
+  async login(@Body() loginDto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const result = await this.authService.login(loginDto);
+    this.setRefreshCookie(res, result.refreshToken);
+    return {
+      user: result.user,
+      accessToken: result.accessToken,
+      accessTokenExpiresIn: result.accessTokenExpiresIn,
+    };
   }
 
   @Public()
@@ -37,8 +49,17 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Token successfully refreshed' })
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
-  async refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
-    return this.authService.refreshToken(refreshTokenDto);
+  async refreshToken(@Req() req: ExpressRequest, @Res({ passthrough: true }) res: Response) {
+    const refreshToken = req.cookies?.refreshToken;
+    if (!refreshToken) {
+      return { error: 'No refresh token' };
+    }
+    const result = await this.authService.refreshToken(refreshToken);
+    this.setRefreshCookie(res, result.refreshToken);
+    return {
+      accessToken: result.accessToken,
+      accessTokenExpiresIn: result.accessTokenExpiresIn,
+    };
   }
 
   @Post('logout')
@@ -46,10 +67,11 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
-  async logout(@Request() req) {
+  async logout(@Request() req, @Res({ passthrough: true }) res: Response) {
     const authHeader = req.headers.authorization;
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
-    const refreshToken = req.body.refreshToken;
+    const refreshToken = req.cookies?.refreshToken;
+    res.clearCookie('refreshToken', { path: '/api/auth', httpOnly: true, secure: true, sameSite: 'strict' as const });
     return this.authService.logout(accessToken, refreshToken);
   }
 
@@ -105,5 +127,15 @@ export class AuthController {
       lastLoginAt: req.user.lastLoginAt,
       createdAt: req.user.createdAt,
     };
+  }
+
+  private setRefreshCookie(res: Response, token: string): void {
+    res.cookie('refreshToken', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/api/auth',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
   }
 }

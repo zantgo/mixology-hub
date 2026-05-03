@@ -41,6 +41,14 @@ export class Cocktail {
   @Expose({ name: 'imageThumb' })
   image_thumb: string; // Path to thumbnail image (300x300 WebP)
 
+  @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
+  @Expose()
+  rating: number | null; // Cached average rating (0.00–5.00)
+
+  @Column({ name: 'rating_count', default: 0 })
+  @Expose({ name: 'ratingCount' })
+  rating_count: number; // Number of ratings for average calculation
+
   @Column({ name: 'is_deleted', default: false })
   @Expose({ name: 'isDeleted' })
   is_deleted: boolean; // Soft delete flag for data integrity
