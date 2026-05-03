@@ -6,6 +6,7 @@ import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { BarInventoryService } from '../inventory/bar-inventory.service';
+import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 
 export interface SearchFilters {
   ingredient?: string;
@@ -33,6 +34,7 @@ export class CocktailAggregatorService {
     private readonly localService: CocktailsService,
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly inventoryService: BarInventoryService,
+    private readonly hierarchicalService: HierarchicalIngredientService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
 
@@ -173,8 +175,8 @@ export class CocktailAggregatorService {
       const inventory = await this.inventoryService.getInventory();
       const inventoryData = inventory.data;
 
-      return cocktails.map(cocktail => {
-        const makeabilityScore = this.calculateMakeabilityScore(cocktail, inventoryData);
+      return Promise.all(cocktails.map(async (cocktail) => {
+        const makeabilityScore = await this.calculateMakeabilityScore(cocktail, inventoryData);
         return {
           ...cocktail,
           makeabilityScore,
@@ -191,7 +193,7 @@ export class CocktailAggregatorService {
     }
   }
 
-  private calculateMakeabilityScore(cocktail: any, inventory: any[]): number {
+  private async calculateMakeabilityScore(cocktail: any, inventory: any[]): Promise<number> {
     if (!cocktail.ingredients || cocktail.ingredients.length === 0) {
       return 0;
     }
@@ -213,8 +215,23 @@ export class CocktailAggregatorService {
         continue;
       }
 
-      // Check for hierarchical match (would need ingredient hierarchy data)
-      // For now, we'll skip this advanced matching
+      // Check for hierarchical match via HierarchicalIngredientService
+      try {
+        const match = await this.hierarchicalService.findBestMatch(requiredName, {
+          includeHierarchical: true,
+          includeSynonyms: true,
+          minConfidence: 0.7,
+        });
+        if (match && match.confidence >= 0.8) {
+          const substitute = inventory.find((item: any) => item.ingredient.id === match.ingredient.id);
+          if (substitute) {
+            matchedIngredients += match.confidence;
+            continue;
+          }
+        }
+      } catch {
+        // Continue without hierarchical matching on error
+      }
     }
 
     return new Decimal(matchedIngredients).div(cocktail.ingredients.length).toNumber();

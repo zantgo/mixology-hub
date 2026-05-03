@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { DatabaseModule } from './database/database.module';
 import { RedisCacheModule } from './redis-cache/redis-cache.module';
@@ -16,6 +17,7 @@ import { AuthModule } from './auth/auth.module';
 import { AdminModule } from './admin/admin.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { McpModule } from './mcp/mcp.module';
+import { EmailModule } from './email/email.module';
 
 @Module({
   imports:[
@@ -23,6 +25,7 @@ import { McpModule } from './mcp/mcp.module';
       isGlobal: true,
       envFilePath: ['.env', '../.env'],
     }),
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -49,6 +52,7 @@ import { McpModule } from './mcp/mcp.module';
     AuthModule,
     AdminModule,
     McpModule,
+    EmailModule,
   ],
   providers: [
     {

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { CocktailsService } from './cocktails.service';
@@ -11,11 +11,13 @@ import { ReportedContent } from './entities/reported-content.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { User } from '../users/entities/user.entity';
 import { ExternalModule } from '../external/external.module';
+import { IngredientsModule } from '../ingredients/ingredients.module';
 import { CocktailAggregatorService } from './cocktail-aggregator.service';
 import { RatingService } from './services/rating.service';
 import { UtilsModule } from '../utils/utils.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ImageService } from '../images/image.service';
+import { ImageCleanupService } from '../images/image-cleanup.service';
 
 @Module({
   imports: [
@@ -23,10 +25,11 @@ import { ImageService } from '../images/image.service';
     UtilsModule,
     HttpModule,
     ExternalModule,
-    InventoryModule,
+    IngredientsModule,
+    forwardRef(() => InventoryModule),
   ],
   controllers: [CocktailsController],
-  providers: [CocktailsService, CocktailAggregatorService, RatingService, ImageService],
-  exports: [CocktailAggregatorService],
+  providers: [CocktailsService, CocktailAggregatorService, RatingService, ImageService, ImageCleanupService],
+  exports: [CocktailAggregatorService, CocktailsService],
 })
 export class CocktailsModule {}

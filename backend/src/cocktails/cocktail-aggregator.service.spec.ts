@@ -89,6 +89,10 @@ describe('CocktailAggregatorService', () => {
       getInventory: jest.fn(),
     };
 
+    const hierarchicalService = {
+      findBestMatch: jest.fn().mockResolvedValue(null),
+    };
+
     cacheManager = {
       get: jest.fn(),
       set: jest.fn(),
@@ -98,6 +102,7 @@ describe('CocktailAggregatorService', () => {
       localService as any,
       externalService as any,
       inventoryService as any,
+      hierarchicalService as any,
       cacheManager as any,
     );
   });

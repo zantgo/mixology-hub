@@ -15,6 +15,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 import { BarInventoryService } from './bar-inventory.service';
+import { MakeabilityService } from './makeability.service';
 import { AddBarInventoryDto } from './dto/add-bar-inventory.dto';
 import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
@@ -25,12 +26,21 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 @Controller('bar-inventory')
 @UseGuards(JwtAuthGuard)
 export class BarInventoryController {
-  constructor(private readonly inventoryService: BarInventoryService) {}
+  constructor(
+    private readonly inventoryService: BarInventoryService,
+    private readonly makeabilityService: MakeabilityService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get bar inventory (all authenticated users)' })
   getInventory(@Query() paginationQuery: PaginationQueryDto) {
     return this.inventoryService.getInventory(paginationQuery);
+  }
+
+  @Get('makeable')
+  @ApiOperation({ summary: 'List cocktails with makeability status based on current inventory' })
+  getMakeable(@Query() paginationQuery: PaginationQueryDto) {
+    return this.makeabilityService.getMakeableCocktails(paginationQuery);
   }
 
   @Get(':id')

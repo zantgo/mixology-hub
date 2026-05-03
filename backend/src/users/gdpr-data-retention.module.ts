@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ScheduleModule } from '@nestjs/schedule';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import { User } from './entities/user.entity';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
@@ -23,7 +22,6 @@ import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.en
       Cocktail,
       CocktailIngredient,
     ]),
-    ScheduleModule.forRoot(),
   ],
   providers: [GdprDataRetentionService],
   exports: [GdprDataRetentionService],

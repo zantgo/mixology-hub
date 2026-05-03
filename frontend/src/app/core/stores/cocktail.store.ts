@@ -103,7 +103,9 @@ export class CocktailStore {
       )
       .subscribe({
         next: (res) => {
-          this.makeable.set(res.data);
+          const all = res.data || [];
+          this.makeable.set(all.filter((c) => c.makeability === 'makeable'));
+          this.almostMakeable.set(all.filter((c) => c.makeability === 'almost'));
           this.loading.set(false);
         },
         error: (err) => {

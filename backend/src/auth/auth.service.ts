@@ -10,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
+import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
@@ -21,6 +22,7 @@ export class AuthService {
     private readonly tokenBlacklistRepository: Repository<TokenBlacklist>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -36,14 +38,21 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
     // Create user
+    const emailToken = crypto.randomBytes(32).toString('hex');
     const user = this.userRepository.create({
       email: registerDto.email,
       passwordHash: hashedPassword,
       displayName: registerDto.displayName || registerDto.email.split('@')[0],
       emailVerified: false,
+      emailVerificationToken: emailToken,
     });
 
     await this.userRepository.save(user);
+
+    // Send verification email
+    this.emailService.sendEmailVerificationEmail(user.email, emailToken).catch((err) => {
+      console.error('Failed to send verification email:', err.message);
+    });
 
     // Generate tokens
     const tokens = await this.generateTokens(user);
@@ -269,9 +278,12 @@ export class AuthService {
     user.resetPasswordExpires = resetTokenExpiry;
     await this.userRepository.save(user);
 
-      // In a real application, send email with reset link containing the raw token.
-      // WARNING: Do NOT return the token in the API response in production.
-      return { message: 'If the email is registered, a password reset link has been sent.' };
+    // Send the raw token via email
+    this.emailService.sendPasswordResetEmail(user.email, resetToken).catch((err) => {
+      console.error('Failed to send password reset email:', err.message);
+    });
+
+    return { message: 'If the email is registered, a password reset link has been sent.' };
   }
 
   async resetPassword(token: string, newPassword: string) {

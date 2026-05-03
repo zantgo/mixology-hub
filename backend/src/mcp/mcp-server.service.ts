@@ -6,6 +6,7 @@ import { BarInventoryService } from '../inventory/bar-inventory.service';
 import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
 import { CocktailsService } from '../cocktails/cocktails.service';
 import { UnitConverterService } from '../utils/unit-converter.service';
+import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AiToolAudit } from '../ai/entities/ai-tool-audit.entity';
@@ -26,6 +27,7 @@ export class McpServerService {
     private readonly aggregatorService: CocktailAggregatorService,
     private readonly cocktailsService: CocktailsService,
     private readonly unitConverter: UnitConverterService,
+    private readonly hierarchicalService: HierarchicalIngredientService,
     @InjectQueue('bar-orders')
     private readonly barOrdersQueue: Queue,
     @InjectRepository(AiToolAudit)
@@ -245,21 +247,49 @@ export class McpServerService {
       const inventory = await this.barInventoryService.getInventory({ limit: 200, page: 1 });
       const items = (inventory as any).data || inventory || [];
       let missing: string[] = [];
-      let makeable = true;
+      let matchedCount = 0;
+      const totalIngredients = (cocktail.ingredients || []).length || 1;
 
       for (const ci of cocktail.ingredients || []) {
-        const found = (items as any[]).find((item: any) => {
-          const invName = item.ingredient?.name?.toLowerCase();
-          const ciName = ci.ingredient?.name?.toLowerCase();
-          return invName === ciName && (item.quantity?.greaterThanOrequal(ci.amount || 0) ?? true);
-        });
+        const requiredName = ci.ingredient?.name?.toLowerCase().trim();
+        const requiredId = ci.ingredient?.id;
+        let found = false;
+
+        const directMatch = (items as any[]).find((item: any) =>
+          item.ingredient?.id === requiredId ||
+          item.ingredient?.name?.toLowerCase().trim() === requiredName,
+        );
+        if (directMatch && directMatch.quantity?.gte(ci.amount || 0)) {
+          matchedCount++;
+          found = true;
+        }
+
+        if (!found && requiredName) {
+          try {
+            const match = await this.hierarchicalService.findBestMatch(requiredName, {
+              includeHierarchical: true,
+              includeSynonyms: true,
+              minConfidence: 0.7,
+            });
+            if (match && match.confidence >= 0.8) {
+              const substitute = (items as any[]).find((item: any) => item.ingredient?.id === match.ingredient.id);
+              if (substitute && substitute.quantity?.gte(ci.amount || 0)) {
+                matchedCount += match.confidence;
+                found = true;
+              }
+            }
+          } catch { }
+        }
+
         if (!found) {
           missing.push(ci.ingredient?.name || 'Unknown');
-          makeable = false;
         }
       }
 
-      return { content: [{ type: 'text', text: JSON.stringify({ makeable, missingIngredients: missing, cocktailName: cocktail.name }) }] };
+      const score = matchedCount / totalIngredients;
+      const makeable = score >= 1.0;
+
+      return { content: [{ type: 'text', text: JSON.stringify({ makeable, matchScore: Math.round(score * 100) / 100, missingIngredients: missing, cocktailName: cocktail.name }) }] };
     } catch (error: any) {
       return { content: [{ type: 'text', text: `Check failed: ${error.message}` }], isError: true };
     }
