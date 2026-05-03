@@ -34,6 +34,7 @@ export class OrderStore {
   readonly status = signal<PreparationStatus | null>(null);
   readonly cocktailName = signal<string | null>(null);
   readonly polling = signal<boolean>(false);
+  readonly undoing = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
   private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -99,11 +100,23 @@ export class OrderStore {
     return s === 'completed' || s === 'failed_insufficient_stock' || s === 'failed_other';
   }
 
+  undo(logId: string): Promise<any> {
+    if (this.undoing()) return Promise.reject(new Error('Undo already in progress'));
+    this.undoing.set(true);
+    return this.http
+      .post(`${environment.apiUrl}/cocktails/preparations/${logId}/undo`, {})
+      .toPromise()
+      .finally(() => {
+        setTimeout(() => this.undoing.set(false), 1000);
+      });
+  }
+
   reset(): void {
     this.stopPolling();
     this.currentLogId.set(null);
     this.status.set(null);
     this.cocktailName.set(null);
+    this.undoing.set(false);
     this.error.set(null);
   }
 }

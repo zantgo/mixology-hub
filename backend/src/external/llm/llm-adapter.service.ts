@@ -277,8 +277,8 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
     const MAX_LENGTH = 500;
     const truncated = input.slice(0, MAX_LENGTH);
 
-    // Character whitelisting: allow alphanumeric, spaces, and common recipe punctuation
-    const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '');
+    // Character whitelisting: allow alphanumeric (incl. unicode letters), spaces, and common recipe punctuation
+    const sanitized = truncated.replace(/[^\p{L}\p{N}\s,.\-'/&%()]/gu, '');
 
     // Block known prompt injection patterns
     const blockedPatterns = [

@@ -28,12 +28,12 @@ export class AiStore {
   readonly error = signal<string | null>(null);
   readonly hasPending = signal<boolean>(false);
 
-  generate(ingredients: string[], theme?: string, difficulty?: string, servingSize?: number): void {
+  generate(ingredients: string[], theme?: string, difficulty?: string, servingSize?: number, language?: string): void {
     this.generating.set(true);
     this.error.set(null);
     this.hasPending.set(true);
 
-    this.http.post<AiRecipe>(this.apiUrl, { ingredients, theme, difficulty, servingSize }).subscribe({
+    this.http.post<AiRecipe>(this.apiUrl, { ingredients, theme, difficulty, servingSize, language }).subscribe({
       next: (recipe) => {
         this.pendingRecipe.set(recipe);
         this.hasPending.set(false);

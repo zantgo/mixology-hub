@@ -1,5 +1,5 @@
 import { Component, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
@@ -9,46 +9,35 @@ import { ButtonComponent } from '../../shared/components/button/button.component
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { environment } from '../../../environments/environment';
 
-interface IngredientRow {
-  ingredientId: string;
-  ingredientName: string;
-  amount: number;
-  unit: string;
-  measure: string;
-  searchResults: any[];
-  searchOpen: boolean;
-  searchTerm: string;
-}
-
 const ALLOWED_UNITS = ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes', 'count', 'g', 'kg', 'parts', 'part', 'drops', 'drop', 'splashes', 'splash', 'slices', 'slice', 'wedges', 'wedge', 'twists', 'twist', 'sprigs', 'sprig', 'leaves', 'leaf'];
 
 @Component({
   selector: 'app-create-page',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, IconComponent],
+  imports: [ReactiveFormsModule, ButtonComponent, IconComponent],
   template: `
     <div class="container">
       <h1 class="page-title">Create Recipe</h1>
 
-      <form (ngSubmit)="onSubmit()" class="create-form card">
+      <form [formGroup]="form" (ngSubmit)="onSubmit()" class="create-form card">
         <div class="form-group">
           <label class="form-label" for="name">Cocktail Name *</label>
-          <input id="name" type="text" class="form-input" [(ngModel)]="name" name="name" placeholder="e.g. Classic Mojito" required [disabled]="submitting()" />
+          <input id="name" type="text" class="form-input" formControlName="name" placeholder="e.g. Classic Mojito" />
         </div>
 
         <div class="form-group">
           <label class="form-label" for="description">Description</label>
-          <textarea id="description" class="form-input form-textarea" [(ngModel)]="description" name="description" rows="2" placeholder="A brief description of your cocktail..." [disabled]="submitting()"></textarea>
+          <textarea id="description" class="form-input form-textarea" formControlName="description" rows="2" placeholder="A brief description of your cocktail..."></textarea>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="instructions">Instructions *</label>
-          <textarea id="instructions" class="form-input form-textarea" [(ngModel)]="instructions" name="instructions" rows="4" placeholder="Step-by-step preparation instructions..." required [disabled]="submitting()"></textarea>
+          <textarea id="instructions" class="form-input form-textarea" formControlName="instructions" rows="4" placeholder="Step-by-step preparation instructions..."></textarea>
         </div>
 
         <div class="form-group">
           <label class="checkbox-label">
-            <input type="checkbox" [(ngModel)]="isPublic" name="isPublic" [disabled]="submitting()" />
+            <input type="checkbox" formControlName="isPublic" [disabled]="submitting()" />
             Make this cocktail public
           </label>
         </div>
@@ -75,36 +64,35 @@ const ALLOWED_UNITS = ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes', '
 
         <h3 class="section-title">Ingredients *</h3>
 
-        <div class="ingredients-list">
-          @for (row of ingredients; track $index; let i = $index) {
-            <div class="ingredient-row">
+        <div formArrayName="ingredients" class="ingredients-list">
+          @for (group of ingredientsArray.controls; track $index; let i = $index) {
+            <div class="ingredient-row" [formGroupName]="i">
               <div class="ingredient-search">
                 <input
                   type="text"
                   class="form-input"
-                  [ngModel]="row.ingredientName"
-                  (ngModelChange)="onIngredientSearch($index, $event)"
-                  [name]="'ingredientSearch' + i"
+                  formControlName="ingredientName"
                   placeholder="Search ingredient..."
                   [disabled]="submitting()"
-                  (focus)="row.searchOpen = true"
-                  (blur)="closeDropdown($index)"
+                  (focus)="onSearchFocus(i)"
+                  (blur)="closeDropdown(i)"
+                  (input)="onSearchInput(i, $event)"
                 />
-                @if (row.searchResults.length > 0 && row.searchOpen) {
+                @if (perRowState()[i]?.searchResults?.length > 0 && perRowState()[i]?.searchOpen) {
                   <ul class="search-dropdown">
-                    @for (result of row.searchResults; track result.id) {
-                      <li (mousedown)="selectIngredient($index, result)">{{ result.name }}</li>
+                    @for (result of perRowState()[i].searchResults; track result.id) {
+                      <li (mousedown)="selectIngredient(i, result)">{{ result.name }}</li>
                     }
                   </ul>
                 }
               </div>
-              <input type="number" class="form-input amount-input" [(ngModel)]="row.amount" [name]="'amount' + i" placeholder="Qty" min="0" step="0.1" [disabled]="submitting()" />
-              <select class="form-input unit-select" [(ngModel)]="row.unit" [name]="'unit' + i" (ngModelChange)="updateMeasure($index)" [disabled]="submitting()">
+              <input type="text" inputmode="decimal" class="form-input amount-input" formControlName="amount" placeholder="Qty" [disabled]="submitting()" (change)="onAmountChanged(i)" />
+              <select class="form-input unit-select" formControlName="unit" (change)="updateMeasure(i)" [disabled]="submitting()">
                 @for (u of ALLOWED_UNITS; track u) {
                   <option [value]="u">{{ u }}</option>
                 }
               </select>
-              <input type="text" class="form-input measure-input" [(ngModel)]="row.measure" [name]="'measure' + i" placeholder="e.g. 2 oz" [disabled]="submitting()" />
+              <input type="text" class="form-input measure-input" formControlName="measure" placeholder="e.g. 2 oz" [disabled]="submitting()" />
               <button type="button" class="remove-btn" (click)="removeIngredient(i)" [disabled]="submitting()">
                 <app-icon name="trash" [size]="18" [color]="'var(--color-error)'" />
               </button>
@@ -123,7 +111,7 @@ const ALLOWED_UNITS = ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes', '
 
         <div class="form-actions">
           <app-button variant="outline" type="button" (action)="router.navigate(['/discover'])" [disabled]="submitting()">Cancel</app-button>
-          <app-button type="submit" [loading]="submitting()" [disabled]="!isValid() || submitting()">
+          <app-button type="submit" [loading]="submitting()" [disabled]="form.invalid || submitting()">
             <app-icon name="save" [size]="18" />
             Save Recipe
           </app-button>
@@ -317,52 +305,74 @@ const ALLOWED_UNITS = ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes', '
   `]
 })
 export class CreatePage {
+  private fb = inject(FormBuilder);
   private cocktailApi = inject(CocktailService);
   private http = inject(HttpClient);
   readonly uiStore = inject(UiStore);
   readonly router = inject(Router);
 
-  name = '';
-  description = '';
-  instructions = '';
-  isPublic = true;
+  form: FormGroup;
   imageFile?: File;
   imagePreview = signal<string | null>(null);
-  ingredients: IngredientRow[] = [];
   submitting = signal(false);
   error = signal<string | null>(null);
   ALLOWED_UNITS = ALLOWED_UNITS;
 
+  perRowState = signal<Array<{ searchResults: any[]; searchOpen: boolean }>>([]);
+
   private searchSubjects = new Map<number, Subject<string>>();
 
   constructor() {
+    this.form = this.fb.group({
+      name: ['', [Validators.required]],
+      description: [''],
+      instructions: ['', [Validators.required]],
+      isPublic: [true],
+      ingredients: this.fb.array([], [Validators.required, Validators.minLength(1)]),
+    });
     this.addIngredient();
   }
 
-  addIngredient(): void {
-    const idx = this.ingredients.length;
-    this.ingredients.push({
-      ingredientId: '',
-      ingredientName: '',
-      amount: 1,
-      unit: 'ml',
-      measure: '',
-      searchResults: [],
-      searchOpen: false,
-      searchTerm: '',
+  get ingredientsArray(): FormArray {
+    return this.form.get('ingredients') as FormArray;
+  }
+
+  private createIngredientGroup(): FormGroup {
+    return this.fb.group({
+      ingredientId: ['', [Validators.required]],
+      ingredientName: ['', [Validators.required]],
+      amount: [1, [Validators.required, Validators.min(0.01)]],
+      unit: ['ml', [Validators.required]],
+      measure: [''],
     });
+  }
+
+  addIngredient(): void {
+    const idx = this.ingredientsArray.length;
+    this.ingredientsArray.push(this.createIngredientGroup());
+
+    const state = this.perRowState();
+    state.push({ searchResults: [], searchOpen: false });
+    this.perRowState.set([...state]);
+
     const subject = new Subject<string>();
     subject.pipe(debounceTime(300), distinctUntilChanged()).subscribe((term) => {
       if (term.length < 1) {
-        this.ingredients[idx].searchResults = [];
+        const s = this.perRowState();
+        if (s[idx]) s[idx].searchResults = [];
+        this.perRowState.set([...s]);
         return;
       }
       this.http.get<any[]>(`${environment.apiUrl}/ingredients?name=${encodeURIComponent(term)}&limit=10`).subscribe({
         next: (res: any) => {
-          this.ingredients[idx].searchResults = res.data || res || [];
+          const s = this.perRowState();
+          if (s[idx]) s[idx].searchResults = res.data || res || [];
+          this.perRowState.set([...s]);
         },
         error: () => {
-          this.ingredients[idx].searchResults = [];
+          const s = this.perRowState();
+          if (s[idx]) s[idx].searchResults = [];
+          this.perRowState.set([...s]);
         }
       });
     });
@@ -370,41 +380,83 @@ export class CreatePage {
   }
 
   removeIngredient(i: number): void {
-    if (this.ingredients.length <= 1) return;
-    this.ingredients.splice(i, 1);
+    if (this.ingredientsArray.length <= 1) return;
+    this.ingredientsArray.removeAt(i);
     this.searchSubjects.get(i)?.complete();
     this.searchSubjects.delete(i);
+
+    const state = this.perRowState();
+    state.splice(i, 1);
+    this.perRowState.set([...state]);
+
+    // Re-index search subjects
+    const newSearchSubjects = new Map<number, Subject<string>>();
+    this.searchSubjects.forEach((sub, key) => {
+      newSearchSubjects.set(key > i ? key - 1 : key, sub);
+    });
+    this.searchSubjects = newSearchSubjects;
   }
 
-  onIngredientSearch(i: number, term: string): void {
-    const row = this.ingredients[i];
-    if (!row) return;
-    row.ingredientName = term;
-    row.searchOpen = true;
+  onSearchFocus(i: number): void {
+    const s = this.perRowState();
+    if (s[i]) s[i].searchOpen = true;
+    this.perRowState.set([...s]);
+  }
+
+  onSearchInput(i: number, event: Event): void {
+    const term = (event.target as HTMLInputElement).value;
+    const group = this.ingredientsArray.at(i) as FormGroup;
+    if (group) {
+      group.patchValue({ ingredientName: term }, { emitEvent: false });
+    }
+    const s = this.perRowState();
+    if (s[i]) s[i].searchOpen = true;
+    this.perRowState.set([...s]);
     this.searchSubjects.get(i)?.next(term);
   }
 
   selectIngredient(i: number, result: any): void {
-    const row = this.ingredients[i];
-    if (!row) return;
-    row.ingredientId = result.id;
-    row.ingredientName = result.name;
-    row.searchOpen = false;
-    row.searchResults = [];
+    const group = this.ingredientsArray.at(i) as FormGroup;
+    if (!group) return;
+    group.patchValue({
+      ingredientId: result.id,
+      ingredientName: result.name,
+    });
+
+    const s = this.perRowState();
+    if (s[i]) {
+      s[i].searchOpen = false;
+      s[i].searchResults = [];
+    }
+    this.perRowState.set([...s]);
     this.updateMeasure(i);
   }
 
   closeDropdown(i: number): void {
     setTimeout(() => {
-      const row = this.ingredients[i];
-      if (row) row.searchOpen = false;
+      const s = this.perRowState();
+      if (s[i]) s[i].searchOpen = false;
+      this.perRowState.set([...s]);
     }, 200);
   }
 
+  onAmountChanged(i: number): void {
+    const group = this.ingredientsArray.at(i) as FormGroup;
+    if (!group) return;
+    const raw = group.get('amount')?.value;
+    const num = typeof raw === 'string' ? parseFloat(raw) : raw;
+    if (!isNaN(num) && num >= 0) {
+      group.patchValue({ amount: num });
+    }
+    this.updateMeasure(i);
+  }
+
   updateMeasure(i: number): void {
-    const row = this.ingredients[i];
-    if (!row) return;
-    row.measure = `${row.amount} ${row.unit}`;
+    const group = this.ingredientsArray.at(i) as FormGroup;
+    if (!group) return;
+    const amount = group.get('amount')?.value || 1;
+    const unit = group.get('unit')?.value || 'ml';
+    group.patchValue({ measure: `${amount} ${unit}` });
   }
 
   onImageSelected(event: Event): void {
@@ -427,21 +479,18 @@ export class CreatePage {
     this.imagePreview.set(null);
   }
 
-  isValid(): boolean {
-    return !!this.name.trim() && !!this.instructions.trim() && this.ingredients.length > 0 && this.ingredients.every((r) => !!r.ingredientId && r.amount > 0);
-  }
-
   onSubmit(): void {
-    if (!this.isValid() || this.submitting()) return;
+    if (this.form.invalid || this.submitting()) return;
     this.submitting.set(true);
     this.error.set(null);
 
+    const value = this.form.value;
     const data: any = {
-      name: this.name.trim(),
-      description: this.description.trim() || undefined,
-      instructions: this.instructions.trim(),
-      isPublic: this.isPublic,
-      ingredients: this.ingredients.map((r) => ({
+      name: value.name.trim(),
+      description: value.description.trim() || undefined,
+      instructions: value.instructions.trim(),
+      isPublic: value.isPublic,
+      ingredients: value.ingredients.map((r: any) => ({
         ingredientId: r.ingredientId,
         amount: r.amount,
         unit: r.unit,

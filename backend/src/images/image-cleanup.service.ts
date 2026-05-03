@@ -10,6 +10,7 @@ import * as path from 'path';
 export class ImageCleanupService {
   private readonly logger = new Logger(ImageCleanupService.name);
   private readonly UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'cocktails');
+  private readonly MIN_FILE_AGE_MS = 60 * 60 * 1000; // 1 hour — prevents race condition with in-flight uploads
 
   constructor(
     @InjectRepository(Cocktail)
@@ -50,6 +51,10 @@ export class ImageCleanupService {
         const filePath = path.join(this.UPLOAD_DIR, filename);
         try {
           const stat = await fs.stat(filePath);
+          if (Date.now() - stat.mtimeMs < this.MIN_FILE_AGE_MS) {
+            this.logger.debug(`Skipping recent file: ${filename}`);
+            continue;
+          }
           freedBytes += stat.size;
           await fs.unlink(filePath);
           deletedCount++;

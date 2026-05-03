@@ -73,6 +73,13 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'auth/verify-email',
+    loadComponent: () =>
+      import('./pages/auth/verify-email.page').then(
+        (m) => m.VerifyEmailPage,
+      ),
+  },
+  {
     path: 'profile',
     loadComponent: () =>
       import('./pages/profile/profile.page').then(

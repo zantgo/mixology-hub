@@ -56,6 +56,22 @@ import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.com
         </div>
 
         <div class="form-section">
+          <label class="form-label" for="ai-language">Language</label>
+          <select
+            id="ai-language"
+            class="form-input"
+            [(ngModel)]="language"
+            [disabled]="aiStore.generating()"
+          >
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="it">Italiano</option>
+          </select>
+        </div>
+
+        <div class="form-section">
           <label class="checkbox-label">
             <input type="checkbox" [(ngModel)]="useOnlyMyBar" [disabled]="inventoryStore.items().length === 0 || aiStore.generating()" />
             Use ONLY ingredients from My Bar
@@ -313,6 +329,7 @@ export class AiBartenderPage implements OnInit {
 
   ingredientsInput = '';
   theme = '';
+  language = 'en';
   useOnlyMyBar = false;
   showSaveInput = false;
   saveName = '';
@@ -335,7 +352,7 @@ export class AiBartenderPage implements OnInit {
       return;
     }
 
-    this.aiStore.generate(ingredients, this.theme || undefined, undefined, 2);
+    this.aiStore.generate(ingredients, this.theme || undefined, undefined, 2, this.language);
   }
 
   onDiscard(): void {

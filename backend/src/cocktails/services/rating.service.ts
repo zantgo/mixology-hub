@@ -94,8 +94,8 @@ export class RatingService {
       forked.name = raw.strDrink || raw.name || 'Unknown';
       forked.description = raw.strInstructions || raw.instructions || '';
       forked.instructions = raw.strInstructions || raw.instructions || '';
-      forked.source = 'api';
-      forked.external_id = externalId;
+      forked.source = 'local';
+      forked.parent_external_id = externalId;
       forked.user = user;
       forked.is_public = false;
       forked.is_deleted = false;

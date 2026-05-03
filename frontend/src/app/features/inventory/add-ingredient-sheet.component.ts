@@ -38,11 +38,11 @@ import { UnitSelectComponent } from '../../shared/components/unit-select/unit-se
               <h4 class="form-title">Add {{ selected()?.name }}</h4>
               <div class="qty-row">
                 <input
-                  type="number"
+                  type="text"
+                  inputmode="decimal"
                   class="form-input qty-input"
-                  [(ngModel)]="quantity"
-                  min="0.1"
-                  step="0.1"
+                  [ngModel]="quantity"
+                  (ngModelChange)="onQuantityChange($event)"
                   placeholder="Quantity"
                   aria-label="Quantity"
                 />
@@ -201,6 +201,17 @@ export class AddIngredientSheetComponent {
     this.selected.set(ingredient);
     if (ingredient.baseUnit) {
       this.unit = ingredient.baseUnit;
+    }
+  }
+
+  onQuantityChange(value: string): void {
+    if (value === '' || value === undefined) {
+      this.quantity = 0;
+      return;
+    }
+    const num = parseFloat(value);
+    if (!isNaN(num) && num >= 0) {
+      this.quantity = num;
     }
   }
 

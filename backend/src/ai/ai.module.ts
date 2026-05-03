@@ -13,6 +13,9 @@ import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { ExternalModule } from '../external/external.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
+import { InventoryModule } from '../inventory/inventory.module';
+import { CocktailsModule } from '../cocktails/cocktails.module';
+import { UtilsModule } from '../utils/utils.module';
 import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
 
 @Module({
@@ -21,6 +24,9 @@ import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
     ConfigModule,
     ExternalModule,
     IngredientsModule,
+    InventoryModule,
+    CocktailsModule,
+    UtilsModule,
   ],
   controllers: [AiController],
   providers: [AiService, EnhancedAiService, AiAuditInterceptor],

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, BadRequestException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { Decimal } from 'decimal.js';
@@ -26,6 +26,7 @@ export interface MakeableCocktail {
 @Injectable()
 export class MakeabilityService {
   private readonly logger = new Logger(MakeabilityService.name);
+  private readonly MAX_ITERATIONS = 200;
 
   constructor(
     private readonly inventoryService: BarInventoryService,
@@ -44,34 +45,63 @@ export class MakeabilityService {
 
     const [inventoryResult, cocktailsResult] = await Promise.all([
       this.inventoryService.getInventory({ limit: 9999, page: 1 }),
-      this.cocktailsService.findAll({ limit: 200, page: 1 }),
+      this.cocktailsService.findAll({ limit: this.MAX_ITERATIONS, page: 1 }),
     ]);
 
     const inventoryItems = (inventoryResult as any).data || [];
     const allCocktails = (cocktailsResult as any).data || [];
 
-    const scored = await Promise.all(
-      allCocktails.map((c: any) => this.scoreCocktail(c, inventoryItems)),
-    );
+    const offset = (page - 1) * limit;
+    const makeableCocktails: any[] = [];
+    let iterations = 0;
 
-    scored.sort((a, b) => {
+    for (const cocktail of allCocktails) {
+      if (iterations >= this.MAX_ITERATIONS) break;
+
+      iterations++;
+      const scored = await this.scoreCocktail(cocktail, inventoryItems);
+
+      if (scored.makeability === 'makeable' || scored.makeability === 'almost') {
+        makeableCocktails.push(scored);
+      }
+
+      if (makeableCocktails.length >= offset + limit) break;
+    }
+
+    makeableCocktails.sort((a, b) => {
       const order = { makeable: 0, almost: 1, unmakeable: 2 };
       return order[a.makeability] - order[b.makeability];
     });
 
-    const totalItems = scored.length;
-    const offset = (page - 1) * limit;
-    const paginated = scored.slice(offset, offset + limit);
+    if (iterations >= this.MAX_ITERATIONS && makeableCocktails.length > 0 && makeableCocktails.length <= offset) {
+      throw new BadRequestException(
+        'Pagination overshoot: Requested page exceeds available results due to computation limits.',
+        'PAGINATION_OVERSHOOT',
+      );
+    }
+
+    const paginated = makeableCocktails.slice(offset, offset + limit);
+    const hasMore = iterations < this.MAX_ITERATIONS || allCocktails.length === 0
+      ? makeableCocktails.length >= offset + limit
+      : false;
+    const totalItems = makeableCocktails.length;
     const totalPages = Math.ceil(totalItems / limit);
+
+    const reachedLimit = iterations >= this.MAX_ITERATIONS;
 
     const result = {
       data: paginated,
       meta: {
         currentPage: page,
-        nextPage: page < totalPages ? page + 1 : null,
+        nextPage: hasMore ? page + 1 : null,
         itemsPerPage: limit,
         totalItems,
         totalPages,
+        iterations,
+        maxIterations: this.MAX_ITERATIONS,
+        warning: reachedLimit
+          ? 'Results limited by computation constraints. Try filtering to reduce candidates.'
+          : null,
       },
     };
 

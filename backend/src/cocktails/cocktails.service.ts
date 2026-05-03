@@ -34,7 +34,7 @@ export class CocktailsService {
   ) {}
 
   async create(
-    createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string },
+    createCocktailDto: CreateCocktailDto & { imageFull?: string; imageThumb?: string; parentExternalId?: string },
     userId: string,
   ): Promise<Cocktail> {
     const user = await this.userRepository.findOne({
@@ -54,6 +54,7 @@ export class CocktailsService {
           image_full: createCocktailDto.imageFull,
           image_thumb: createCocktailDto.imageThumb,
           is_public: createCocktailDto.isPublic ?? true,
+          parent_external_id: createCocktailDto.parentExternalId,
           user: user,
         });
 
@@ -145,27 +146,41 @@ export class CocktailsService {
   }
 
   async undo(logId: string) {
-    const log = await this.preparationLogRepository.findOne({
-      where: { id: logId },
-    });
+    const result = await this.preparationLogRepository.manager.query(
+      `UPDATE preparation_log
+       SET undone = true
+       WHERE id = $1
+         AND status = 'completed'
+         AND undone = false
+       RETURNING *`,
+      [logId],
+    );
 
-    if (!log) {
-      throw new NotFoundException(`Preparation log ${logId} not found`);
+    if (!result || result.length === 0) {
+      const log = await this.preparationLogRepository.findOne({
+        where: { id: logId },
+      });
+
+      if (!log) {
+        throw new NotFoundException(`Preparation log ${logId} not found`);
+      }
+
+      if (log.status !== 'completed') {
+        throw new NotFoundException(
+          `Cannot undo preparation: status is ${log.status}, expected "completed"`,
+        );
+      }
+
+      if (log.undone) {
+        throw new NotFoundException('Preparation has already been undone');
+      }
     }
 
-    if (log.status !== 'completed') {
-      throw new NotFoundException(
-        `Cannot undo preparation: status is ${log.status}, expected "completed"`,
-      );
-    }
-
-    if (log.undone) {
-      throw new NotFoundException('Preparation has already been undone');
-    }
+    const log = result[0];
 
     const job = await this.barOrdersQueue.add('undo-preparation', {
       type: 'undo',
-      bartenderId: log.bartenderId || undefined,
+      bartenderId: log.bartender_id || undefined,
       preparationLogId: log.id,
     });
 

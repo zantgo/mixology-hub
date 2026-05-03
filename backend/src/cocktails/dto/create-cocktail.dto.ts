@@ -58,12 +58,21 @@ export class CreateCocktailDto {
 
 
 
-  @ApiProperty({ 
-    example: true, 
+  @ApiProperty({
+    example: true,
     description: 'Whether the cocktail is publicly visible to other users',
     required: false,
-    default: true 
+    default: true
   })
   @IsOptional()
   isPublic?: boolean;
+
+  @ApiProperty({
+    example: '11000',
+    description: 'Original external cocktail ID when forking from TheCocktailDB (UC 2.22 lineage tracking)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  parentExternalId?: string;
 }

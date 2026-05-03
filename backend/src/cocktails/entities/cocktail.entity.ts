@@ -33,6 +33,10 @@ export class Cocktail {
   @Expose({ name: 'externalId' })
   external_id: string; // ID from TheCocktailDB to prevent duplicates
 
+  @Column({ name: 'parent_external_id', nullable: true })
+  @Expose({ name: 'parentExternalId' })
+  parent_external_id: string; // Original external ID when forked from API (UC 2.22 lineage tracking)
+
   @Column({ name: 'image_full', type: 'varchar', length: 255, nullable: true })
   @Expose({ name: 'imageFull' })
   image_full: string; // Path to full-size image (1024x1024 WebP)

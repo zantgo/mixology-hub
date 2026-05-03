@@ -12,6 +12,9 @@ import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.en
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { LlmAdapterService } from '../external/llm/llm-adapter.service';
+import { BarInventoryService } from '../inventory/bar-inventory.service';
+import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
+import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 
 export interface AiRecipeRequest {
@@ -78,6 +81,8 @@ export class EnhancedAiService {
   private readonly BANNED_INGREDIENTS: string[];
   private readonly BANNED_THEMES: string[];
 
+  private readonly recipeTools = this.buildRecipeTools();
+
   constructor(
     @InjectRepository(Ai) private readonly aiRepository: Repository<Ai>,
     @InjectRepository(UserAiQuotas) private readonly quotaRepository: Repository<UserAiQuotas>,
@@ -87,6 +92,9 @@ export class EnhancedAiService {
     private readonly hierarchicalIngredientService: HierarchicalIngredientService,
     private readonly externalService: EnhancedTheCocktailDbService,
     private readonly llmAdapterService: LlmAdapterService,
+    private readonly barInventoryService: BarInventoryService,
+    private readonly aggregatorService: CocktailAggregatorService,
+    private readonly unitConverter: UnitConverterService,
     private readonly configService: ConfigService,
   ) {
     this.MAX_RECIPES_PER_DAY = this.configService.get<number>('AI_MAX_RECIPES_PER_DAY') || 50;
@@ -120,19 +128,21 @@ export class EnhancedAiService {
     // 4. Validate ingredients against database
     const validatedIngredients = await this.validateIngredients(sanitizedRequest.ingredients);
 
-    // 5. Generate recipe with multiple attempts if needed
+    // 5. Generate recipe with multiple attempts using MCP tool calling (ADR 0019)
     const maxAttempts = sanitizedRequest.options?.maxAttempts || 3;
     let bestRecipe: any = null;
     let bestValidation: AiRecipeValidationResult | null = null;
+
+    const sanitizedIngredientNames = validatedIngredients.valid.map(ing => ing.name);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         this.logger.log(`Attempt ${attempt}/${maxAttempts} for user ${userId}`);
 
-        // 6. Generate recipe using AI provider
-        const aiProvider = this.getAiProvider();
-        const rawRecipe = await aiProvider.generateRecipe(
-          validatedIngredients.valid.map(ing => ing.name),
+        const rawRecipe = await this.llmAdapterService.generateWithTools(
+          sanitizedIngredientNames,
+          this.recipeTools,
+          (toolName: string, args: any) => this.executeRecipeTool(toolName, args),
           {
             theme: sanitizedRequest.theme,
             difficulty: sanitizedRequest.difficulty,
@@ -140,25 +150,19 @@ export class EnhancedAiService {
           }
         );
 
-        // 7. Parse and normalize the recipe
-        const parsedRecipe = this.parseAiResponse(rawRecipe, sanitizedRequest);
-
-        // 8. Validate the generated recipe
+        const parsedRecipe = this.buildRecipeFromParsed(rawRecipe, sanitizedRequest);
         const validation = await this.validateGeneratedRecipe(parsedRecipe, validatedIngredients);
 
-        // 9. Check if this is the best attempt so far
         if (!bestRecipe || validation.score > (bestValidation?.score || 0)) {
           bestRecipe = parsedRecipe;
           bestValidation = validation;
         }
 
-        // 10. If validation passes threshold, accept it
         if (validation.score >= 0.8 && validation.isValid) {
           this.logger.log(`Recipe validation passed on attempt ${attempt} with score ${validation.score}`);
           break;
         }
 
-        // 11. Log validation issues for debugging
         if (validation.issues.length > 0) {
           this.logger.warn(`Validation issues on attempt ${attempt}:`, validation.issues);
         }
@@ -376,7 +380,7 @@ export class EnhancedAiService {
       }
       // Truncate and apply character whitelist
       const truncated = trimmed.slice(0, MAX_LENGTH);
-      const sanitized = truncated.replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '').trim();
+      const sanitized = truncated.replace(/[^\p{L}\p{N}\s,.\-'/&%()]/gu, '').trim();
       if (sanitized.length === 0) {
         throw new BadRequestException('Ingredient name contains no valid characters');
       }
@@ -397,7 +401,7 @@ export class EnhancedAiService {
         throw new BadRequestException('Theme cannot exceed 200 characters');
       }
       // Apply same character whitelist and blocked patterns as ingredients
-      const sanitized = trimmed.slice(0, 200).replace(/[^a-zA-Z0-9\s,.\-'/&%()]/g, '').trim();
+      const sanitized = trimmed.slice(0, 200).replace(/[^\p{L}\p{N}\s,.\-'/&%()]/gu, '').trim();
       if (sanitized.length === 0) {
         throw new BadRequestException('Theme contains no valid characters');
       }
@@ -516,31 +520,129 @@ export class EnhancedAiService {
     return { valid, invalid, suggestions };
   }
 
-  private getAiProvider(): any {
-    // Always use the LLM adapter service
-    return this.llmAdapterService;
+  private buildRecipeTools(): Array<{ type: 'function'; function: { name: string; description: string; parameters: any } }> {
+    return [
+      {
+        type: 'function',
+        function: {
+          name: 'get_bar_inventory',
+          description: 'Retrieve current bar inventory stock levels and quantities',
+          parameters: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Max items to return (default 50)' },
+            },
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'search_cocktails',
+          description: 'Search for existing cocktails by name across local and external databases',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Search query' },
+              limit: { type: 'number', description: 'Max results (default 10)' },
+            },
+            required: ['name'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_cocktail_detail',
+          description: 'Get full recipe details including ingredients and instructions for a cocktail',
+          parameters: {
+            type: 'object',
+            properties: {
+              cocktailId: { type: 'string', description: 'Cocktail ID' },
+            },
+            required: ['cocktailId'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'convert_units',
+          description: 'Convert between measurement units (ml, oz, cl, tbsp, tsp, etc.)',
+          parameters: {
+            type: 'object',
+            properties: {
+              amount: { type: 'number', description: 'Amount to convert' },
+              from: { type: 'string', description: 'Source unit' },
+              to: { type: 'string', description: 'Target unit' },
+              ingredient: { type: 'string', description: 'Ingredient name for density-aware conversion' },
+            },
+            required: ['amount', 'from', 'to'],
+          },
+        },
+      },
+    ];
   }
 
-  private parseAiResponse(rawResponse: any, request: AiRecipeRequest): AiRecipeResponse {
-    // Try to extract structured data from AI response
-    if (typeof rawResponse === 'string') {
-      try {
-        const parsed = JSON.parse(rawResponse);
-        return this.buildRecipeFromParsed(parsed, request);
-      } catch (error) {
-        this.logger.error('AI returned unparseable response, raw:', rawResponse.substring(0, 300));
-        throw new InternalServerErrorException(
-          'AI returned an unrecognizable response format. Please try again.'
-        );
+  private async executeRecipeTool(toolName: string, args: any): Promise<any> {
+    switch (toolName) {
+      case 'get_bar_inventory': {
+        const limit = args.limit || 50;
+        const result = await this.barInventoryService.getInventory({ limit, page: 1 });
+        const items = (result as any).data || [];
+        return items.map((item: any) => ({
+          name: item.ingredient?.name || 'Unknown',
+          quantity: item.quantity?.toString(),
+          unit: item.unit || item.ingredient?.baseUnit || 'units',
+        }));
       }
-    } else if (rawResponse && typeof rawResponse === 'object') {
-      return this.buildRecipeFromParsed(rawResponse, request);
+      case 'search_cocktails': {
+        const result = await this.aggregatorService.searchUnified(
+          args.name || '',
+          { limit: args.limit || 10, page: 1 },
+        );
+        const cocktails = ((result as any).data || []).map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          source: c.source,
+          ingredientCount: c.ingredients?.length || 0,
+        }));
+        return { cocktails, total: cocktails.length };
+      }
+      case 'get_cocktail_detail': {
+        const cocktail = await this.cocktailRepository.findOne({
+          where: { id: args.cocktailId, is_deleted: false },
+          relations: ['ingredients', 'ingredients.ingredient'],
+        });
+        if (!cocktail) return { error: 'Cocktail not found' };
+        return {
+          id: cocktail.id,
+          name: cocktail.name,
+          description: cocktail.description,
+          instructions: cocktail.instructions,
+          ingredients: cocktail.ingredients.map(ci => ({
+            name: ci.ingredient?.name,
+            amount: ci.amount,
+            unit: ci.unit,
+            measure: ci.measure,
+          })),
+        };
+      }
+      case 'convert_units': {
+        try {
+          const result = this.unitConverter.convert(
+            new Decimal(args.amount || 0),
+            args.from,
+            args.to,
+          );
+          return { result: result.toString(), from: args.from, to: args.to };
+        } catch (err: any) {
+          return { error: err.message };
+        }
+      }
+      default:
+        return { error: `Unknown tool: ${toolName}` };
     }
-
-    this.logger.error('AI returned empty or invalid response');
-    throw new InternalServerErrorException(
-      'AI returned an empty response. Please try again.'
-    );
   }
 
   private buildRecipeFromParsed(parsed: any, request: AiRecipeRequest): AiRecipeResponse {

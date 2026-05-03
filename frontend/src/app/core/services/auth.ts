@@ -52,6 +52,10 @@ export class Auth {
     return this.http.get<UserProfile>(`${this.apiUrl}/profile`);
   }
 
+  verifyEmail(token: string): Observable<{ message: string }> {
+    return this.http.get<{ message: string }>(`${this.apiUrl}/verify-email/${token}`);
+  }
+
   getAccessToken(): string | null {
     return localStorage.getItem('access_token');
   }
