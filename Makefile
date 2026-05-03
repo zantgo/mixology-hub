@@ -34,8 +34,13 @@ logs:
 	docker compose logs -f
 
 test-backend:
-	@echo "$(GREEN)Running Backend Tests...$(NC)"
-	cd backend && npm run test
+	@echo "$(GREEN)Running Backend Tests in Docker...$(NC)"
+	docker compose run --rm \
+		-v $$(pwd)/backend/src:/app/src \
+		-v $$(pwd)/backend/package.json:/app/package.json \
+		-v $$(pwd)/backend/tsconfig.json:/app/tsconfig.json \
+		-v $$(pwd)/backend/test:/app/test \
+		backend npx jest --passWithNoTests --verbose
 
 test-frontend:
 	@echo "$(GREEN)Running Frontend Tests...$(NC)"

@@ -90,8 +90,15 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
+    "setupFiles": ["<rootDir>/../test/jest-setup.cjs"],
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.(t|j)s$": ["ts-jest", { "diagnostics": false }]
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uuid)/)"
+    ],
+    "moduleNameMapper": {
+      "^bcrypt$": "<rootDir>/../test/__mocks__/bcrypt.js"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

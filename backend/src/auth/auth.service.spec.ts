@@ -124,6 +124,9 @@ describe('AuthService', () => {
       
       userRepository.create.mockReturnValue(savedUser);
       userRepository.save.mockResolvedValue(savedUser);
+      jwtService.signAsync
+        .mockResolvedValueOnce('mock-access-token')
+        .mockResolvedValueOnce('mock-refresh-token');
 
       const result = await service.register(registerDto);
 
@@ -304,7 +307,7 @@ describe('AuthService', () => {
       userRepository.findOne.mockResolvedValue(mockUser);
       tokenBlacklistRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.validateUser(payload);
+      const result = await service.validateUser(payload, 'mock-token');
 
       expect(result).toBeDefined();
       expect(result!.id).toBe(mockUser.id);
@@ -317,7 +320,7 @@ describe('AuthService', () => {
       userRepository.findOne.mockResolvedValue(mockUser);
       tokenBlacklistRepository.findOne.mockResolvedValue(mockTokenBlacklist);
 
-      const result = await service.validateUser(payload);
+      const result = await service.validateUser(payload, 'mock-token');
 
       expect(result).toBeNull();
     });
@@ -327,7 +330,7 @@ describe('AuthService', () => {
 
       userRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.validateUser(payload);
+      const result = await service.validateUser(payload, 'mock-token');
 
       expect(result).toBeNull();
     });
