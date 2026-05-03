@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards, UseInterceptors, Request } from '@nestjs/common';
 import { AiService } from './ai.service';
 import { EnhancedAiService } from './enhanced-ai.service';
 import { CreateAiDto } from './dto/create-ai.dto';
@@ -6,11 +6,13 @@ import { UpdateAiDto } from './dto/update-ai.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
 
 @ApiTags('AI')
 @ApiBearerAuth()
 @Controller('ai')
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(AiAuditInterceptor)
 export class AiController {
   constructor(
     private readonly aiService: AiService,

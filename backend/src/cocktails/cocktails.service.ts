@@ -127,6 +127,7 @@ export class CocktailsService {
     const savedLog = await this.preparationLogRepository.save(preparationLog);
 
     const job = await this.barOrdersQueue.add('prepare-cocktail', {
+      type: 'prepare',
       cocktailId,
       bartenderId,
       preparationLogId: savedLog.id,
@@ -140,6 +141,40 @@ export class CocktailsService {
       jobId: job.id,
       status: 'queued',
       statusUrl: `/cocktails/preparations/${savedLog.id}/status`,
+    };
+  }
+
+  async undo(logId: string) {
+    const log = await this.preparationLogRepository.findOne({
+      where: { id: logId },
+    });
+
+    if (!log) {
+      throw new NotFoundException(`Preparation log ${logId} not found`);
+    }
+
+    if (log.status !== 'completed') {
+      throw new NotFoundException(
+        `Cannot undo preparation: status is ${log.status}, expected "completed"`,
+      );
+    }
+
+    if (log.undone) {
+      throw new NotFoundException('Preparation has already been undone');
+    }
+
+    const job = await this.barOrdersQueue.add('undo-preparation', {
+      type: 'undo',
+      bartenderId: log.bartenderId || undefined,
+      preparationLogId: log.id,
+    });
+
+    return {
+      message: 'Undo queued for processing',
+      preparationLogId: log.id,
+      jobId: job.id,
+      status: 'queued',
+      statusUrl: `/cocktails/preparations/${log.id}/status`,
     };
   }
 

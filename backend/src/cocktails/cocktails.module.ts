@@ -13,7 +13,6 @@ import { CocktailAggregatorService } from './cocktail-aggregator.service';
 import { UtilsModule } from '../utils/utils.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ImageService } from '../images/image.service';
-import { BarOrdersProcessor } from '../queue/bar-orders.processor';
 
 @Module({
   imports: [
@@ -24,7 +23,7 @@ import { BarOrdersProcessor } from '../queue/bar-orders.processor';
     InventoryModule,
   ],
   controllers: [CocktailsController],
-  providers: [CocktailsService, CocktailAggregatorService, ImageService, BarOrdersProcessor],
+  providers: [CocktailsService, CocktailAggregatorService, ImageService],
   exports: [CocktailAggregatorService],
 })
 export class CocktailsModule {}

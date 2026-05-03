@@ -121,6 +121,14 @@ export class CocktailsController {
     return this.cocktailsService.getPreparationStatus(logId);
   }
 
+  @Post('preparations/:logId/undo')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Undo a completed preparation (returns 202 Accepted)' })
+  undo(@Param('logId') logId: string) {
+    return this.cocktailsService.undo(logId);
+  }
+
   @Get()
   @ApiOperation({ summary: 'List cocktails with pagination. Supports unified external search.' })
   @ApiQuery({ name: 'name', required: false, description: 'Search term for unified search' })

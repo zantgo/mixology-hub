@@ -8,13 +8,13 @@ import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { UnitConverterService } from '../utils/unit-converter.service';
-import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 
 interface PrepareJobPayload {
-  cocktailId: string;
+  type: 'prepare' | 'undo';
+  cocktailId?: string;
   bartenderId: string;
   preparationLogId: string;
-  servings: number;
+  servings?: number;
   force?: boolean;
 }
 
@@ -32,12 +32,18 @@ export class BarOrdersProcessor extends WorkerHost {
     @InjectRepository(PreparationLog)
     private readonly preparationLogRepository: Repository<PreparationLog>,
     private readonly unitConverter: UnitConverterService,
-    private readonly hierarchicalIngredientService: HierarchicalIngredientService,
   ) {
     super();
   }
 
   async process(job: Job<PrepareJobPayload>): Promise<{ status: string; logId: string }> {
+    if (job.data.type === 'undo') {
+      return this.processUndo(job);
+    }
+    return this.processPrepare(job);
+  }
+
+  private async processPrepare(job: Job<PrepareJobPayload>): Promise<{ status: string; logId: string }> {
     const { cocktailId, bartenderId, preparationLogId, servings, force } = job.data;
     this.logger.log(`Processing prepare job for cocktail ${cocktailId}, bartender ${bartenderId}`);
 
@@ -158,6 +164,75 @@ export class BarOrdersProcessor extends WorkerHost {
         this.logger.error(`Failed to update preparation log status: ${updateError}`);
       }
 
+      throw error;
+    });
+  }
+
+  private async processUndo(job: Job<PrepareJobPayload>): Promise<{ status: string; logId: string }> {
+    const { bartenderId, preparationLogId } = job.data;
+    this.logger.log(`Processing undo job for preparation log ${preparationLogId}, bartender ${bartenderId}`);
+
+    return await this.dataSource.transaction(async (transactionalEntityManager) => {
+      const preparationLog = await transactionalEntityManager.findOne(PreparationLog, {
+        where: { id: preparationLogId },
+      });
+      if (!preparationLog) {
+        throw new Error(`PreparationLog ${preparationLogId} not found`);
+      }
+
+      if (preparationLog.status !== 'completed') {
+        throw new Error(
+          `Cannot undo preparation log ${preparationLogId}: status is ${preparationLog.status}, expected "completed"`,
+        );
+      }
+
+      if (preparationLog.undone) {
+        throw new Error(`Preparation log ${preparationLogId} has already been undone`);
+      }
+
+      const deductions = preparationLog.deductedIngredients;
+      if (!deductions || deductions.length === 0) {
+        throw new Error(`No deductions found for preparation log ${preparationLogId}`);
+      }
+
+      for (const deduction of deductions) {
+        if (deduction.skipped) {
+          continue;
+        }
+
+        const ingredientId = deduction.ingredientId as string;
+        const amount = deduction.amount as string;
+
+        const barStock = await transactionalEntityManager
+          .createQueryBuilder(BarInventory, 'bi')
+          .setLock('pessimistic_write')
+          .where('bi.ingredient_id = :ingredientId', { ingredientId })
+          .getOne();
+
+        if (!barStock) {
+          this.logger.warn(
+            `Cannot restore ingredient ${deduction.ingredientName}: no inventory row found (possibly deleted)`,
+          );
+          continue;
+        }
+
+        await transactionalEntityManager
+          .createQueryBuilder()
+          .update(BarInventory)
+          .set({ quantity: () => `quantity + ${amount}` })
+          .where('ingredient_id = :ingredientId', { ingredientId })
+          .execute();
+
+        this.logger.log(`Restored ${amount} of ${deduction.ingredientName} (${ingredientId})`);
+      }
+
+      preparationLog.undone = true;
+      await transactionalEntityManager.save(preparationLog);
+
+      this.logger.log(`Successfully undone preparation log ${preparationLogId}`);
+      return { status: 'undone', logId: preparationLogId };
+    }).catch(async (error) => {
+      this.logger.error(`Failed to process undo job: ${error.message}`);
       throw error;
     });
   }
