@@ -27,7 +27,12 @@ export class PreparationLog {
   @Expose()
   bartender: User | null;
 
-  @Column({ name: 'bartender_id', nullable: true })
+  @Column({
+    name: 'bartender_id',
+    nullable: true,
+    insert: false,
+    update: false,
+  })
   bartenderId: string | null;
 
   @ManyToOne(() => Cocktail, { onDelete: 'SET NULL', nullable: true })
@@ -35,7 +40,7 @@ export class PreparationLog {
   @Expose()
   cocktail: Cocktail | null;
 
-  @Column({ name: 'cocktail_id', nullable: true })
+  @Column({ name: 'cocktail_id', nullable: true, insert: false, update: false })
   cocktailId: string | null;
 
   @Column({ name: 'external_cocktail_id', nullable: true })

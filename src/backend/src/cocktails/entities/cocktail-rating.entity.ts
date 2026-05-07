@@ -24,7 +24,7 @@ export class CocktailRating {
   @Expose()
   user: User;
 
-  @Column({ name: 'user_id' })
+  @Column({ name: 'user_id', insert: false, update: false })
   userId: string;
 
   @ManyToOne(() => Cocktail, { onDelete: 'CASCADE' })
@@ -32,7 +32,7 @@ export class CocktailRating {
   @Expose()
   cocktail: Cocktail;
 
-  @Column({ name: 'cocktail_id' })
+  @Column({ name: 'cocktail_id', insert: false, update: false })
   cocktailId: string;
 
   @Column({ type: 'decimal', precision: 3, scale: 2 })

@@ -1,4 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import Decimal from 'decimal.js';
 import { InventoryStore, InventoryItem } from '../../core/stores/inventory.store';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { ProgressBarComponent } from '../../shared/components/progress-bar/progress-bar.component';
@@ -168,9 +169,11 @@ export class InventoryCardComponent {
   private inventoryStore = inject(InventoryStore);
 
   adjust(delta: number): void {
-    const newQty = Math.max(0, this.item.quantity + delta);
-    const current = this.item.quantity;
-    this.item.quantity = newQty;
-    this.inventoryStore.updateQuantity(this.item.id, newQty, this.item.unit).subscribe();
+    const current = new Decimal(this.item.quantity);
+    const newQty = current.plus(delta);
+    const finalQty = newQty.isNegative() ? 0 : newQty.toNumber();
+
+    this.item.quantity = finalQty;
+    this.inventoryStore.updateQuantity(this.item.id, finalQty, this.item.unit).subscribe();
   }
 }

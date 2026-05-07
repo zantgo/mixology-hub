@@ -27,6 +27,10 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/playfair-display": "^5.2.8",
     "@fontsource/roboto-mono": "^5.2.8",
+    "decimal": {
+      "js": "^10.4.3"
+    },
+    "decimal.js": "^10.6.0",
     "lucide-angular": "^1.0.0",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"

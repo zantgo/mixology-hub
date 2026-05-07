@@ -42,7 +42,12 @@ export class AiToolAudit {
   @Expose({ name: 'triggeredBy' })
   triggeredBy: User | null;
 
-  @Column({ name: 'triggered_by', nullable: true })
+  @Column({
+    name: 'triggered_by',
+    nullable: true,
+    insert: false,
+    update: false,
+  })
   triggeredById: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
