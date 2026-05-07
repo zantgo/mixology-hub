@@ -5,6 +5,7 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Unique,
 } from 'typeorm';
 import { Decimal } from 'decimal.js';
 import { Expose } from 'class-transformer';
@@ -12,6 +13,7 @@ import { Ingredient } from '../../ingredients/entities/ingredient.entity';
 import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
 @Entity('bar_inventory')
+@Unique(['ingredient'])
 export class BarInventory {
   @PrimaryGeneratedColumn('uuid')
   @Expose()

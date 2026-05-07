@@ -31,13 +31,14 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/schedule": "^6.1.1",
-    "@nestjs/throttler": "^6.5.0",
     "@nestjs/swagger": "^11.2.6",
+    "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.0",
     "@types/multer": "^2.1.0",
     "@types/nodemailer": "^6.4.17",
     "@types/sharp": "^0.31.1",
     "@types/uuid": "^10.0.0",
+    "ajv": "^8.17.1",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.55.0",
@@ -93,9 +94,16 @@
     ],
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
-    "setupFiles": ["<rootDir>/../test/jest-setup.cjs"],
+    "setupFiles": [
+      "<rootDir>/../test/jest-setup.cjs"
+    ],
     "transform": {
-      "^.+\\.(t|j)s$": ["ts-jest", { "diagnostics": false }]
+      "^.+\\.(t|j)s$": [
+        "ts-jest",
+        {
+          "diagnostics": false
+        }
+      ]
     },
     "transformIgnorePatterns": [
       "node_modules/(?!(uuid)/)"
