@@ -64,7 +64,7 @@ make test-frontend
 - **E2E Tests:** Use `supertest` to hit actual HTTP endpoints against an in-memory or test database.
 
 ```bash
-cd backend
+cd src/backend
 npm run test        # Unit tests
 npm run test:e2e    # End-to-end tests
 npm run test:cov    # Coverage report
@@ -77,7 +77,7 @@ npm run test:cov    # Coverage report
 - **E2E Tests:** For full browser E2E testing, we use **Playwright** (configured as a separate test suite).
 
 ```bash
-cd frontend
+cd src/frontend
 npm run test        # Run tests in watch mode
 npm run test:ci     # Single run with coverage
 npm run test:e2e    # Run Playwright E2E tests (requires backend running)

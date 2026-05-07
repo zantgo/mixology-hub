@@ -38,7 +38,7 @@ assignees: ''
 make start
 # or
 docker compose up -d postgres redis
-cd backend && npm run start:dev
+cd src/backend && npm run start:dev
 ```
 
 ## Additional Context

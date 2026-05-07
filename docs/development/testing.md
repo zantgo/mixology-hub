@@ -113,13 +113,15 @@ make test
 
 # Backend only (Jest)
 make test-backend
-cd backend && npm run test
-cd backend && npm run test:e2e
-cd backend && npm run test:cov
+cd src/backend && npm run test
+
+cd src/backend && npm run test:e2e
+
+cd src/backend && npm run test:cov
 
 # Frontend only (Vitest)
 make test-frontend
-cd frontend && npm run test
+cd src/frontend && npm run test
 ```
 
 ---

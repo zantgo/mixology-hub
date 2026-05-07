@@ -3,38 +3,87 @@
 ## Overview
 This document outlines the strategic direction and planned features for MixologyHub. The roadmap is organized into phases, with each phase building upon the previous to deliver increasing value to users while maintaining technical excellence.
 
-## Current Status: MVP (Minimum Viable Product) ✅
-**Completed Features:**
-- ✅ Cocktail discovery from TheCocktailDB API
-- ✅ AI-powered recipe generation (provider-agnostic)
-- ✅ Personal cocktail creation and management
-- ✅ Favorites system
-- ✅ Basic ingredient tracking
+## Current Status: Phase 1 Complete, Phase 2 Partially Complete ✅
+**Completed Features (as of May 2026):**
+
+### Core Domain
+- ✅ Cocktail discovery from TheCocktailDB API (circuit breaker + rate limiter)
+- ✅ AI-powered recipe generation (provider-agnostic with tool calling)
+- ✅ Personal cocktail creation and management (dynamic forms + image upload)
+- ✅ Favorites system (polymorphic: local + external cocktails)
+- ✅ Unified search (local + external + AI) with Redis caching
+- ✅ Fuzzy search with pg_trgm (typo-tolerant)
+- ✅ Strict inclusion search (filter by required ingredients)
+- ✅ Advanced filtering (category, glassware, ingredient count)
 - ✅ Docker-based development environment
-- ✅ Unified search across local and external recipes
+- ✅ B2B shared `bar_inventory` (single-bar POS model)
+
+### Authentication & Security
+- ✅ JWT authentication (register/login/refresh/logout)
+- ✅ Refresh token rotation + reuse detection + session management (5 max)
+- ✅ RBAC (admin/bartender roles with AdminGuard)
+- ✅ Password strength enforcement (common password blacklist)
+- ✅ Brute-force lockout (5 attempts → 15min) + unlock recovery flow
+- ✅ CSRF protection (refresh token in httpOnly sameSite:strict cookie)
+- ✅ GDPR (data export, deletion, anonymization, scheduled cleanup)
+- ✅ Rate limiting (ThrottlerModule, MCP-specific limits)
+
+### Inventory & Preparation
+- ✅ Smart inventory dashboard (category-grouped, admin-only mutations)
+- ✅ Bulk add/delete inventory
+- ✅ Unit conversion engine (13 units, mass↔volume via density)
+- ✅ Measure parsing (fractions, decimals, qualitative measures)
+- ✅ Makeability intelligence (hierarchical ingredient resolution)
+- ✅ Cocktail preparation via BullMQ queue (concurrency:1, ACID transactions)
+- ✅ Async preparation UX (202 Accepted → polling → toast)
+- ✅ Batch preparation + undo (single atomic transaction)
+- ✅ Optional ingredient conditional deduction
+- ✅ Undo with 15-min window + idempotency guard
+
+### AI & MCP
+- ✅ AI recipe generation with multi-attempt validation
+- ✅ AI recipe regeneration (same ingredients, different output)
+- ✅ AI stylistic modifiers + unit system awareness
+- ✅ AI daily quota enforcement (atomic DB upsert)
+- ✅ AI prompt injection defense + safety validation
+- ✅ MCP (Model Context Protocol) server with 6 tools
+- ✅ MCP tool call audit trail + parameter validation
+- ✅ AI response payload size bounding (50KB)
+
+### Developer Experience
+- ✅ Frontend lint/format scripts (Prettier)
+- ✅ Health check endpoint (GET /health: db + redis)
+- ✅ CI/CD pipeline (GitHub Actions: lint, build, test, E2E)
+- ✅ Response time monitoring (slow request logging >1s)
+- ✅ Error alerting hook (structured 5xx logging)
+- ✅ PWA manifest (standalone display)
+- ✅ Frontend session timeout (30-min idle → auto-logout)
+- ✅ Backend tests: 10 suites, 174 tests
+- ✅ Frontend tests: 7 files, 21 tests
+- ✅ E2E test scaffold (8 scenarios)
 
 ## Phase 1: Enhanced User Experience & Core Features (Q2 2026)
 
 ### 1.1 Authentication & User Management
-- **JWT-based Authentication**: Replace mock auth with proper JWT token system
-- **User Registration & Profiles**: Email/password registration with profile management
-- **Social Login**: OAuth2 integration (Google, GitHub, etc.)
-- **Password Reset**: Secure password recovery flow
-- **Session Management**: Token refresh, logout, multiple device support
+- ✅ **JWT-based Authentication**: Replace mock auth with proper JWT token system
+- ✅ **User Registration & Profiles**: Email/password registration with profile management
+- ~~**Social Login**: OAuth2 integration (Google, GitHub, etc.)~~ → Phase 2
+- ✅ **Password Reset**: Secure password recovery flow
+- ✅ **Session Management**: Token refresh, logout, multiple device support (max 5 sessions)
 
 ### 1.2 Advanced Inventory Management
-- **Smart Inventory Dashboard**: Visual overview of ingredient stock
-- **Barcode Scanning**: Mobile app integration for easy inventory updates
-- **Expiration Tracking**: Notifications for expiring ingredients
-- **Shopping List Generation**: Auto-generated shopping lists based on missing ingredients
-- **Batch Updates**: Bulk import/export of inventory data
+- ✅ **Smart Inventory Dashboard**: Visual overview of ingredient stock
+- ~~**Barcode Scanning**: Mobile app integration for easy inventory updates~~ → Phase 2
+- ~~**Expiration Tracking**: Notifications for expiring ingredients~~ → Phase 2
+- ~~**Shopping List Generation**: Auto-generated shopping lists based on missing ingredients~~ → Phase 2
+- ✅ **Batch Updates**: Bulk import/export of inventory data
 
 ### 1.3 Enhanced Recipe Features
-- **Recipe Ratings & Reviews**: User ratings and written reviews
-- **Recipe Collections**: User-curated collections (e.g., "Summer Cocktails", "Party Drinks")
-- **Recipe Sharing**: Social sharing with generated images
-- **Recipe Variations**: User-submitted variations of existing recipes
-- **Seasonal Recommendations**: Time-based recipe suggestions
+- ✅ **Recipe Ratings & Reviews**: User ratings and written reviews
+- ~~**Recipe Collections**: User-curated collections (e.g., "Summer Cocktails", "Party Drinks")~~ → Phase 2
+- ~~**Recipe Sharing**: Social sharing with generated images~~ → Phase 2
+- ~~**Recipe Variations**: User-submitted variations of existing recipes~~ → Phase 2
+- ~~**Seasonal Recommendations**: Time-based recipe suggestions~~ → Phase 2
 
 ## Phase 2: Social & Community Features (Q3 2026)
 
@@ -113,16 +162,13 @@ This document outlines the strategic direction and planned features for Mixology
 ### Immediate (Q2 2026)
 - ✅ Implement proper authentication (replacing mock auth)
 - ✅ Add comprehensive error handling and logging
-- ✅ Improve test coverage (>80% for critical paths)
+- ✅ Improve test coverage (10 backend suites, 174 tests; 7 frontend files, 21 tests)
 - ✅ Implement proper CI/CD pipeline
-- ✅ Add monitoring and alerting
+- ✅ Add monitoring and alerting (ResponseTimeInterceptor + 5xx alerting)
 
 ### Short-term (Q3 2026)
-- Refactor monolithic architecture
-- Implement proper caching strategy
+- Add E2E test coverage for critical paths
 - Add database indexing and query optimization
-- Implement rate limiting and API throttling
-- Add security scanning and vulnerability testing
 
 ### Long-term (Q4 2026+)
 - Migrate to microservices architecture
@@ -180,6 +226,7 @@ This document outlines the strategic direction and planned features for Mixology
 5. **Testing**: Participate in beta testing programs
 
 ## Changelog
+- **2026-05-06**: Phase 1 complete. Fuzzy search, batch prep, MCP Polish, multi-session auth, test coverage expanded (174+21 tests)
 - **2026-04-08**: Initial roadmap created
 - **2026-04-07**: MVP feature set completed
 - **2026-03-15**: Project inception and architecture design

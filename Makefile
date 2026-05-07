@@ -10,9 +10,9 @@ help:
 
 setup:
 	@echo "$(YELLOW)Installing backend dependencies...$(NC)"
-	cd backend && npm install
+	cd src/backend && npm install
 	@echo "$(YELLOW)Installing frontend dependencies...$(NC)"
-	cd frontend && npm install
+	cd src/frontend && npm install
 
 start:
 	@echo "$(GREEN)Starting MixologyHub stack...$(NC)"
@@ -36,19 +36,19 @@ logs:
 test-backend:
 	@echo "$(GREEN)Running Backend Tests in Docker...$(NC)"
 	docker compose run --rm \
-		-v $$(pwd)/backend/src:/app/src \
-		-v $$(pwd)/backend/package.json:/app/package.json \
-		-v $$(pwd)/backend/tsconfig.json:/app/tsconfig.json \
-		-v $$(pwd)/backend/test:/app/test \
+		-v $$(pwd)/src/backend/src:/app/src \
+		-v $$(pwd)/src/backend/package.json:/app/package.json \
+		-v $$(pwd)/src/backend/tsconfig.json:/app/tsconfig.json \
+		-v $$(pwd)/src/backend/test:/app/test \
 		backend npx jest --passWithNoTests --verbose
 
 test-frontend:
 	@echo "$(GREEN)Running Frontend Tests...$(NC)"
-	cd frontend && npm run test:ci
+	cd src/frontend && npm run test:ci
 
 test-e2e:
 	@echo "$(GREEN)Running Backend E2E Tests...$(NC)"
-	cd backend && npm run test:e2e
+	cd src/backend && npm run test:e2e
 
 test: test-backend test-frontend
 	@echo "$(GREEN)All tests completed successfully.$(NC)"

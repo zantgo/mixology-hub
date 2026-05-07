@@ -163,7 +163,7 @@ docker compose up -d postgres redis
 
 ```bash
 
-cd backend
+cd src/backend
 
 npm install
 
@@ -179,7 +179,7 @@ npm run start:dev
 
 ```bash
 
-cd frontend
+cd src/frontend
 
 npm install
 
@@ -235,7 +235,7 @@ make test-frontend
 
   
 
-To streamline local development and testing, MixologyHub includes an automated `SeederService` (`backend/src/database/seeder.service.ts`).
+To streamline local development and testing, MixologyHub includes an automated `SeederService` (`src/backend/src/database/seeder.service.ts`).
 
   
 
@@ -253,14 +253,14 @@ This ensures that core database relations—such as Foreign Key constraints for 
 
 ## 🗄️ Database Migrations with TypeORM
 
-MixologyHub uses TypeORM migrations to manage database schema changes. All migrations are stored in `backend/src/database/migrations/`.
+MixologyHub uses TypeORM migrations to manage database schema changes. All migrations are stored in `src/backend/src/database/migrations/`.
 
 ### Generating a New Migration
 
 When you modify entity classes (add/remove columns, change types, etc.), generate a migration:
 
 ```bash
-cd backend
+cd src/backend
 
 # 1. Ensure the database is running
 docker compose up -d postgres

@@ -1,0 +1,82 @@
+import { Injectable, inject } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import { Cocktail, PaginationMeta } from '../models/cocktail.model';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class CocktailService {
+  private http = inject(HttpClient);
+  private apiUrl = `${environment.apiUrl}/cocktails`;
+  private ingredientsUrl = `${environment.apiUrl}/ingredients`;
+
+  // Get cocktails with pagination
+  getCocktails(
+    page: number = 1,
+    limit: number = 10,
+  ): Observable<{ data: Cocktail[]; meta: PaginationMeta }> {
+    return this.http.get<{ data: Cocktail[]; meta: PaginationMeta }>(
+      `${this.apiUrl}?page=${page}&limit=${limit}`,
+    );
+  }
+
+  // Get ingredients (necessary to create a cocktail)
+  getIngredients(): Observable<any[]> {
+    return this.http.get<any[]>(this.ingredientsUrl);
+  }
+
+  // Create a new cocktail (legacy - without file upload)
+  createCocktail(
+    cocktail: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>,
+  ): Observable<Cocktail> {
+    return this.http.post<Cocktail>(this.apiUrl, cocktail);
+  }
+
+  // Create a new cocktail with image upload
+  createCocktailWithImage(
+    cocktailData: Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>,
+    imageFile?: File,
+  ): Observable<Cocktail> {
+    const formData = new FormData();
+    formData.append('data', JSON.stringify(cocktailData));
+
+    if (imageFile) {
+      formData.append('image', imageFile);
+    }
+
+    return this.http.post<Cocktail>(this.apiUrl, formData);
+  }
+
+  // Update cocktail (legacy - without file upload)
+  updateCocktail(id: string, cocktail: Partial<Cocktail>): Observable<Cocktail> {
+    return this.http.patch<Cocktail>(`${this.apiUrl}/${id}`, cocktail);
+  }
+
+  // Update cocktail with image upload
+  updateCocktailWithImage(
+    id: string,
+    cocktailData: Partial<Omit<Cocktail, 'id' | 'createdAt' | 'isPublic' | 'source'>>,
+    imageFile?: File,
+  ): Observable<Cocktail> {
+    const formData = new FormData();
+    formData.append('data', JSON.stringify(cocktailData));
+
+    if (imageFile) {
+      formData.append('image', imageFile);
+    }
+
+    return this.http.patch<Cocktail>(`${this.apiUrl}/${id}`, formData);
+  }
+
+  // Get cocktail by ID
+  getCocktail(id: string): Observable<Cocktail> {
+    return this.http.get<Cocktail>(`${this.apiUrl}/${id}`);
+  }
+
+  // Delete cocktail
+  deleteCocktail(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiUrl}/${id}`);
+  }
+}

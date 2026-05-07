@@ -85,7 +85,7 @@ The Postman collection is organized by API resource:
 ### Local Development
 ```bash
 # Start backend in development mode
-cd backend
+cd src/backend
 npm run start:dev
 
 # API will be available at http://localhost:3000
@@ -146,7 +146,7 @@ Accept: application/json
 ### Running API Tests
 ```bash
 # Backend E2E tests
-cd backend
+cd src/backend
 npm run test:e2e
 
 # Test coverage

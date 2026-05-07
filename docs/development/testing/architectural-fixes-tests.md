@@ -411,7 +411,7 @@ describe('End-to-End Network Resilience', () => {
 
 ### Backend Tests
 ```bash
-cd backend
+cd src/backend
 npm test -- architectural-fixes
 ```
 

@@ -20,7 +20,7 @@ The migration includes the following changes:
 When the database is running:
 
 ```bash
-cd backend
+cd src/backend
 npx typeorm migration:run -d typeorm.config.ts
 ```
 
@@ -30,7 +30,7 @@ If TypeORM migration fails, run the SQL script manually:
 
 ```bash
 # When PostgreSQL is running on port 5433 (Docker default)
-psql -h localhost -p 5433 -U admin -d mixology_hub -f backend/migration-script.sql
+psql -h localhost -p 5433 -U admin -d mixology_hub -f src/backend/migration-script.sql
 
 # You'll be prompted for the password: secretpassword
 ```
@@ -136,7 +136,7 @@ docker compose logs --tail=10 postgres
 **Solution:** Use the manual SQL script:
 ```bash
 # Copy the SQL script to a location psql can access
-cp backend/migration-script.sql .
+cp src/backend/migration-script.sql .
 
 # Run it manually
 psql -h localhost -p 5433 -U admin -d mixology_hub -f migration-script.sql
@@ -148,7 +148,7 @@ If you need to rollback the migration:
 
 ### Using TypeORM:
 ```bash
-cd backend
+cd src/backend
 npx typeorm migration:revert -d typeorm.config.ts
 ```
 
@@ -178,10 +178,10 @@ ALTER COLUMN cocktail_id SET NOT NULL;
 
 ## 📝 Migration Files
 
-1. **TypeORM Migration:** `backend/src/migrations/1733702400000-fix-architectural-inconsistencies.ts`
-2. **SQL Script:** `backend/migration-script.sql`
-3. **TypeORM Config:** `backend/typeorm.config.ts`
-4. **Migration Runner:** `backend/run-migration.js`
+1. **TypeORM Migration:** `src/backend/src/migrations/1733702400000-fix-architectural-inconsistencies.ts`
+2. **SQL Script:** `src/backend/migration-script.sql`
+3. **TypeORM Config:** `src/backend/typeorm.config.ts`
+4. **Migration Runner:** `src/backend/run-migration.js`
 
 ## ⏰ Timing Considerations
 

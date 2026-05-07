@@ -1,0 +1,218 @@
+import { Injectable, signal, inject, Injector, runInInjectionContext } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { Observable, tap, catchError, throwError, of, fromEvent, merge } from 'rxjs';
+import { Router } from '@angular/router';
+import { environment } from '../../../environments/environment';
+
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName?: string;
+  role: 'user' | 'admin';
+}
+
+@Injectable({ providedIn: 'root' })
+export class AuthStore {
+  private http = inject(HttpClient);
+  private router = inject(Router);
+  private injector = inject(Injector);
+  private apiUrl = `${environment.apiUrl}/auth`;
+
+  readonly user = signal<UserProfile | null>(null);
+  readonly isAuthenticated = signal<boolean>(false);
+  readonly isAdmin = signal<boolean>(false);
+  readonly loading = signal<boolean>(false);
+  readonly error = signal<string | null>(null);
+
+  private accessToken: string | null = null;
+  private refreshInProgress: Promise<boolean> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimeoutWarning: ReturnType<typeof setTimeout> | null = null;
+
+  startIdleTimer(): void {
+    this.stopIdleTimer();
+    this.resetIdleTimer();
+
+    merge(
+      fromEvent(document, 'mousedown'),
+      fromEvent(document, 'keydown'),
+      fromEvent(document, 'touchstart'),
+      fromEvent(document, 'scroll'),
+    ).subscribe(() => this.resetIdleTimer());
+  }
+
+  private resetIdleTimer(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    if (this.idleTimeoutWarning) clearTimeout(this.idleTimeoutWarning);
+
+    if (!this.isAuthenticated()) return;
+
+    this.idleTimeoutWarning = setTimeout(
+      () => {
+        runInInjectionContext(this.injector, async () => {
+          const { UiStore } = await import('./ui.store');
+          const uiStore = inject(UiStore);
+          uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: 'Session expiring soon due to inactivity.',
+            type: 'warning',
+            dismissAfter: 10000,
+          });
+        });
+      },
+      SESSION_TIMEOUT_MS - 60 * 1000,
+    );
+
+    this.idleTimer = setTimeout(() => {
+      this.logout();
+    }, SESSION_TIMEOUT_MS);
+  }
+
+  private stopIdleTimer(): void {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    if (this.idleTimeoutWarning) {
+      clearTimeout(this.idleTimeoutWarning);
+      this.idleTimeoutWarning = null;
+    }
+  }
+
+  initialize(): Observable<boolean> {
+    return new Observable<boolean>((subscriber) => {
+      this.silentRefresh().subscribe({
+        next: (success) => {
+          subscriber.next(success);
+          subscriber.complete();
+        },
+        error: () => {
+          subscriber.next(false);
+          subscriber.complete();
+        },
+      });
+    });
+  }
+
+  getAccessToken(): string | null {
+    return this.accessToken;
+  }
+
+  login(email: string, password: string): Observable<any> {
+    this.loading.set(true);
+    this.error.set(null);
+    return this.http
+      .post<{
+        user: UserProfile;
+        accessToken: string;
+      }>(`${this.apiUrl}/login`, { email, password }, { withCredentials: true })
+      .pipe(
+        tap((res) => {
+          this.accessToken = res.accessToken;
+          this.user.set(res.user);
+          this.isAuthenticated.set(true);
+          this.isAdmin.set(res.user.role === 'admin');
+          this.loading.set(false);
+          this.startIdleTimer();
+        }),
+        catchError((err) => {
+          this.error.set(err.error?.message || 'Login failed');
+          this.loading.set(false);
+          return throwError(() => err);
+        }),
+      );
+  }
+
+  register(email: string, password: string, displayName?: string): Observable<any> {
+    this.loading.set(true);
+    this.error.set(null);
+    return this.http
+      .post<{
+        user: UserProfile;
+        accessToken: string;
+      }>(`${this.apiUrl}/register`, { email, password, displayName }, { withCredentials: true })
+      .pipe(
+        tap((res) => {
+          this.accessToken = res.accessToken;
+          this.user.set(res.user);
+          this.isAuthenticated.set(true);
+          this.isAdmin.set(res.user.role === 'admin');
+          this.loading.set(false);
+          this.startIdleTimer();
+        }),
+        catchError((err) => {
+          this.error.set(err.error?.message || 'Registration failed');
+          this.loading.set(false);
+          return throwError(() => err);
+        }),
+      );
+  }
+
+  silentRefresh(): Observable<boolean> {
+    if (this.refreshInProgress) {
+      return new Observable<boolean>((subscriber) => {
+        this.refreshInProgress!.then((result) => {
+          subscriber.next(result);
+          subscriber.complete();
+        });
+      });
+    }
+
+    this.refreshInProgress = new Promise<boolean>((resolve) => {
+      this.http
+        .post<{ accessToken: string }>(`${this.apiUrl}/refresh`, {}, { withCredentials: true })
+        .subscribe({
+          next: (res) => {
+            this.accessToken = res.accessToken;
+            this.isAuthenticated.set(true);
+            this.refreshInProgress = null;
+            resolve(true);
+          },
+          error: () => {
+            this.refreshInProgress = null;
+            resolve(false);
+          },
+        });
+    });
+
+    return new Observable<boolean>((subscriber) => {
+      this.refreshInProgress!.then((result) => {
+        subscriber.next(result);
+        subscriber.complete();
+      });
+    });
+  }
+
+  loadProfile(): Observable<UserProfile> {
+    this.loading.set(true);
+    return this.http.get<UserProfile>(`${this.apiUrl}/profile`).pipe(
+      tap((profile) => {
+        this.user.set(profile);
+        this.isAdmin.set(profile.role === 'admin');
+        this.isAuthenticated.set(true);
+        this.loading.set(false);
+      }),
+      catchError((err) => {
+        this.loading.set(false);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  logout(): void {
+    this.http.post(`${this.apiUrl}/logout`, {}, { withCredentials: true }).subscribe();
+    this.stopIdleTimer();
+    this.clearState();
+  }
+
+  clearState(): void {
+    this.stopIdleTimer();
+    this.accessToken = null;
+    this.user.set(null);
+    this.isAuthenticated.set(false);
+    this.isAdmin.set(false);
+    this.error.set(null);
+  }
+}

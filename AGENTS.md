@@ -1,7 +1,7 @@
 # MixologyHub - Agent Instructions
 
 ## Project Structure
-- **Monorepo layout**: `backend/` (NestJS), `frontend/` (Angular 21), `docs/`
+- **Monorepo layout**: `src/backend/` (NestJS), `src/frontend/` (Angular 21), `docs/`
 - **Containerized**: Full Docker Compose stack (PostgreSQL 15, Redis 7, Backend, Frontend)
 - **AI Integration**: Provider-agnostic LLM via environment variables (DeepSeek/OpenAI/Anthropic)
 
@@ -27,43 +27,48 @@ make setup             # Install dependencies in both packages
 docker compose up -d postgres redis
 
 # 2. Backend (update .env: DB_HOST=localhost, REDIS_HOST=localhost)
-cd backend && npm run start:dev  # Port 3000
+cd src/backend && npm run start:dev  # Port 3000
 
 # 3. Frontend
-cd frontend && npm start         # Port 4200
+cd src/frontend && npm start         # Port 4200
 ```
 
 ### Per-Package Commands
 ```bash
 # Backend
-cd backend && npm run build      # NestJS build
-cd backend && npm run lint       # ESLint + Prettier (flat config)
-cd backend && npm run format     # Prettier write
+cd src/backend && npm run build      # NestJS build
+cd src/backend && npm run lint       # ESLint + Prettier (flat config)
+cd src/backend && npm run format     # Prettier write
 
-# Frontend (no lint/format scripts configured)
-cd frontend && npm run build     # ng build (production)
-cd frontend && npm start         # ng serve
+# Frontend (has lint/format scripts)
+cd src/frontend && npm run build     # ng build (production)
+cd src/frontend && npm start         # ng serve
+cd src/frontend && npm run format    # Prettier write
+cd src/frontend && npm run lint      # Prettier check
 ```
 
 ### Testing
 ```bash
-make test            # Backend unit + Frontend unit
+make test            # Backend unit (10 suites, 174 tests) + Frontend unit (7 files, 21 tests)
 make test-backend    # Backend Jest unit tests only
 make test-frontend   # Frontend Vitest via Angular unit-test builder
-make test-e2e        # Backend E2E tests (Supertest)
+make test-e2e        # Backend E2E tests (Supertest, 8 scenarios)
 
 # Backend coverage
-cd backend && npm run test:cov
+cd src/backend && npm run test:cov
 ```
 
-**Recommended verification order**: `lint → build → test` (backend only; frontend has no lint)
+**Recommended verification order**: `lint → build → test` for both packages
 
 ## Key Architecture Notes
 - **Backend**: NestJS with TypeORM, Redis caching, external API aggregation (TheCocktailDB)
 - **Frontend**: Angular 21 with Signals, Standalone Components, Zoneless Change Detection, SCSS styles
-- **Database**: PostgreSQL with `synchronize: true` — **schema auto-syncs from entities on boot** (only 1 migration exists)
-- **Unit Conversion**: Mathematical base-unit conversions in `UnitConverterService`
+- **Database**: PostgreSQL with `synchronize: true` — **schema auto-syncs from entities on boot** (2 migrations exist: architectural fixes + pg_trgm extension)
+- **Health Check**: `GET /health` returns `{ status, checks: { db, redis } }`
+- **Unit Conversion**: Mathematical base-unit conversions in `UnitConverterService` (13 units, mass↔volume via density)
 - **Online-Only Mandate**: No offline sync — application requires persistent internet connection
+- **Multi-Session Auth**: Up to 5 concurrent refresh token sessions per user (stored in `refresh_tokens` table)
+- **Preparation Queue**: BullMQ `bar-orders` queue with `concurrency: 1` for serialized inventory mutations
 
 ## Environment Configuration
 - **Required**: `.env` file in root directory (copy from `.env.example`)
@@ -109,5 +114,6 @@ _Strict rule:_ DO NOT assume the design. Always verify CSS variables and structu
 5. **State Management**: Use Signals for simple state, RxJS for async streams
 6. **Backend imports**: `nodenext` module resolution is set but imports do NOT use `.js` extensions — this works under NestJS/ts-jest but raw `tsc` may fail
 7. **Arithmetic**: The custom ESLint rule warns on native operators (see Backend-Specific Lint Rules above)
-8. **Frontend lint**: Frontend has no `lint` or `format` npm scripts. Prettier config exists (`.prettierrc`) but must be invoked manually
+8. **Frontend lint**: Frontend has `lint` and `format` npm scripts using Prettier. No ESLint configured for frontend
 9. **Test framework**: Frontend tests use Vitest via `@angular/build:unit-test` — the test script is `ng test`, NOT `vitest` directly
+10. **Zoneless testing**: Frontend cannot use `fakeAsync`/`tick` — use async/await with Promise-based patterns instead
