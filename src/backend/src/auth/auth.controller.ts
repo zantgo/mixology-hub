@@ -8,6 +8,7 @@ import {
   Param,
   Res,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -78,7 +79,7 @@ export class AuthController {
   ) {
     const refreshToken = req.cookies?.refreshToken;
     if (!refreshToken) {
-      return { error: 'No refresh token' };
+      throw new UnauthorizedException('No refresh token');
     }
     const result = await this.authService.refreshToken(refreshToken);
     this.setRefreshCookie(res, result.refreshToken);
@@ -100,7 +101,7 @@ export class AuthController {
       : authHeader;
     const refreshToken = req.cookies?.refreshToken;
     res.clearCookie('refreshToken', {
-      path: '/api/auth',
+      path: '/auth',
       httpOnly: true,
       secure: true,
       sameSite: 'strict' as const,
@@ -190,7 +191,7 @@ export class AuthController {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      path: '/api/auth',
+      path: '/auth',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
   }

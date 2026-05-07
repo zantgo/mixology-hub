@@ -8,6 +8,15 @@ import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { UtilsModule } from '../utils/utils.module';
 
+const BarOrdersQueueModule = BullModule.registerQueue({
+  name: 'bar-orders',
+  defaultJobOptions: {
+    removeOnComplete: 100,
+    removeOnFail: 500,
+    attempts: 1,
+  },
+});
+
 @Global()
 @Module({
   imports: [
@@ -21,18 +30,11 @@ import { UtilsModule } from '../utils/utils.module';
         },
       }),
     }),
-    BullModule.registerQueue({
-      name: 'bar-orders',
-      defaultJobOptions: {
-        removeOnComplete: 100,
-        removeOnFail: 500,
-        attempts: 1,
-      },
-    }),
+    BarOrdersQueueModule,
     TypeOrmModule.forFeature([BarInventory, Cocktail, PreparationLog]),
     UtilsModule,
   ],
   providers: [BarOrdersProcessor],
-  exports: [BullModule],
+  exports: [BullModule, BarOrdersQueueModule],
 })
 export class QueueModule {}

@@ -49,7 +49,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
         request.user = mockUser;
         return true;
       }
-      return true;
+      throw new UnauthorizedException('Mock user not found. Waiting for seeder.');
     }
 
     const result = super.canActivate(context);

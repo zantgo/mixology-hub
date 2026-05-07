@@ -8,7 +8,7 @@ import {
   Unique,
 } from 'typeorm';
 import { Decimal } from 'decimal.js';
-import { Expose } from 'class-transformer';
+import { Expose, Transform } from 'class-transformer';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
 import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
 
@@ -32,6 +32,7 @@ export class BarInventory {
     transformer: new ColumnNumericTransformer(),
   })
   @Expose()
+  @Transform(({ value }) => value?.toString())
   quantity: Decimal;
 
   @Column({ name: 'expiration_date', type: 'timestamp', nullable: true })

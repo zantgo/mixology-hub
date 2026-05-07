@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, tap, catchError, throwError, of, fromEvent, merge } from 'rxjs';
 import { Router } from '@angular/router';
 import { environment } from '../../../environments/environment';
+import { UiStore } from './ui.store';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -51,9 +52,8 @@ export class AuthStore {
 
     this.idleTimeoutWarning = setTimeout(
       () => {
-        runInInjectionContext(this.injector, async () => {
-          const { UiStore } = await import('./ui.store');
-          const uiStore = inject(UiStore);
+        runInInjectionContext(this.injector, () => {
+          const uiStore = this.injector.get(UiStore);
           uiStore.addToast({
             id: crypto.randomUUID(),
             message: 'Session expiring soon due to inactivity.',

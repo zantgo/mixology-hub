@@ -12,6 +12,7 @@ import {
 import { Decimal } from 'decimal.js';
 import { ApiProperty } from '@nestjs/swagger';
 import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer';
+import { Transform } from 'class-transformer';
 
 @Entity('ingredients')
 export class Ingredient {
@@ -127,6 +128,7 @@ export class Ingredient {
     default: 1.0,
     transformer: new ColumnNumericTransformer(),
   })
+  @Transform(({ value }) => value?.toString())
   density: Decimal;
 
   /**

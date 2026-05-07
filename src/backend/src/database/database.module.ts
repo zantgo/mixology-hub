@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AddPgTrgm1746496000000 } from '../migrations/1746496000000-add-pg-trgm';
+import { FixArchitecturalInconsistencies1733702400000 } from '../migrations/1733702400000-fix-architectural-inconsistencies';
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         database: configService.get<string>('DB_NAME'),
         autoLoadEntities: true,
         synchronize: true,
+        migrationsRun: true,
+        migrations: [FixArchitecturalInconsistencies1733702400000, AddPgTrgm1746496000000],
         retryAttempts: 3,
         retryDelay: 3000,
       }),

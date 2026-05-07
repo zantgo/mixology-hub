@@ -6,7 +6,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Decimal } from 'decimal.js';
-import { Expose } from 'class-transformer';
+import { Expose, Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { Cocktail } from './cocktail.entity';
 import { Ingredient } from '../../ingredients/entities/ingredient.entity';
@@ -64,6 +64,7 @@ export class CocktailIngredient {
     nullable: true,
   })
   @Expose()
+  @Transform(({ value }) => value?.toString())
   amount: Decimal;
 
   @ApiProperty({
