@@ -22,7 +22,7 @@
 MixologyHub is a modern, enterprise-grade full-stack web application designed for professional bars and bartenders. It serves as a unified Point-of-Sale and inventory management platform to discover recipes, manage a shared bar ingredient inventory, and generate unique cocktail recipes using Generative AI.
  
 
-Built as a showcase of **Senior Full-Stack Engineering** practices, this project demonstrates clean architecture, scalable API design, third-party API aggregation, strict data modeling, and containerized deployment.
+Built as a showcase of **Full-Stack Engineering** practices, this project demonstrates clean architecture, scalable API design, third-party API aggregation, strict data modeling, and containerized deployment.
   
 ## ✨ Key Features & Technical Highlights
  
