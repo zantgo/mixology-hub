@@ -333,8 +333,6 @@ export class EnhancedTheCocktailDbService {
 
         const sanitizedDrink: any = {};
 
-        // ADR 0016: Exclude image fields — never expose external image URLs.
-        // Retain metadata fields used for filtering/display (category, glass, tags, alcoholic).
         const stringFields = [
           'strDrink',
           'strInstructions',
@@ -342,6 +340,7 @@ export class EnhancedTheCocktailDbService {
           'strAlcoholic',
           'strGlass',
           'strTags',
+          'strDrinkThumb',
         ];
         const idFields = ['idDrink'];
 

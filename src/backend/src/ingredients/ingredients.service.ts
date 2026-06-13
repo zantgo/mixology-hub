@@ -36,13 +36,27 @@ export class IngredientsService {
     }
   }
 
-  async findAll(paginationQuery: PaginationQueryDto) {
+  async findAll(paginationQuery: PaginationQueryDto, name?: string) {
     const { limit = 10, page = 1 } = paginationQuery;
     const offset = (page - 1) * limit;
-    const [data, total] = await this.ingredientRepository.findAndCount({
-      skip: offset,
-      take: limit,
-    });
+
+    const queryBuilder =
+      this.ingredientRepository.createQueryBuilder('ingredient');
+
+    if (name && name.trim().length > 0) {
+      const normalized = name.trim().toUpperCase();
+      queryBuilder.where(
+        'ingredient.normalizedName LIKE :name OR ingredient.name ILIKE :rawName',
+        {
+          name: `%${normalized}%`,
+          rawName: `%${name.trim()}%`,
+        },
+      );
+    }
+
+    queryBuilder.skip(offset).take(limit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
 
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;

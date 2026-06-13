@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { AuthService } from './auth.service';
 import { User } from '../users/entities/user.entity';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
@@ -116,6 +117,21 @@ describe('AuthService', () => {
       sendEmailVerificationEmail: jest.fn().mockResolvedValue(undefined),
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
       sendAccountUnlockEmail: jest.fn().mockResolvedValue(undefined),
+      sendEmailChangeVerificationEmail: jest.fn().mockResolvedValue(undefined),
+      sendEmailChangeNoticeEmail: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const cacheManagerMock = {
+      get: jest.fn().mockResolvedValue(null),
+      set: jest.fn().mockResolvedValue(undefined),
+      del: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const systemSettingsRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      save: jest.fn(),
+      update: jest.fn(),
+      create: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -132,11 +148,12 @@ describe('AuthService', () => {
         },
         {
           provide: getRepositoryToken(SystemSettings),
-          useValue: { findOne: jest.fn(), save: jest.fn(), update: jest.fn() },
+          useValue: systemSettingsRepo,
         },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
         { provide: EmailService, useValue: emailService },
+        { provide: CACHE_MANAGER, useValue: cacheManagerMock },
       ],
     }).compile();
 

@@ -7,14 +7,14 @@ import {
   Body,
   Query,
   UseGuards,
+  Req,
+  BadRequestException,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { AuthService } from '../auth/auth.service';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
-import { GetUser } from '../auth/decorators/get-user.decorator';
-import { User } from '../users/entities/user.entity';
 import { ReviewReportDto } from './dto/review-report.dto';
 import { MergeIngredientsDto } from './dto/merge-ingredients.dto';
 import { HideExternalCocktailDto } from './dto/hide-external-cocktail.dto';
@@ -47,22 +47,14 @@ export class AdminController {
 
   @Post('ingredients/merge')
   async mergeIngredients(@Body() dto: MergeIngredientsDto) {
-    return this.adminService.mergeIngredients(
-      dto.sourceId,
-      dto.targetId,
-      dto.adminId,
-    );
+    return this.adminService.mergeIngredients(dto.sourceId, dto.targetId);
   }
 
   // Ingredient synonym mapping (UC 1.24)
 
   @Post('ingredients/:id/synonyms')
-  async mapSynonym(
-    @Param('id') id: string,
-    @Body('synonym') synonym: string,
-    @GetUser() user: User,
-  ) {
-    return this.adminService.mapSynonym(id, synonym, user.id);
+  async mapSynonym(@Param('id') id: string, @Body('synonym') synonym: string) {
+    return this.adminService.mapSynonym(id, synonym);
   }
 
   // Hidden external cocktails
@@ -101,7 +93,19 @@ export class AdminController {
   }
 
   @Post('security/global-revoke')
-  async globalRevoke() {
-    return this.authService.revokeAllSessions();
+  @ApiOperation({
+    summary:
+      'Globally revoke all sessions with mandatory security audit logging',
+  })
+  async globalRevoke(@Req() req: any, @Body('reason') reason: string) {
+    if (!reason || reason.trim().length === 0) {
+      throw new BadRequestException(
+        'Security audit mandate: A revocation reason is required.',
+      );
+    }
+    const adminId = req.user.id;
+    const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+
+    return this.authService.revokeAllSessions(adminId, clientIp, reason);
   }
 }

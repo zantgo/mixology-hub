@@ -56,6 +56,11 @@ export class BarInventoryService {
       })) {
         await this.cacheManager.del(key);
       }
+      for await (const key of store.client.scanIterator({
+        MATCH: 'search:*',
+      })) {
+        await this.cacheManager.del(key);
+      }
     } else {
       await this.cacheManager.clear();
     }

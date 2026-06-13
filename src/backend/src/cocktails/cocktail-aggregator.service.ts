@@ -23,6 +23,7 @@ export interface CocktailDbDrink {
   strAlcoholic: string;
   strGlass: string | null;
   strTags: string | null;
+  strDrinkThumb: string | null;
   [key: `strIngredient${number}`]: string | null;
   [key: `strMeasure${number}`]: string | null;
 }
@@ -245,83 +246,107 @@ export class CocktailAggregatorService {
     }
   }
 
-  private applyFilters(
+  private async applyFilters(
     cocktails: FormattedCocktail[],
     filters: SearchFilters,
-  ): FormattedCocktail[] {
-    return cocktails.filter((cocktail) => {
-      // Ingredient filter
+  ): Promise<FormattedCocktail[]> {
+    const filtered: FormattedCocktail[] = [];
+
+    for (const cocktail of cocktails) {
+      let keep = true;
+
       if (filters.ingredient) {
         const normalizedFilter = filters.ingredient.toLowerCase().trim();
-        const hasIngredient = cocktail.ingredients.some((ing) => {
-          const ingName = ing.ingredient?.name as string | undefined;
-          return (
-            ingName && ingName.toLowerCase().trim().includes(normalizedFilter)
+        const expandedQuery =
+          await this.hierarchicalService.expandIngredientQuery(
+            normalizedFilter,
           );
+
+        const hasIngredient = cocktail.ingredients.some((ing) => {
+          const ingName = (ing.ingredient?.name || '').toLowerCase().trim();
+          return expandedQuery.some((eq) => ingName.includes(eq.toLowerCase()));
         });
-        if (!hasIngredient) return false;
+        if (!hasIngredient) keep = false;
       }
 
-      // Category filter (matches local category or external strCategory)
-      if (filters.category) {
+      if (keep && filters.category) {
         const target = filters.category.toLowerCase().trim();
         const cocktailCategory = (cocktail.category || '').toLowerCase().trim();
-        if (cocktailCategory !== target) return false;
+        if (cocktailCategory !== target) keep = false;
       }
 
-      // Glass type filter (matches local glassware or external strGlass)
-      if (filters.glassType) {
+      if (keep && filters.glassType) {
         const target = filters.glassType.toLowerCase().trim();
         const cocktailGlass = (cocktail.glass || '').toLowerCase().trim();
-        if (cocktailGlass !== target) return false;
+        if (cocktailGlass !== target) keep = false;
       }
 
-      // Alcoholic filter
-      if (filters.alcoholic !== undefined) {
-        if (cocktail.alcoholic !== filters.alcoholic) return false;
+      if (keep && filters.alcoholic !== undefined) {
+        if (cocktail.alcoholic !== filters.alcoholic) keep = false;
       }
 
-      // Ingredient count filters
       if (
-        filters.minIngredients !== undefined ||
-        filters.maxIngredients !== undefined
+        keep &&
+        (filters.minIngredients !== undefined ||
+          filters.maxIngredients !== undefined)
       ) {
         const ingredientCount = cocktail.ingredients.length;
         if (
           filters.minIngredients !== undefined &&
           ingredientCount < filters.minIngredients
         ) {
-          return false;
+          keep = false;
         }
         if (
           filters.maxIngredients !== undefined &&
           ingredientCount > filters.maxIngredients
         ) {
-          return false;
+          keep = false;
         }
       }
 
-      return true;
-    });
+      if (keep) {
+        filtered.push(cocktail);
+      }
+    }
+
+    return filtered;
   }
 
-  private applyStrictInclusionFilter(
+  private async applyStrictInclusionFilter(
     cocktails: FormattedCocktail[],
     requiredIngredients: string[],
-  ): FormattedCocktail[] {
-    const normalized = requiredIngredients.map((ing) =>
-      ing.toLowerCase().trim(),
-    );
+  ): Promise<FormattedCocktail[]> {
+    const filtered: FormattedCocktail[] = [];
 
-    return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
-        (ing.ingredient?.name || '').toLowerCase().trim(),
-      );
+    for (const cocktail of cocktails) {
+      let allSatisfied = true;
 
-      return normalized.every((req) =>
-        cocktailIngredientNames.some((cName) => cName.includes(req)),
-      );
-    });
+      for (const req of requiredIngredients) {
+        let foundMatch = false;
+        const expandedQuery =
+          await this.hierarchicalService.expandIngredientQuery(req);
+
+        for (const ci of cocktail.ingredients) {
+          const ciName = (ci.ingredient?.name || '').toLowerCase().trim();
+          if (expandedQuery.some((eq) => ciName.includes(eq.toLowerCase()))) {
+            foundMatch = true;
+            break;
+          }
+        }
+
+        if (!foundMatch) {
+          allSatisfied = false;
+          break;
+        }
+      }
+
+      if (allSatisfied) {
+        filtered.push(cocktail);
+      }
+    }
+
+    return filtered;
   }
 
   private async calculateMakeabilityScores(
@@ -433,9 +458,13 @@ export class CocktailAggregatorService {
           return (complexityB - complexityA) * order;
         }
 
-        case 'popularity':
-          // Placeholder - would need popularity data
-          return 0;
+        case 'popularity': {
+          const popularityA: number =
+            (a as any).ratingCount || a.metadata?.ingredientCount || 0;
+          const popularityB: number =
+            (b as any).ratingCount || b.metadata?.ingredientCount || 0;
+          return (popularityB - popularityA) * order;
+        }
 
         case 'name':
         default: {
@@ -548,40 +577,66 @@ export class CocktailAggregatorService {
     return Decimal.min(5, score).toNumber();
   }
 
-  private applyExclusionFilter(
+  private async applyExclusionFilter(
     cocktails: FormattedCocktail[],
     excludedIngredients: string[],
-  ): FormattedCocktail[] {
-    const normalized = excludedIngredients.map((ing) =>
-      ing.toLowerCase().trim(),
-    );
+  ): Promise<FormattedCocktail[]> {
+    const filtered: FormattedCocktail[] = [];
 
-    return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
-        (ing.ingredient?.name || '').toLowerCase().trim(),
-      );
+    for (const cocktail of cocktails) {
+      let containsExcluded = false;
 
-      return !normalized.some((excl) =>
-        cocktailIngredientNames.some((cName) => cName.includes(excl)),
-      );
-    });
+      for (const excl of excludedIngredients) {
+        const expandedQuery =
+          await this.hierarchicalService.expandIngredientQuery(excl);
+
+        for (const ci of cocktail.ingredients) {
+          const ciName = (ci.ingredient?.name || '').toLowerCase().trim();
+          if (expandedQuery.some((eq) => ciName.includes(eq.toLowerCase()))) {
+            containsExcluded = true;
+            break;
+          }
+        }
+        if (containsExcluded) break;
+      }
+
+      if (!containsExcluded) {
+        filtered.push(cocktail);
+      }
+    }
+
+    return filtered;
   }
 
-  private applyIngredientsAnyFilter(
+  private async applyIngredientsAnyFilter(
     cocktails: FormattedCocktail[],
     anyIngredients: string[],
-  ): FormattedCocktail[] {
-    const normalized = anyIngredients.map((ing) => ing.toLowerCase().trim());
+  ): Promise<FormattedCocktail[]> {
+    const filtered: FormattedCocktail[] = [];
 
-    return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
-        (ing.ingredient?.name || '').toLowerCase().trim(),
-      );
+    for (const cocktail of cocktails) {
+      let foundAny = false;
 
-      return normalized.some((req) =>
-        cocktailIngredientNames.some((cName) => cName.includes(req)),
-      );
-    });
+      for (const req of anyIngredients) {
+        const expandedQuery =
+          await this.hierarchicalService.expandIngredientQuery(req);
+
+        for (const ci of cocktail.ingredients) {
+          const ciName = (ci.ingredient?.name || '').toLowerCase().trim();
+          if (expandedQuery.some((eq) => ciName.includes(eq.toLowerCase()))) {
+            foundAny = true;
+            break;
+          }
+        }
+        if (foundAny) break;
+      }
+
+      if (foundAny) {
+        filtered.push(cocktail);
+      }
+    }
+
+    return filtered;
   }
 
   private generateSearchCacheKey(
@@ -651,12 +706,12 @@ export class CocktailAggregatorService {
 
     // 3. Apply filters
     if (options.filters) {
-      unifiedList = this.applyFilters(unifiedList, options.filters);
+      unifiedList = await this.applyFilters(unifiedList, options.filters);
     }
 
     // 3b. Apply strict inclusion filter (requires ALL specified ingredients)
     if (options.includeIngredients && options.includeIngredients.length > 0) {
-      unifiedList = this.applyStrictInclusionFilter(
+      unifiedList = await this.applyStrictInclusionFilter(
         unifiedList,
         options.includeIngredients,
       );
@@ -664,7 +719,7 @@ export class CocktailAggregatorService {
 
     // 3c. Apply exclusion filter (removes cocktails containing ANY excluded ingredient)
     if (options.excludeIngredients && options.excludeIngredients.length > 0) {
-      unifiedList = this.applyExclusionFilter(
+      unifiedList = await this.applyExclusionFilter(
         unifiedList,
         options.excludeIngredients,
       );
@@ -672,7 +727,7 @@ export class CocktailAggregatorService {
 
     // 3d. Apply OR filter (keeps cocktails containing AT LEAST ONE ingredient)
     if (options.ingredientsAny && options.ingredientsAny.length > 0) {
-      unifiedList = this.applyIngredientsAnyFilter(
+      unifiedList = await this.applyIngredientsAnyFilter(
         unifiedList,
         options.ingredientsAny,
       );

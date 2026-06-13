@@ -9,7 +9,9 @@ import {
   Res,
   Req,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import {
   ApiTags,
   ApiOperation,
@@ -80,6 +82,16 @@ export class AuthController {
   }
 
   @Public()
+  @Get('csrf')
+  @ApiOperation({ summary: 'Bootstrap CSRF token handshake' })
+  @ApiResponse({ status: 200, description: 'CSRF token initialized' })
+  bootstrapCsrf(@Res({ passthrough: true }) res: Response) {
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+    this.setCsrfCookie(res, csrfToken);
+    return { success: true };
+  }
+
+  @Public()
   @Post('refresh')
   @ApiOperation({ summary: 'Refresh access token' })
   @ApiResponse({ status: 200, description: 'Token successfully refreshed' })
@@ -95,6 +107,7 @@ export class AuthController {
     }
     const result = await this.authService.refreshToken(refreshToken);
     this.setRefreshCookie(res, result.refreshToken);
+    this.setCsrfCookie(res, result.csrfToken);
     return {
       accessToken: result.accessToken,
       accessTokenExpiresIn: result.accessTokenExpiresIn,
@@ -200,6 +213,30 @@ export class AuthController {
       lastLoginAt: req.user.lastLoginAt,
       createdAt: req.user.createdAt,
     };
+  }
+
+  @Post('email-change/request')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Initiate a secure email change request' })
+  async requestEmailChange(
+    @Request() req: AuthenticatedRequest,
+    @Body('newEmail') newEmail: string,
+  ) {
+    if (!newEmail) {
+      throw new BadRequestException('New email address is required');
+    }
+    return this.authService.initiateEmailChange(req.user.id, newEmail);
+  }
+
+  @Public()
+  @Post('email-change/confirm')
+  @ApiOperation({ summary: 'Confirm a pending secure email change' })
+  async confirmEmailChange(@Body('token') token: string) {
+    if (!token) {
+      throw new BadRequestException('Verification token is required');
+    }
+    return this.authService.confirmEmailChange(token);
   }
 
   private setRefreshCookie(res: Response, token: string): void {

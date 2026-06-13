@@ -51,18 +51,14 @@ describe('OrderStore', () => {
     store.startPolling('log-123');
 
     // First poll (immediate)
-    const req1 = httpMock.expectOne(
-      `${environment.apiUrl}/cocktails/preparations/log-123/status`,
-    );
+    const req1 = httpMock.expectOne(`${environment.apiUrl}/cocktails/preparations/log-123/status`);
     req1.flush({ status: 'queued', cocktailName: 'Martini' });
     expect(store.status()).toBe('queued');
 
     // Advance past the 1500ms interval for the second poll
     vi.advanceTimersByTime(1500);
 
-    const req2 = httpMock.expectOne(
-      `${environment.apiUrl}/cocktails/preparations/log-123/status`,
-    );
+    const req2 = httpMock.expectOne(`${environment.apiUrl}/cocktails/preparations/log-123/status`);
     req2.flush({ status: 'completed', cocktailName: 'Martini' });
 
     expect(store.status()).toBe('completed');
@@ -76,9 +72,7 @@ describe('OrderStore', () => {
 
     store.startPolling('log-123');
 
-    const req1 = httpMock.expectOne(
-      `${environment.apiUrl}/cocktails/preparations/log-123/status`,
-    );
+    const req1 = httpMock.expectOne(`${environment.apiUrl}/cocktails/preparations/log-123/status`);
     req1.flush({ status: 'cancelled', cocktailName: 'Martini' });
 
     expect(store.status()).toBe('cancelled');
@@ -95,11 +89,13 @@ describe('OrderStore', () => {
 
     const promise = store.cancel('log-123');
 
-    const req = httpMock.expectOne(
-      `${environment.apiUrl}/cocktails/preparations/log-123/cancel`,
-    );
+    const req = httpMock.expectOne(`${environment.apiUrl}/cocktails/preparations/log-123/cancel`);
     expect(req.request.method).toBe('POST');
-    req.flush({ message: 'Preparation cancelled successfully', preparationLogId: 'log-123', status: 'cancelled' });
+    req.flush({
+      message: 'Preparation cancelled successfully',
+      preparationLogId: 'log-123',
+      status: 'cancelled',
+    });
 
     await promise;
     expect(store.status()).toBe('cancelled');

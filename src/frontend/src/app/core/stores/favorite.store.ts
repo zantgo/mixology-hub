@@ -1,12 +1,12 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, catchError, throwError } from 'rxjs';
+import { tap, catchError, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface Favorite {
   id: string;
   cocktailId?: string;
-  externalCocktailId?: string;
+  external_cocktail_id?: string;
   cocktail?: {
     id: string;
     name: string;
@@ -45,7 +45,15 @@ export class FavoriteStore {
   }
 
   toggle(cocktailId: string): void {
-    const existing = this.items().find((f) => f.cocktailId === cocktailId);
+    const isExternal = cocktailId.startsWith('ext-');
+    const cleanId = isExternal ? cocktailId.slice(4) : cocktailId;
+
+    const existing = this.items().find(
+      (f) =>
+        (!isExternal && f.cocktailId === cocktailId) ||
+        (isExternal && f.external_cocktail_id === cleanId),
+    );
+
     if (existing) {
       this.remove(existing.id);
     } else {
@@ -54,18 +62,31 @@ export class FavoriteStore {
   }
 
   isFavorite(cocktailId: string): boolean {
-    return this.items().some((f) => f.cocktailId === cocktailId);
+    const isExternal = cocktailId.startsWith('ext-');
+    const cleanId = isExternal ? cocktailId.slice(4) : cocktailId;
+
+    return this.items().some(
+      (f) =>
+        (!isExternal && f.cocktailId === cocktailId) ||
+        (isExternal && f.external_cocktail_id === cleanId),
+    );
   }
 
   private add(cocktailId: string): void {
+    const isExternal = cocktailId.startsWith('ext-');
+    const cleanId = isExternal ? cocktailId.slice(4) : cocktailId;
+    const payload = isExternal ? { externalCocktailId: cleanId } : { cocktailId };
+
     const optimistic: Favorite = {
       id: 'temp-' + Date.now(),
-      cocktailId,
+      cocktailId: isExternal ? undefined : cocktailId,
+      external_cocktail_id: isExternal ? cleanId : undefined,
       createdAt: new Date().toISOString(),
     };
+
     this.items.update((arr) => [optimistic, ...arr]);
 
-    this.http.post<Favorite>(this.apiUrl, { cocktailId }).subscribe({
+    this.http.post<Favorite>(this.apiUrl, payload).subscribe({
       next: (favorite) => {
         this.items.update((arr) => arr.map((f) => (f.id === optimistic.id ? favorite : f)));
       },

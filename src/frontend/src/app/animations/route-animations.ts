@@ -11,5 +11,10 @@ const slideOut = [
 ];
 
 export const routeAnimations = trigger('routeAnimations', [
-  transition('* => *', [group([query(':enter', slideIn, { optional: true }), query(':leave', slideOut, { optional: true })])]),
+  transition('* => *', [
+    group([
+      query(':enter', slideIn, { optional: true }),
+      query(':leave', slideOut, { optional: true }),
+    ]),
+  ]),
 ]);

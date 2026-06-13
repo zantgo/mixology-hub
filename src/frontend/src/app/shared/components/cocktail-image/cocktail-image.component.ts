@@ -10,6 +10,7 @@ import { ImageService } from '../../../core/services/image.service';
         [src]="displayImageUrl"
         [alt]="altText"
         [class]="imageClass"
+        [class.error]="hasError"
         (error)="onImageError()"
         [style.width]="width"
         [style.height]="height"
@@ -31,7 +32,8 @@ import { ImageService } from '../../../core/services/image.service';
       }
 
       img.error {
-        opacity: 0.8;
+        opacity: 0.85;
+        filter: grayscale(20%);
       }
     `,
   ],
@@ -48,7 +50,8 @@ export class CocktailImageComponent implements OnInit, OnChanges {
 
   private currentImageUrl: string = '';
   private errorCount = 0;
-  private maxRetries = 3;
+  private readonly maxRetries = 2;
+  hasError = false;
 
   constructor(private imageService: ImageService) {}
 
@@ -62,6 +65,7 @@ export class CocktailImageComponent implements OnInit, OnChanges {
 
   private setImageUrl() {
     this.errorCount = 0;
+    this.hasError = false;
     this.currentImageUrl = this.imageService.getSafeCocktailImageUrl(
       this.imageFull,
       this.imageThumb,
@@ -74,7 +78,9 @@ export class CocktailImageComponent implements OnInit, OnChanges {
   }
 
   onImageError() {
+    this.hasError = true;
     if (this.errorCount >= this.maxRetries) {
+      this.currentImageUrl = 'assets/images/cocktails/default/cocktail-1.svg';
       return;
     }
     this.errorCount++;

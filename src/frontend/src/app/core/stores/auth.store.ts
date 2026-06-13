@@ -94,8 +94,18 @@ export class AuthStore {
           subscriber.complete();
         },
         error: () => {
-          subscriber.next(false);
-          subscriber.complete();
+          this.http
+            .get<{ success: boolean }>(`${this.apiUrl}/csrf`, { withCredentials: true })
+            .subscribe({
+              next: () => {
+                subscriber.next(false);
+                subscriber.complete();
+              },
+              error: () => {
+                subscriber.next(false);
+                subscriber.complete();
+              },
+            });
         },
       });
     });

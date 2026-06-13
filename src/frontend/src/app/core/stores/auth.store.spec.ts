@@ -18,10 +18,7 @@ describe('AuthStore', () => {
   beforeEach(() => {
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [
-        AuthStore,
-        { provide: Router, useValue: { navigate: vi.fn() } },
-      ],
+      providers: [AuthStore, { provide: Router, useValue: { navigate: vi.fn() } }],
     });
 
     store = TestBed.inject(AuthStore);
@@ -52,10 +49,7 @@ describe('AuthStore', () => {
     });
 
     const req = httpMock.expectOne(`${environment.apiUrl}/auth/login`);
-    req.flush(
-      { message: 'Invalid credentials' },
-      { status: 401, statusText: 'Unauthorized' },
-    );
+    req.flush({ message: 'Invalid credentials' }, { status: 401, statusText: 'Unauthorized' });
 
     expect(store.isAuthenticated()).toBe(false);
     expect(store.user()).toBeNull();

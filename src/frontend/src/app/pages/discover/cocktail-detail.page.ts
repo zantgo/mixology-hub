@@ -1,10 +1,12 @@
-import { Component, OnInit, OnDestroy, inject, effect } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, effect, signal } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { CocktailStore } from '../../core/stores/cocktail.store';
 import { InventoryStore } from '../../core/stores/inventory.store';
 import { OrderStore } from '../../core/stores/order.store';
 import { UiStore } from '../../core/stores/ui.store';
+import { AuthStore } from '../../core/stores/auth.store';
 import { CocktailImageComponent } from '../../shared/components/cocktail-image/cocktail-image.component';
 import { FavoriteButtonComponent } from '../../features/shared/favorite-button.component';
 import { StarRatingComponent } from '../../shared/components/star-rating/star-rating.component';
@@ -13,6 +15,8 @@ import { ButtonComponent } from '../../shared/components/button/button.component
 import { ModalComponent } from '../../shared/components/modal/modal.component';
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { IconComponent } from '../../shared/components/icon/icon.component';
+import { UnitConvertPipe } from '../../shared/pipes/unit-convert.pipe';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-cocktail-detail-page',
@@ -27,6 +31,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
     ModalComponent,
     SkeletonComponent,
     IconComponent,
+    UnitConvertPipe,
   ],
   template: `
     @if (cocktailStore.loading() || !cocktail()) {
@@ -65,6 +70,10 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
                 <app-star-rating
                   [value]="cocktail()!.rating ?? 0"
                   [count]="cocktail()!.ratingCount ?? 0"
+                  [cocktailId]="cocktail()!.id"
+                  [interactive]="true"
+                  [userRating]="myRating()"
+                  (rated)="onRated($event)"
                 />
               </span>
             }
@@ -96,9 +105,20 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
                     <app-icon name="check-circle" [size]="18" [color]="'var(--color-success)'" />
                   }
                 </span>
-                <span class="ingredient-name">{{
-                  ing.measure || ing.amount + ' ' + ing.unit
-                }}</span>
+
+                <span class="ingredient-name">
+                  @if (ing.amount && ing.unit) {
+                    @if (uiStore.unitSystem() === 'imperial' && ing.unit === 'ml') {
+                      {{ ing.amount | unitConvert: 'ml' : 'oz' }} oz
+                    } @else if (uiStore.unitSystem() === 'metric' && ing.unit === 'oz') {
+                      {{ ing.amount | unitConvert: 'oz' : 'ml' }} ml
+                    } @else {
+                      {{ ing.amount }} {{ ing.unit }}
+                    }
+                  } @else {
+                    {{ ing.measure }}
+                  }
+                </span>
                 <span class="ingredient-type text-truncate">{{
                   ing.ingredient?.name || 'Unknown'
                 }}</span>
@@ -119,6 +139,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
             [count]="cocktail()!.ratingCount ?? 0"
             [cocktailId]="cocktail()!.id"
             [interactive]="true"
+            [userRating]="myRating()"
             (rated)="onRated($event)"
           />
         </section>
@@ -144,7 +165,11 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               }
             </app-button>
             @if (orderStore.status() === 'queued' || orderStore.status() === 'evaluating') {
-              <app-button variant="outline" (action)="onCancel()" [disabled]="orderStore.cancelling()">
+              <app-button
+                variant="outline"
+                (action)="onCancel()"
+                [disabled]="orderStore.cancelling()"
+              >
                 Cancel Order
               </app-button>
             }
@@ -318,14 +343,17 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
 })
 export class CocktailDetailPage implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
+  private http = inject(HttpClient);
   private announcer = inject(LiveAnnouncer);
   readonly cocktailStore = inject(CocktailStore);
   readonly inventoryStore = inject(InventoryStore);
   readonly orderStore = inject(OrderStore);
   readonly uiStore = inject(UiStore);
+  readonly authStore = inject(AuthStore);
 
   showPrepareModal = false;
   servings = 1;
+  myRating = signal<number>(0);
 
   constructor() {
     effect(() => {
@@ -371,11 +399,23 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
     const id = this.route.snapshot.paramMap.get('id');
     if (id) {
       this.cocktailStore.loadCocktail(id);
+      this.loadUserRating(id);
     }
   }
 
   ngOnDestroy(): void {
     this.orderStore.stopPolling();
+  }
+
+  loadUserRating(id: string): void {
+    if (!this.authStore.isAuthenticated()) return;
+    this.http.get<number>(`${environment.apiUrl}/cocktails/${id}/my-rating`).subscribe({
+      next: (rating) => {
+        if (rating) {
+          this.myRating.set(rating);
+        }
+      },
+    });
   }
 
   isMissing(name?: string): boolean {
@@ -387,6 +427,7 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
   }
 
   onRated(event: { score: number; average: number; count: number }): void {
+    this.myRating.set(event.score);
     this.uiStore.addToast({
       id: crypto.randomUUID(),
       message: `Rated ${event.score} star${event.score > 1 ? 's' : ''}!`,

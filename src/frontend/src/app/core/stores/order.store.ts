@@ -34,6 +34,7 @@ export class OrderStore {
   private http = inject(HttpClient);
 
   readonly currentLogId = signal<string | null>(null);
+  readonly currentCocktailId = signal<string | null>(null);
   readonly status = signal<PreparationStatus | null>(null);
   readonly cocktailName = signal<string | null>(null);
   readonly polling = signal<boolean>(false);
@@ -73,6 +74,7 @@ export class OrderStore {
       .then((res) => {
         if (!res) throw new Error('No response from prepare endpoint');
         this.currentLogId.set(res.preparationLogId);
+        this.currentCocktailId.set(cocktailId);
         this.status.set('queued');
         return res;
       });
@@ -151,6 +153,7 @@ export class OrderStore {
   reset(): void {
     this.stopPolling();
     this.currentLogId.set(null);
+    this.currentCocktailId.set(null);
     this.status.set(null);
     this.cocktailName.set(null);
     this.undoing.set(false);

@@ -126,6 +126,13 @@ export class User {
   token_version: number;
 
   @Expose()
+  @Column({ name: 'temp_new_email', nullable: true })
+  tempNewEmail: string | null;
+
+  @Column({ name: 'email_change_token', nullable: true })
+  emailChangeToken: string | null;
+
+  @Expose()
   @Index()
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

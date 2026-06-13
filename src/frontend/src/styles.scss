@@ -409,6 +409,14 @@ ol {
     border-color: var(--color-success);
   }
 
+  &.valid {
+    border-color: var(--color-success);
+  }
+
+  &.invalid {
+    border-color: var(--color-error);
+  }
+
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;

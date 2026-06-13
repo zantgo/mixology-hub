@@ -122,6 +122,53 @@ export class EmailService {
     });
   }
 
+  async sendEmailChangeVerificationEmail(
+    to: string,
+    token: string,
+  ): Promise<void> {
+    const baseUrl = this.configService.get<string>(
+      'APP_BASE_URL',
+      'http://localhost:4200',
+    );
+    const verifyLink = `${baseUrl}/auth/confirm-email-change?token=${encodeURIComponent(token)}`;
+    const from = this.getFrom();
+
+    const html = `
+      <h2>Verify Your New Email Address</h2>
+      <p>You requested to change your MixologyHub account email to this address.</p>
+      <p><a href="${verifyLink}">Click here to verify and activate your new email</a></p>
+      <p>If you did not request this, you can safely ignore this email.</p>
+    `;
+
+    await this.sendMail({
+      from,
+      to,
+      subject: 'MixologyHub — Verify New Email',
+      html,
+    });
+  }
+
+  async sendEmailChangeNoticeEmail(
+    to: string,
+    proposedEmail: string,
+  ): Promise<void> {
+    const from = this.getFrom();
+
+    const html = `
+      <h2>Security Alert: Email Change Requested</h2>
+      <p>A request was made to change your MixologyHub account email to <strong>${proposedEmail}</strong>.</p>
+      <p>We have sent a verification link to that new address to complete the process.</p>
+      <p><strong>If you did not make this request</strong>, please change your password and contact support immediately to secure your account.</p>
+    `;
+
+    await this.sendMail({
+      from,
+      to,
+      subject: 'MixologyHub — Security Alert: Email Change',
+      html,
+    });
+  }
+
   private async sendMail(options: {
     from: string;
     to: string;

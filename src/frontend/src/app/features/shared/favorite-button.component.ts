@@ -52,11 +52,21 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
       }
 
       @keyframes heartBounce {
-        0% { transform: scale(1); }
-        30% { transform: scale(1.3); }
-        50% { transform: scale(0.9); }
-        70% { transform: scale(1.1); }
-        100% { transform: scale(1); }
+        0% {
+          transform: scale(1);
+        }
+        30% {
+          transform: scale(1.3);
+        }
+        50% {
+          transform: scale(0.9);
+        }
+        70% {
+          transform: scale(1.1);
+        }
+        100% {
+          transform: scale(1);
+        }
       }
 
       .heart-bounce {

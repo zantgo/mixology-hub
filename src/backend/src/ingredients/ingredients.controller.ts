@@ -9,7 +9,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { IngredientsService } from './ingredients.service';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
@@ -41,8 +46,16 @@ export class IngredientsController {
   @Public()
   @Get()
   @ApiOperation({ summary: 'Get all available ingredients with pagination' })
-  findAll(@Query() paginationQuery: PaginationQueryDto) {
-    return this.ingredientsService.findAll(paginationQuery);
+  @ApiQuery({
+    name: 'name',
+    required: false,
+    description: 'Search term for ingredient autocomplete',
+  })
+  findAll(
+    @Query() paginationQuery: PaginationQueryDto,
+    @Query('name') name?: string,
+  ) {
+    return this.ingredientsService.findAll(paginationQuery, name);
   }
 
   @Public()

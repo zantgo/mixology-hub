@@ -21,6 +21,7 @@ export interface PrepareJobPayload {
   batchOrders?: Array<{
     cocktailId: string;
     servings?: number;
+    totalVolumeMl?: number;
     force?: boolean;
   }>;
 }
@@ -165,25 +166,56 @@ export class BarOrdersProcessor extends WorkerHost {
             totalAmount = amountPerServing.times(new Decimal(servings));
           }
 
-          const requiredName = req.ingredient.name.toLowerCase().trim();
+          const descendantRows = await transactionalEntityManager.query(
+            `
+            WITH RECURSIVE descendants AS (
+              SELECT id, name, synonyms FROM ingredients WHERE id = $1
+              UNION
+              SELECT i.id, i.name, i.synonyms FROM ingredients i
+              INNER JOIN descendants d ON i.parent_id = d.id
+            )
+            SELECT id, name, synonyms FROM descendants;
+          `,
+            [req.ingredient.id],
+          );
+
+          const eligibleIngredientIds = new Set<string>(
+            descendantRows.map((r: any) => r.id),
+          );
+          const eligibleNames = new Set<string>(
+            descendantRows.map((r: any) => r.name.toLowerCase().trim()),
+          );
+          const eligibleSynonyms = new Set<string>();
+          for (const r of descendantRows) {
+            if (r.synonyms) {
+              r.synonyms
+                .split(',')
+                .forEach((s: string) =>
+                  eligibleSynonyms.add(s.toLowerCase().trim()),
+                );
+            }
+          }
 
           const eligible: Array<{ rowId: string; quantity: Decimal }> = [];
           for (const [rowId, entry] of remainingStock) {
             const row = entry.row;
             if (!row.ingredient) continue;
 
+            const rowIdMatch = eligibleIngredientIds.has(row.ingredient.id);
             const rowName = row.ingredient.name.toLowerCase().trim();
+            const nameMatch =
+              eligibleNames.has(rowName) || eligibleSynonyms.has(rowName);
+
             const synNames = row.ingredient.synonyms
               ? row.ingredient.synonyms
                   .split(',')
-                  .map((s) => s.toLowerCase().trim())
+                  .map((s: string) => s.toLowerCase().trim())
               : [];
+            const synonymMatch = synNames.some(
+              (s: string) => eligibleNames.has(s) || eligibleSynonyms.has(s),
+            );
 
-            if (
-              row.ingredient.id === req.ingredient.id ||
-              rowName === requiredName ||
-              synNames.includes(requiredName)
-            ) {
+            if (rowIdMatch || nameMatch || synonymMatch) {
               eligible.push({ rowId, quantity: entry.quantity });
             }
           }
@@ -358,19 +390,49 @@ export class BarOrdersProcessor extends WorkerHost {
             throw new Error(`Cocktail ${order.cocktailId} not found in batch`);
           }
 
+          const partBased = cocktail.ingredients.some(
+            (i) => i.unit === 'part' || i.unit === 'parts',
+          );
+          let partSize = new Decimal(30);
+          if (partBased) {
+            const totalParts = cocktail.ingredients.reduce(
+              (sum, i) =>
+                sum.plus(
+                  i.unit === 'part' || i.unit === 'parts'
+                    ? new Decimal(i.amount)
+                    : new Decimal(0),
+                ),
+              new Decimal(0),
+            );
+            if (order.totalVolumeMl && totalParts.gt(0)) {
+              partSize = new Decimal(order.totalVolumeMl).div(totalParts);
+            }
+          }
+
           for (const req of cocktail.ingredients) {
             if (!req.ingredient?.id) continue;
 
-            const safeAmount = req.amount ? req.amount : new Decimal(0);
-            const amountPerServing = this.unitConverter.convert(
-              safeAmount,
-              req.unit,
-              req.ingredient.baseUnit,
-              req.ingredient,
-            );
-            const totalAmount = amountPerServing.times(
-              new Decimal(order.servings || 1),
-            );
+            let totalAmount: Decimal;
+            if (req.unit === 'part' || req.unit === 'parts') {
+              const calculatedMl = partSize.times(new Decimal(req.amount));
+              totalAmount = this.unitConverter.convert(
+                calculatedMl,
+                'ml',
+                req.ingredient.baseUnit,
+                req.ingredient,
+              );
+            } else {
+              const safeAmount = req.amount ? req.amount : new Decimal(0);
+              const amountPerServing = this.unitConverter.convert(
+                safeAmount,
+                req.unit,
+                req.ingredient.baseUnit,
+                req.ingredient,
+              );
+              totalAmount = amountPerServing.times(
+                new Decimal(order.servings || 1),
+              );
+            }
 
             const barStock = await tx
               .createQueryBuilder(BarInventory, 'bi')

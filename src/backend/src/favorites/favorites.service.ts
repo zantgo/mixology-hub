@@ -172,9 +172,24 @@ export class FavoritesService {
       where: { user: { id: userId }, external_cocktail_id: externalId },
     });
     if (favorite) {
-      favorite.external_cocktail_id = null;
-      favorite.cocktail = { id: localId } as Cocktail;
-      await this.favoriteRepository.save(favorite);
+      try {
+        favorite.external_cocktail_id = null;
+        favorite.cocktail = { id: localId } as Cocktail;
+        await this.favoriteRepository.save(favorite);
+      } catch (error: any) {
+        if (
+          error?.code === '23505' ||
+          error?.message?.includes('unique') ||
+          error?.message?.includes('duplicate')
+        ) {
+          await this.favoriteRepository.remove(favorite);
+          this.logger.log(
+            `Silently resolved favorite migration collision for user ${userId} and cocktail ${localId}. Redundant favorite cleared.`,
+          );
+        } else {
+          throw error;
+        }
+      }
     }
   }
 }

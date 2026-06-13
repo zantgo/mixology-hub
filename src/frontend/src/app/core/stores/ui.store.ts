@@ -1,6 +1,7 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 
 export type Theme = 'light' | 'dark' | 'system';
+export type UnitSystem = 'metric' | 'imperial';
 
 export interface Toast {
   id: string;
@@ -15,8 +16,10 @@ export interface Toast {
 @Injectable({ providedIn: 'root' })
 export class UiStore {
   private readonly THEME_KEY = 'mixologyhub-theme';
+  private readonly UNIT_KEY = 'mixologyhub-unit';
 
   readonly theme = signal<Theme>(this.getInitialTheme());
+  readonly unitSystem = signal<UnitSystem>(this.getInitialUnitSystem());
   readonly sidebarOpen = signal<boolean>(false);
   readonly online = signal<boolean>(navigator.onLine);
   readonly toasts = signal<Toast[]>([]);
@@ -30,6 +33,11 @@ export class UiStore {
     this.theme.set(theme);
     localStorage.setItem(this.THEME_KEY, theme);
     this.applyTheme(theme);
+  }
+
+  setUnitSystem(unit: UnitSystem): void {
+    this.unitSystem.set(unit);
+    localStorage.setItem(this.UNIT_KEY, unit);
   }
 
   toggleSidebar(): void {
@@ -55,6 +63,14 @@ export class UiStore {
       return stored;
     }
     return 'dark';
+  }
+
+  private getInitialUnitSystem(): UnitSystem {
+    const stored = localStorage.getItem(this.UNIT_KEY);
+    if (stored === 'metric' || stored === 'imperial') {
+      return stored;
+    }
+    return 'metric';
   }
 
   private applyTheme(theme: Theme): void {

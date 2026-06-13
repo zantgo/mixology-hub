@@ -48,15 +48,24 @@ export class AiAuditInterceptor implements NestInterceptor {
     }
 
     return next.handle().pipe(
-      tap(() => {
-        this.saveAudit(toolName, args, 'success', isWrite, userId).catch(
-          (err) =>
-            this.logger.error(`Failed to save audit log: ${err.message}`),
+      tap((responseBody) => {
+        this.saveAudit(
+          toolName,
+          args,
+          responseBody,
+          'success',
+          isWrite,
+          userId,
+        ).catch((err) =>
+          this.logger.error(`Failed to save audit log: ${err.message}`),
         );
       }),
       catchError((error) => {
-        this.saveAudit(toolName, args, 'error', isWrite, userId).catch((err) =>
-          this.logger.error(`Failed to save audit log: ${err.message}`),
+        this.saveAudit(toolName, args, error, 'error', isWrite, userId).catch(
+          (err) =>
+            this.logger.error(
+              `Failed to save audit log on error: ${err.message}`,
+            ),
         );
         return throwError(() => error);
       }),
@@ -66,18 +75,38 @@ export class AiAuditInterceptor implements NestInterceptor {
   private async saveAudit(
     toolName: string,
     args: Record<string, unknown>,
+    resultPayload: any,
     status: 'success' | 'error',
     isWrite: boolean,
     userId: string | null,
   ): Promise<void> {
+    const estimatedTokens = this.calculateEstimatedTokens(args, resultPayload);
+
     const audit = this.auditRepository.create({
       toolName,
       arguments: args,
       resultStatus: status,
       isWrite,
+      tokensUsed: estimatedTokens,
       triggeredById: userId,
     });
     await this.auditRepository.save(audit);
+  }
+
+  private calculateEstimatedTokens(
+    args: Record<string, unknown>,
+    resultPayload: any,
+  ): number {
+    try {
+      const serializedInput = JSON.stringify(args || {});
+      const serializedOutput = resultPayload
+        ? JSON.stringify(resultPayload)
+        : '';
+      const totalCharacters = serializedInput.length + serializedOutput.length;
+      return Math.ceil(totalCharacters / 4);
+    } catch {
+      return 0;
+    }
   }
 
   private sanitizeArgs(body: any): Record<string, unknown> {

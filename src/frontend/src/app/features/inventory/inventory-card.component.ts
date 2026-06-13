@@ -1,6 +1,7 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
 import Decimal from 'decimal.js';
 import { InventoryStore, InventoryItem } from '../../core/stores/inventory.store';
+import { AuthStore } from '../../core/stores/auth.store';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { ProgressBarComponent } from '../../shared/components/progress-bar/progress-bar.component';
 import { BadgeComponent } from '../../shared/components/badge/badge.component';
@@ -21,20 +22,24 @@ import { BadgeComponent } from '../../shared/components/badge/badge.component';
           </div>
 
           <div class="quantity-controls">
-            <button
-              class="qty-btn"
-              (click)="adjust(-1)"
-              [disabled]="item.quantity <= 0"
-              aria-label="Decrease quantity"
-            >
-              <app-icon name="minus" [size]="16" />
-            </button>
+            @if (authStore.isAdmin()) {
+              <button
+                class="qty-btn"
+                (click)="adjust(-1)"
+                [disabled]="item.quantity <= 0"
+                aria-label="Decrease quantity"
+              >
+                <app-icon name="minus" [size]="16" />
+              </button>
+            }
             <span class="qty-value">
               {{ item.quantity }} <span class="qty-unit">{{ item.unit }}</span>
             </span>
-            <button class="qty-btn" (click)="adjust(1)" aria-label="Increase quantity">
-              <app-icon name="plus" [size]="16" />
-            </button>
+            @if (authStore.isAdmin()) {
+              <button class="qty-btn" (click)="adjust(1)" aria-label="Increase quantity">
+                <app-icon name="plus" [size]="16" />
+              </button>
+            }
           </div>
         </div>
 
@@ -45,13 +50,15 @@ import { BadgeComponent } from '../../shared/components/badge/badge.component';
           </span>
         }
 
-        <button
-          class="remove-btn"
-          (click)="remove.emit(item.id)"
-          aria-label="Remove {{ item.name }} from inventory"
-        >
-          <app-icon name="trash-2" [size]="16" />
-        </button>
+        @if (authStore.isAdmin()) {
+          <button
+            class="remove-btn"
+            (click)="remove.emit(item.id)"
+            aria-label="Remove {{ item.name }} from inventory"
+          >
+            <app-icon name="trash-2" [size]="16" />
+          </button>
+        }
       </div>
     </div>
   `,
@@ -167,8 +174,10 @@ export class InventoryCardComponent {
   @Output() quantityChange = new EventEmitter<{ id: string; quantity: number }>();
 
   private inventoryStore = inject(InventoryStore);
+  readonly authStore = inject(AuthStore);
 
   adjust(delta: number): void {
+    if (!this.authStore.isAdmin()) return;
     const current = new Decimal(this.item.quantity);
     const newQty = current.plus(delta);
     const finalQty = newQty.isNegative() ? 0 : newQty.toNumber();

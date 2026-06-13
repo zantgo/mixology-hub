@@ -42,7 +42,9 @@ import { ButtonComponent } from '../../shared/components/button/button.component
         @if (archivedFavorites().length > 0) {
           <div class="archived-section">
             <h2 class="archived-section-title">Archived Recipes</h2>
-            <p class="archived-section-subtitle">The following recipes have been deleted or archived by their authors.</p>
+            <p class="archived-section-subtitle">
+              The following recipes have been deleted or archived by their authors.
+            </p>
             <div class="grid">
               @for (item of archivedFavorites(); track item.id) {
                 @if (item.cocktail) {
@@ -118,17 +120,13 @@ export class FavoritesPage implements OnInit {
   readonly favoriteStore = inject(FavoriteStore);
 
   readonly activeFavorites = computed(() =>
-    this.favoriteStore.items().filter(
-      (item) =>
-        (item.cocktail && !item.cocktail.isDeleted) ||
-        item.external_cocktail_data
-    )
+    this.favoriteStore
+      .items()
+      .filter((item) => (item.cocktail && !item.cocktail.isDeleted) || item.external_cocktail_data),
   );
 
   readonly archivedFavorites = computed(() =>
-    this.favoriteStore.items().filter(
-      (item) => item.cocktail && item.cocktail.isDeleted
-    )
+    this.favoriteStore.items().filter((item) => item.cocktail && item.cocktail.isDeleted),
   );
 
   ngOnInit(): void {

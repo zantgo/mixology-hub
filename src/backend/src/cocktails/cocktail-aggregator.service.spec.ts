@@ -91,6 +91,11 @@ describe('CocktailAggregatorService', () => {
 
     const hierarchicalService = {
       findBestMatch: jest.fn().mockResolvedValue(null),
+      expandIngredientQuery: jest
+        .fn()
+        .mockImplementation((term: string) =>
+          Promise.resolve([term.toLowerCase().trim()]),
+        ),
     };
 
     const measureParser = {

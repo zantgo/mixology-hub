@@ -4,10 +4,15 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  NotFoundException,
+  Logger,
+  Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { SystemSettings } from '../users/entities/system-settings.entity';
@@ -35,6 +40,8 @@ interface JwtPayload {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -47,6 +54,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async register(registerDto: RegisterDto) {
@@ -289,12 +297,19 @@ export class AuthService {
     }
 
     // Check global token salt version (invalidates sessions on emergency admin revocation)
-    const saltSetting = await this.systemSettingsRepository.findOne({
-      where: { settingKey: 'global_token_salt_version' },
-    });
-    const currentSaltVersion = saltSetting
-      ? parseInt(saltSetting.settingValue, 10) || 0
-      : 0;
+    // Retrieve from Redis cache (60s TTL) to prevent DB bottleneck on every request
+    const cacheKey = 'setting:global_token_salt_version';
+    let saltVersionString = await this.cacheManager.get<string>(cacheKey);
+
+    if (!saltVersionString) {
+      const saltSetting = await this.systemSettingsRepository.findOne({
+        where: { settingKey: 'global_token_salt_version' },
+      });
+      saltVersionString = saltSetting ? saltSetting.settingValue : '0';
+      await this.cacheManager.set(cacheKey, saltVersionString, 60000);
+    }
+
+    const currentSaltVersion = parseInt(saltVersionString, 10) || 0;
     if (
       payload.saltVersion !== undefined &&
       payload.saltVersion < currentSaltVersion
@@ -605,7 +620,11 @@ export class AuthService {
     return { success: true, message: 'Account unlocked successfully' };
   }
 
-  async revokeAllSessions(): Promise<{ revoked: number }> {
+  async revokeAllSessions(
+    adminId: string,
+    clientIp: string,
+    reason: string,
+  ): Promise<{ revoked: number }> {
     const SETTING_KEY = 'global_token_salt_version';
 
     let setting = await this.systemSettingsRepository.findOne({
@@ -624,11 +643,86 @@ export class AuthService {
 
     await this.systemSettingsRepository.save(setting);
 
+    await this.cacheManager.del('setting:global_token_salt_version');
+
     const result = await this.refreshTokenRepository.update(
       {},
       { isRevoked: true },
     );
 
+    this.logger.warn({
+      event: 'emergency_global_session_revocation',
+      adminId,
+      clientIp,
+      reason,
+      revokedCount: result.affected || 0,
+      timestamp: new Date().toISOString(),
+      alert: true,
+    });
+
     return { revoked: result.affected || 0 };
+  }
+
+  async initiateEmailChange(
+    userId: string,
+    newEmail: string,
+  ): Promise<{ message: string }> {
+    const normalizedEmail = newEmail.toLowerCase().trim();
+    const existing = await this.userRepository.findOne({
+      where: { email: normalizedEmail },
+    });
+    if (existing) {
+      throw new ConflictException('Email already registered');
+    }
+
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.tempNewEmail = normalizedEmail;
+    user.emailChangeToken = this.hashToken(rawToken);
+    await this.userRepository.save(user);
+
+    await this.emailService.sendEmailChangeVerificationEmail(
+      normalizedEmail,
+      rawToken,
+    );
+
+    await this.emailService.sendEmailChangeNoticeEmail(
+      user.email,
+      normalizedEmail,
+    );
+
+    return { message: 'Verification email sent to the new email address.' };
+  }
+
+  async confirmEmailChange(
+    token: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const tokenHash = this.hashToken(token);
+    const user = await this.userRepository.findOne({
+      where: { emailChangeToken: tokenHash },
+    });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired email change token');
+    }
+
+    const oldEmail = user.email;
+    user.email = user.tempNewEmail!;
+    user.tempNewEmail = null;
+    user.emailChangeToken = null;
+    user.emailVerified = true;
+    user.token_version += 1;
+
+    await this.userRepository.save(user);
+    await this.blacklistAllUserTokens(user.id);
+
+    return {
+      success: true,
+      message: `Your email has been successfully changed from ${oldEmail} to ${user.email}. Please log in again.`,
+    };
   }
 }

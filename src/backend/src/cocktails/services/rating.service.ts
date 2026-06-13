@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Decimal } from 'decimal.js';
@@ -7,6 +7,7 @@ import { CocktailRating } from '../entities/cocktail-rating.entity';
 import { ExternalCocktailRating } from '../entities/external-cocktail-rating.entity';
 import { User } from '../../users/entities/user.entity';
 import { RateCocktailDto } from '../dto/rate-cocktail.dto';
+import { EnhancedTheCocktailDbService } from '../../external/the-cocktail-db/enhanced-cocktail-db.service';
 
 @Injectable()
 export class RatingService {
@@ -19,6 +20,7 @@ export class RatingService {
     private ratingRepository: Repository<CocktailRating>,
     @InjectRepository(ExternalCocktailRating)
     private externalRatingRepository: Repository<ExternalCocktailRating>,
+    private readonly externalCocktailService: EnhancedTheCocktailDbService,
   ) {}
 
   async rateCocktail(
@@ -54,6 +56,16 @@ export class RatingService {
     const externalId = cocktailId.startsWith('ext-')
       ? cocktailId.slice(4)
       : cocktailId;
+
+    // Verify external cocktail existence before saving rating to prevent database pollution
+    const externalCocktail =
+      await this.externalCocktailService.getCocktailById(externalId);
+    if (!externalCocktail) {
+      throw new NotFoundException(
+        `External cocktail with ID ${externalId} not found`,
+      );
+    }
+
     return this.rateExternalCocktail(user, externalId, ratingDto.score);
   }
 

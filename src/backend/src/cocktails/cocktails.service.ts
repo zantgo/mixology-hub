@@ -10,6 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import axios from 'axios';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
 import { Cocktail } from './entities/cocktail.entity';
@@ -22,6 +23,7 @@ import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanc
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { MeasureParserService } from '../utils/measure-parser.service';
 import { FavoritesService } from '../favorites/favorites.service';
+import { ImageService } from '../images/image.service';
 import type { CocktailDbDrink } from './cocktail-aggregator.service';
 
 @Injectable()
@@ -44,6 +46,7 @@ export class CocktailsService {
     private readonly measureParser: MeasureParserService,
     @Inject(forwardRef(() => FavoritesService))
     private readonly favoritesService: FavoritesService,
+    private readonly imageService: ImageService,
   ) {}
 
   async create(
@@ -198,6 +201,10 @@ export class CocktailsService {
         );
       }
 
+      const imagePaths = await this.ingestExternalImage(
+        externalDrink.strDrinkThumb || '',
+      );
+
       cocktail = await this.create(
         {
           name: externalDrink.strDrink,
@@ -209,6 +216,8 @@ export class CocktailsService {
           ingredients: resolvedIngredients,
           isPublic: true,
           parentExternalId: cocktailId,
+          imageFull: imagePaths.full || undefined,
+          imageThumb: imagePaths.thumb || undefined,
         },
         bartenderId,
       );
@@ -282,17 +291,52 @@ export class CocktailsService {
     };
   }
 
+  private async ingestExternalImage(
+    url: string,
+  ): Promise<{ full: string | null; thumb: string | null }> {
+    if (!url || !url.startsWith('https://')) {
+      return { full: null, thumb: null };
+    }
+
+    const MAX_CONTENT_LENGTH = 5 * 1024 * 1024;
+    const TIMEOUT_MS = 3000;
+
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: TIMEOUT_MS,
+        maxContentLength: MAX_CONTENT_LENGTH,
+      });
+
+      const contentType: string | undefined = Array.isArray(
+        response.headers['content-type'],
+      )
+        ? response.headers['content-type'][0]
+        : (response.headers['content-type'] as string | undefined);
+      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!contentType || !allowedTypes.includes(contentType)) {
+        return { full: null, thumb: null };
+      }
+
+      const buffer = Buffer.from(response.data as ArrayBuffer);
+      return await this.imageService.processAndSaveBuffer(buffer, contentType);
+    } catch {
+      return { full: null, thumb: null };
+    }
+  }
+
   async undo(logId: string) {
     interface UndoQueryRow {
       id: string;
       bartender_id: string | null;
+      cocktail_id: string | null;
       status: string;
       undone: boolean;
     }
 
     const result: UndoQueryRow[] =
       await this.preparationLogRepository.manager.query<UndoQueryRow>(
-        `UPDATE preparation_log
+        `UPDATE preparation_logs
        SET undone = true
        WHERE id = $1
          AND status = 'completed'
@@ -323,8 +367,10 @@ export class CocktailsService {
 
     const log = result[0];
 
+    const jobType = log.cocktail_id ? 'undo' : 'batch-undo';
+
     const job = await this.barOrdersQueue.add('undo-preparation', {
-      type: 'undo',
+      type: jobType,
       bartenderId: log.bartender_id || undefined,
       preparationLogId: log.id,
     });

@@ -1,4 +1,13 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, ElementRef, inject } from '@angular/core';
+import {
+  Component,
+  Input,
+  Output,
+  EventEmitter,
+  OnChanges,
+  SimpleChanges,
+  ElementRef,
+  inject,
+} from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({

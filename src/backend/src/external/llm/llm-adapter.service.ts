@@ -41,7 +41,6 @@ export class LlmAdapterService implements IAiProvider {
     const difficulty = options?.difficulty
       ? ` suitable for ${options.difficulty} skill level`
       : '';
-    const language = options?.language || 'English';
 
     const prompt = `Act as a professional bartender. Create a cocktail${theme}${difficulty} using ONLY these ingredients: ${sanitizedIngredients.join(', ')}. 
     Return ONLY a raw JSON object with this structure: {
@@ -254,12 +253,16 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
     ];
 
     const MAX_RESPONSE_SIZE = 50 * 1024;
+    const MAX_TURNS = 5;
+    let turns = 0;
 
-    try {
-      const headers = {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      };
+    const headers = {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    };
+
+    while (turns < MAX_TURNS) {
+      turns++;
       const response = await firstValueFrom(
         this.httpService.post(
           apiUrl,
@@ -278,7 +281,6 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
       const choice = response.data.choices[0];
       const message = choice.message;
 
-      // Handle tool calls loop
       if (message.tool_calls && message.tool_calls.length > 0) {
         messages.push(message);
 
@@ -293,35 +295,21 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
             content: JSON.stringify(toolResult),
           });
         }
-
-        // Get final response after tool calls
-        const followUpResponse = await firstValueFrom(
-          this.httpService.post(
-            apiUrl,
-            {
-              model,
-              messages,
-              max_tokens: options?.maxTokens || 2000,
-              temperature: options?.temperature || 0.7,
-            },
-            { headers },
-          ),
-        );
-
-        const finalChoice = followUpResponse.data.choices[0];
-        const finalContent = finalChoice.message.content;
-        return this.extractRecipeJson(finalContent);
+      } else {
+        const recipe = this.extractRecipeJson(message.content);
+        const validation = await this.validateContent(JSON.stringify(recipe));
+        if (!validation.isValid) {
+          throw new BadGatewayException(
+            `Generated recipe failed safety moderation validation: ${validation.issues.join(', ')}`,
+          );
+        }
+        return recipe;
       }
-
-      // No tool calls — direct response
-      return this.extractRecipeJson(message.content);
-    } catch (error: any) {
-      this.logger.error(
-        'Failed to generate AI recipe with tools',
-        error.message,
-      );
-      throw new BadGatewayException('LLM Provider failed to generate recipe.');
     }
+
+    throw new BadGatewayException(
+      'LLM exceeded maximum conversational tool turns.',
+    );
   }
 
   private extractRecipeJson(rawContent: string): AiRecipe {

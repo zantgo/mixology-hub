@@ -3,7 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { SystemSettings } from '../users/entities/system-settings.entity';
 import { Decimal } from 'decimal.js';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
@@ -25,8 +27,12 @@ export class SeederService implements OnModuleInit {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(UserProfile)
+    private readonly profileRepository: Repository<UserProfile>,
     @InjectRepository(Ingredient)
     private readonly ingredientRepository: Repository<Ingredient>,
+    @InjectRepository(SystemSettings)
+    private readonly settingsRepository: Repository<SystemSettings>,
     private readonly configService: ConfigService,
   ) {}
 
@@ -39,6 +45,7 @@ export class SeederService implements OnModuleInit {
 
     await this.seedMockUser();
     await this.seedIngredients();
+    await this.seedSystemSettings();
   }
 
   private async seedMockUser(): Promise<void> {
@@ -48,21 +55,37 @@ export class SeederService implements OnModuleInit {
     });
 
     if (!exists) {
-      this.logger.log('Seeding mock user into the database...');
+      this.logger.log('Seeding mock user and default profile...');
       const hashedPassword = await bcrypt.hash(
         'mock_password_do_not_use_in_production',
         10,
       );
-      const user = this.userRepository.create({
-        id: uuidv4(),
-        email: mockEmail,
-        passwordHash: hashedPassword,
-        displayName: 'Mock User',
-        emailVerified: true,
-        role: 'admin',
-      });
-      await this.userRepository.save(user);
-      this.logger.log('Mock user seeded successfully.');
+
+      await this.userRepository.manager.transaction(
+        async (transactionalEntityManager) => {
+          const user = this.userRepository.create({
+            id: uuidv4(),
+            email: mockEmail,
+            passwordHash: hashedPassword,
+            displayName: 'Mock User',
+            emailVerified: true,
+            role: 'admin',
+          });
+          const savedUser = await transactionalEntityManager.save(user);
+
+          const profile = transactionalEntityManager.create(UserProfile, {
+            user: savedUser,
+            unitSystem: 'metric',
+            theme: 'system',
+            defaultServings: 1,
+            defaultPartSize: 30,
+            showTutorial: true,
+          });
+          await transactionalEntityManager.save(profile);
+        },
+      );
+
+      this.logger.log('Mock user and profile seeded successfully.');
     }
   }
 
@@ -108,5 +131,23 @@ export class SeederService implements OnModuleInit {
     this.logger.log(
       `Seeded ${entities.length} global ingredients successfully.`,
     );
+  }
+
+  private async seedSystemSettings(): Promise<void> {
+    const KEY = 'global_token_salt_version';
+    const exists = await this.settingsRepository.findOne({
+      where: { settingKey: KEY },
+    });
+
+    if (!exists) {
+      this.logger.log('Seeding global token salt version setting...');
+      const setting = this.settingsRepository.create({
+        settingKey: KEY,
+        settingValue: '0',
+        updatedBy: null,
+      });
+      await this.settingsRepository.save(setting);
+      this.logger.log('System settings seeded successfully.');
+    }
   }
 }

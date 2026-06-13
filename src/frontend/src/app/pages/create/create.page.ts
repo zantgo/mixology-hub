@@ -56,6 +56,9 @@ const ALLOWED_UNITS = [
             id="name"
             type="text"
             class="form-input"
+            [class.valid]="isControlValid('name')"
+            [class.invalid]="isControlInvalid('name')"
+            (blur)="markControlBlurred('name')"
             formControlName="name"
             placeholder="e.g. Classic Mojito"
             aria-required="true"
@@ -67,6 +70,9 @@ const ALLOWED_UNITS = [
           <textarea
             id="description"
             class="form-input form-textarea"
+            [class.valid]="isControlValid('description')"
+            [class.invalid]="isControlInvalid('description')"
+            (blur)="markControlBlurred('description')"
             formControlName="description"
             rows="2"
             placeholder="A brief description of your cocktail..."
@@ -78,6 +84,9 @@ const ALLOWED_UNITS = [
           <textarea
             id="instructions"
             class="form-input form-textarea"
+            [class.valid]="isControlValid('instructions')"
+            [class.invalid]="isControlInvalid('instructions')"
+            (blur)="markControlBlurred('instructions')"
             formControlName="instructions"
             rows="4"
             placeholder="Step-by-step preparation instructions..."
@@ -258,6 +267,12 @@ const ALLOWED_UNITS = [
         &:focus {
           outline: none;
           border-color: var(--color-primary);
+        }
+        &.valid {
+          border-color: var(--color-success);
+        }
+        &.invalid {
+          border-color: var(--color-error);
         }
         &:disabled {
           opacity: 0.6;
@@ -457,6 +472,8 @@ export class CreatePage implements CanComponentDeactivate {
 
   perRowState = signal<Array<{ searchResults: any[]; searchOpen: boolean }>>([]);
 
+  blurredControls = signal<Record<string, boolean>>({});
+
   private searchSubjects = new Map<number, Subject<string>>();
 
   constructor() {
@@ -627,6 +644,23 @@ export class CreatePage implements CanComponentDeactivate {
   removeImage(): void {
     this.imageFile = undefined;
     this.imagePreview.set(null);
+  }
+
+  markControlBlurred(controlName: string) {
+    this.blurredControls.update((state) => ({
+      ...state,
+      [controlName]: true,
+    }));
+  }
+
+  isControlValid(controlName: string): boolean {
+    const control = this.form.get(controlName);
+    return !!control && control.valid && !!this.blurredControls()[controlName];
+  }
+
+  isControlInvalid(controlName: string): boolean {
+    const control = this.form.get(controlName);
+    return !!control && control.invalid && !!this.blurredControls()[controlName];
   }
 
   onSubmit(): void {

@@ -99,6 +99,15 @@ function createMocks() {
     save: jest.fn(),
     create: jest.fn(),
     createQueryBuilder: jest.fn().mockReturnValue(qb),
+    query: jest.fn().mockImplementation((_sql: string, params: string[]) =>
+      Promise.resolve([
+        {
+          id: params[0],
+          name: params[0] === 'ing-1' ? 'Vodka' : 'Unknown',
+          synonyms: null,
+        },
+      ]),
+    ),
   };
   const ds = {
     transaction: jest

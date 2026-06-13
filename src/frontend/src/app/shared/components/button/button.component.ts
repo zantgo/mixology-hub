@@ -19,8 +19,16 @@ export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'ico
         <span
           class="spinner"
           aria-hidden="true"
-          [style.borderColor]="(variant === 'outline' || variant === 'ghost' || variant === 'icon') ? 'rgba(217, 119, 54, 0.3)' : 'rgba(255, 255, 255, 0.3)'"
-          [style.borderTopColor]="(variant === 'outline' || variant === 'ghost' || variant === 'icon') ? 'var(--color-primary)' : '#fff'"
+          [style.borderColor]="
+            variant === 'outline' || variant === 'ghost' || variant === 'icon'
+              ? 'rgba(217, 119, 54, 0.3)'
+              : 'rgba(255, 255, 255, 0.3)'
+          "
+          [style.borderTopColor]="
+            variant === 'outline' || variant === 'ghost' || variant === 'icon'
+              ? 'var(--color-primary)'
+              : '#fff'
+          "
         ></span>
       }
       <span [class.hidden]="loading">

@@ -27,8 +27,7 @@ export class McpServerService {
   private readonly rateLimiter = new Map<string, number[]>();
   private readonly RATE_LIMIT = 30;
   private readonly RATE_WINDOW_MS = 60000;
-  private readonly sessionCallCounts = new Map<string, number>();
-  private rateLimitWindowStart = Date.now();
+  private readonly SESSION_TTL_MS = 30 * 60 * 1000;
 
   constructor(
     private readonly barInventoryService: BarInventoryService,
@@ -159,6 +158,21 @@ export class McpServerService {
     toolCall: McpToolCall,
     session: McpSession,
   ): Promise<McpToolResult> {
+    if (session.ticketId !== 'stdio-session') {
+      const elapsed = Date.now() - new Date(session.createdAt).getTime();
+      if (elapsed > this.SESSION_TTL_MS) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Error: MCP session has expired. Re-authenticate.',
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+
     const sessionId = session.userId || 'anonymous';
     const now = Date.now();
     const windowStart = now - this.RATE_WINDOW_MS;
@@ -194,7 +208,7 @@ export class McpServerService {
       };
     }
 
-    const resultStatus: 'success' | 'error' = 'error';
+    let resultStatus: 'success' | 'error' = 'error';
     let result: McpToolResult;
 
     if (tool.inputSchema) {
@@ -551,9 +565,7 @@ export class McpServerService {
                 found = true;
               }
             }
-          } catch {
-            // Best-match lookup failed
-          }
+          } catch {}
         }
 
         if (!found) {

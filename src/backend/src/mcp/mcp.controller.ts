@@ -71,9 +71,9 @@ export class McpController {
 
     this.sseConnections.set(session.ticketId, res);
 
-    res.write(
-      `data: ${JSON.stringify({ type: 'initialized', protocolVersion: '0.1.0', serverInfo: { name: 'mixology-hub', version: '1.0.0' } })}\n\n`,
-    );
+    // Mandated MCP Handshake: Broadcast the HTTP POST endpoint URI using "event: endpoint"
+    const messageEndpoint = `/api/mcp/messages?sessionId=${session.ticketId}`;
+    res.write(`event: endpoint\ndata: ${messageEndpoint}\n\n`);
 
     req.on('close', () => {
       this.sseConnections.delete(session.ticketId);
@@ -106,29 +106,61 @@ export class McpController {
       const tools = this.mcpServer.getTools();
 
       switch (msg.method) {
-        case 'tools/list':
-          sseRes.write(`data: ${JSON.stringify({ type: 'tools', tools })}\n\n`);
-          break;
-
-        case 'tools/call': {
-          const toolCall: McpToolCall = msg.params as McpToolCall;
-          const result = await this.mcpServer.executeTool(toolCall, session);
+        case 'tools/list': {
+          const jsonRpcResponse = {
+            jsonrpc: '2.0',
+            id: msg.id,
+            result: { tools },
+          };
           sseRes.write(
-            `data: ${JSON.stringify({ type: 'tool_result', id: msg.id, result })}\n\n`,
+            `event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`,
           );
           break;
         }
 
-        default:
+        case 'tools/call': {
+          const toolCall: McpToolCall = msg.params as McpToolCall;
+          const result = await this.mcpServer.executeTool(toolCall, session);
+          const jsonRpcResponse = {
+            jsonrpc: '2.0',
+            id: msg.id,
+            result,
+          };
           sseRes.write(
-            `data: ${JSON.stringify({ type: 'error', message: `Unknown method: ${msg.method ?? 'undefined'}` })}\n\n`,
+            `event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`,
           );
+          break;
+        }
+
+        default: {
+          const jsonRpcResponse = {
+            jsonrpc: '2.0',
+            id: msg.id,
+            error: {
+              code: -32601,
+              message: `Method not found: ${msg.method ?? 'undefined'}`,
+            },
+          };
+          sseRes.write(
+            `event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`,
+          );
+        }
       }
 
-      res.json({ ok: true });
+      res.status(200).json({ ok: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      sseRes.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+      const jsonRpcResponse = {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32603,
+          message,
+        },
+      };
+      sseRes.write(
+        `event: message\ndata: ${JSON.stringify(jsonRpcResponse)}\n\n`,
+      );
       res.status(500).json({ error: message });
     }
   }

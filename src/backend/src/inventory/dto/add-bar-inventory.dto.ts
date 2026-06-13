@@ -6,6 +6,7 @@ import {
   IsDateString,
   Min,
   Max,
+  Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -28,9 +29,14 @@ export class AddBarInventoryDto {
   unit?: string;
 
   @ApiPropertyOptional({
-    description: 'Expiration date for this inventory batch',
+    description:
+      'Expiration date for this inventory batch (must be between years 2000 and 2100)',
   })
   @IsOptional()
   @IsDateString()
+  @Matches(/^(20|21)\d\d-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])/, {
+    message:
+      'Expiration date must be a valid date string between 2000-01-01 and 2100-12-31',
+  })
   expirationDate?: string;
 }

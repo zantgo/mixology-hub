@@ -1,6 +1,7 @@
 import { Component, OnInit, inject } from '@angular/core';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { InventoryStore } from '../../core/stores/inventory.store';
+import { AuthStore } from '../../core/stores/auth.store';
 import { UiStore } from '../../core/stores/ui.store';
 import { InventoryCardComponent } from '../../features/inventory/inventory-card.component';
 import { AddIngredientSheetComponent } from '../../features/inventory/add-ingredient-sheet.component';
@@ -22,10 +23,12 @@ import { ButtonComponent } from '../../shared/components/button/button.component
     <div class="container page-section">
       <div class="page-header">
         <h1 class="page-title">My Bar</h1>
-        <app-button (action)="showAddSheet = true"> + Add Ingredient </app-button>
+        @if (authStore.isAdmin()) {
+          <app-button (action)="showAddSheet = true"> + Add Ingredient </app-button>
+        }
       </div>
 
-      @if (showAddSheet) {
+      @if (showAddSheet && authStore.isAdmin()) {
         <app-add-ingredient-sheet
           [open]="true"
           (close)="showAddSheet = false"
@@ -44,7 +47,8 @@ import { ButtonComponent } from '../../shared/components/button/button.component
           icon="glass-water"
           title="Your bar is empty"
           description="Add your first ingredient to start discovering cocktails you can make."
-          [actionLabel]="'Add your first ingredient'"
+          [actionLabel]="authStore.isAdmin() ? 'Add your first ingredient' : undefined"
+          (action)="showAddSheet = true"
         />
       } @else {
         @for (category of inventoryStore.categories(); track category.name) {
@@ -98,6 +102,7 @@ import { ButtonComponent } from '../../shared/components/button/button.component
 })
 export class MyBarPage implements OnInit {
   readonly inventoryStore = inject(InventoryStore);
+  readonly authStore = inject(AuthStore);
   readonly uiStore = inject(UiStore);
   private announcer = inject(LiveAnnouncer);
 
@@ -108,6 +113,7 @@ export class MyBarPage implements OnInit {
   }
 
   onAdd(event: { ingredientId: string; quantity: number; unit: string }): void {
+    if (!this.authStore.isAdmin()) return;
     this.inventoryStore.add(event).subscribe({
       next: () => {
         this.showAddSheet = false;
@@ -129,6 +135,7 @@ export class MyBarPage implements OnInit {
   }
 
   onRemove(id: string): void {
+    if (!this.authStore.isAdmin()) return;
     this.inventoryStore.remove(id).subscribe({
       next: () => {
         this.announcer.announce('ingredient removed', 'assertive');
