@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User } from './entities/user.entity';
+import { UserProfile } from './entities/user-profile.entity';
+import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { GdprController } from './gdpr.controller';
 import { SeederService } from '../database/seeder.service';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -13,7 +15,13 @@ import { AdminGuard } from '../auth/guards/admin.guard';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, Ingredient, Cocktail]),
+    TypeOrmModule.forFeature([
+      User,
+      UserProfile,
+      PreparationLog,
+      Cocktail,
+      Ingredient,
+    ]),
     UtilsModule,
     GdprDataRetentionModule,
   ],

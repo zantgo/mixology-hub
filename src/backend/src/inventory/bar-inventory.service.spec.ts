@@ -41,6 +41,7 @@ describe('BarInventoryService', () => {
   let repo: any;
   let ingRepo: any;
   let ds: any;
+  let cacheManager: any;
 
   beforeEach(() => {
     repo = {
@@ -53,11 +54,16 @@ describe('BarInventoryService', () => {
     };
     ingRepo = { findOne: jest.fn() };
     ds = { transaction: jest.fn() };
+    cacheManager = {
+      del: jest.fn(),
+      clear: jest.fn(),
+    };
     service = new BarInventoryService(
       repo,
       ingRepo,
       new UnitConverterService(),
       ds,
+      cacheManager,
     );
   });
 

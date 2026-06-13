@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThan } from 'typeorm';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
 import { SystemSettings } from '../users/entities/system-settings.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -21,6 +22,16 @@ import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
 
 const MAX_SESSIONS = 5;
+
+interface JwtPayload {
+  sub: string;
+  email?: string;
+  jti?: string;
+  type?: string;
+  token_version?: number;
+  family?: string;
+  saltVersion?: number;
+}
 
 @Injectable()
 export class AuthService {
@@ -50,34 +61,53 @@ export class AuthService {
     // Hash password
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
 
-    // Create user
-    const emailToken = crypto.randomBytes(32).toString('hex');
-    const user = this.userRepository.create({
-      email: registerDto.email,
-      passwordHash: hashedPassword,
-      displayName: registerDto.displayName || registerDto.email.split('@')[0],
-      emailVerified: false,
-      emailVerificationToken: emailToken,
-    });
+    const result = await this.userRepository.manager.transaction(
+      async (transactionalEntityManager) => {
+        // Create user
+        const emailToken = crypto.randomBytes(32).toString('hex');
+        const user = this.userRepository.create({
+          email: registerDto.email,
+          passwordHash: hashedPassword,
+          displayName:
+            registerDto.displayName || registerDto.email.split('@')[0],
+          emailVerified: false,
+          emailVerificationToken: emailToken,
+        });
 
-    await this.userRepository.save(user);
+        const savedUser = await transactionalEntityManager.save(user);
+
+        // Seed default system preferences for UserProfile atomically (UC 9.20)
+        const profile = transactionalEntityManager.create(UserProfile, {
+          user: savedUser,
+          unitSystem: 'metric',
+          theme: 'system',
+          defaultServings: 1,
+          defaultPartSize: 30,
+          showTutorial: true,
+        });
+        await transactionalEntityManager.save(profile);
+
+        return savedUser;
+      },
+    );
 
     // Send verification email
     this.emailService
-      .sendEmailVerificationEmail(user.email, emailToken)
-      .catch((err) => {
-        console.error('Failed to send verification email:', err.message);
+      .sendEmailVerificationEmail(result.email, result.emailVerificationToken!)
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Failed to send verification email:', message);
       });
 
     // Generate tokens
-    const tokens = await this.generateTokens(user);
+    const tokens = await this.generateTokens(result);
 
     return {
       user: {
-        id: user.id,
-        email: user.email,
-        displayName: user.displayName,
-        emailVerified: user.emailVerified,
+        id: result.id,
+        email: result.email,
+        displayName: result.displayName,
+        emailVerified: result.emailVerified,
       },
       ...tokens,
     };
@@ -139,9 +169,12 @@ export class AuthService {
   async refreshToken(refreshTokenValue: string) {
     try {
       // Verify refresh token
-      const payload = await this.jwtService.verifyAsync(refreshTokenValue, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-      });
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(
+        refreshTokenValue,
+        {
+          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
+        },
+      );
 
       // Check if token is blacklisted
       const isBlacklisted = await this.tokenBlacklistRepository.findOne({
@@ -230,7 +263,7 @@ export class AuthService {
     await this.blacklistAllUserTokens(userId);
   }
 
-  async validateUser(payload: any, token: string): Promise<User | null> {
+  async validateUser(payload: JwtPayload, token: string): Promise<User | null> {
     const user = await this.userRepository.findOne({
       where: { id: payload.sub },
     });
@@ -247,6 +280,28 @@ export class AuthService {
       return null;
     }
 
+    // Check token version (invalidates sessions on password reset/change)
+    if (
+      payload.token_version !== undefined &&
+      payload.token_version !== user.token_version
+    ) {
+      return null;
+    }
+
+    // Check global token salt version (invalidates sessions on emergency admin revocation)
+    const saltSetting = await this.systemSettingsRepository.findOne({
+      where: { settingKey: 'global_token_salt_version' },
+    });
+    const currentSaltVersion = saltSetting
+      ? parseInt(saltSetting.settingValue, 10) || 0
+      : 0;
+    if (
+      payload.saltVersion !== undefined &&
+      payload.saltVersion < currentSaltVersion
+    ) {
+      return null;
+    }
+
     return user;
   }
 
@@ -254,11 +309,20 @@ export class AuthService {
     const accessTokenId = uuidv4();
     const refreshTokenId = uuidv4();
 
+    const saltSetting = await this.systemSettingsRepository.findOne({
+      where: { settingKey: 'global_token_salt_version' },
+    });
+    const currentSaltVersion = saltSetting
+      ? parseInt(saltSetting.settingValue, 10) || 0
+      : 0;
+
     const accessTokenPayload = {
       sub: user.id,
       email: user.email,
       jti: accessTokenId,
       type: 'access',
+      token_version: user.token_version,
+      saltVersion: currentSaltVersion,
     };
 
     const refreshTokenPayload = {
@@ -274,14 +338,14 @@ export class AuthService {
         expiresIn: this.configService.get<string>(
           'JWT_ACCESS_EXPIRES_IN',
           '15m',
-        ) as any,
+        ),
       }),
       this.jwtService.signAsync(refreshTokenPayload, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.get<string>(
           'JWT_REFRESH_EXPIRES_IN',
           '7d',
-        ) as any,
+        ),
       }),
     ]);
 
@@ -338,11 +402,9 @@ export class AuthService {
       if (user) {
         this.emailService
           .sendSessionEvictionEmail(user.email, toRevoke.length)
-          .catch((err) => {
-            console.error(
-              'Failed to send session eviction email:',
-              err.message,
-            );
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            console.error('Failed to send session eviction email:', message);
           });
       }
     }
@@ -388,8 +450,9 @@ export class AuthService {
     // Send the raw token via email
     this.emailService
       .sendPasswordResetEmail(user.email, resetToken)
-      .catch((err) => {
-        console.error('Failed to send password reset email:', err.message);
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Failed to send password reset email:', message);
       });
 
     return {
@@ -454,11 +517,13 @@ export class AuthService {
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password and clear reset token
+    // Update password, increment token_version, clear reset token AND clear brute-force lockout states
     user.passwordHash = hashedPassword;
+    user.token_version = (user.token_version ?? 0) + 1;
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
-    user.failedLoginAttempts = 0; // Reset failed attempts
+    user.failedLoginAttempts = 0;
+    user.accountLockedUntil = null;
 
     await this.userRepository.save(user);
 
@@ -507,8 +572,9 @@ export class AuthService {
 
     this.emailService
       .sendAccountUnlockEmail(user.email, unlockToken)
-      .catch((err) => {
-        console.error('Failed to send unlock email:', err.message);
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('Failed to send unlock email:', message);
       });
 
     return {

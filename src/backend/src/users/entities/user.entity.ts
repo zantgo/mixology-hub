@@ -122,6 +122,9 @@ export class User {
   })
   updatedAt: Date;
 
+  @Column({ name: 'token_version', default: 1 })
+  token_version: number;
+
   @Expose()
   @Index()
   @Column({ name: 'is_active', default: true })

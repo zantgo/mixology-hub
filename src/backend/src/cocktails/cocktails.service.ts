@@ -3,6 +3,8 @@ import {
   NotFoundException,
   InternalServerErrorException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -19,6 +21,8 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { MeasureParserService } from '../utils/measure-parser.service';
+import { FavoritesService } from '../favorites/favorites.service';
+import type { CocktailDbDrink } from './cocktail-aggregator.service';
 
 @Injectable()
 export class CocktailsService {
@@ -38,6 +42,8 @@ export class CocktailsService {
     private readonly externalCocktailService: EnhancedTheCocktailDbService,
     private readonly hierarchicalIngredientService: HierarchicalIngredientService,
     private readonly measureParser: MeasureParserService,
+    @Inject(forwardRef(() => FavoritesService))
+    private readonly favoritesService: FavoritesService,
   ) {}
 
   async create(
@@ -122,6 +128,7 @@ export class CocktailsService {
     cocktailId: string,
     bartenderId: string,
     servings: number = 1,
+    totalVolumeMl?: number,
     force: boolean = false,
   ) {
     let cocktail = await this.cocktailRepository.findOne({
@@ -135,7 +142,7 @@ export class CocktailsService {
       const cleanExternalId = cocktailId.startsWith('ext-')
         ? cocktailId.slice(4)
         : cocktailId;
-      const externalDrink =
+      const externalDrink: CocktailDbDrink | null =
         await this.externalCocktailService.getCocktailById(cleanExternalId);
       if (!externalDrink || !externalDrink.strDrink) {
         throw new NotFoundException(`Cocktail #${cocktailId} not found`);
@@ -150,8 +157,10 @@ export class CocktailsService {
       }[] = [];
 
       for (let i = 1; i <= 15; i++) {
-        const ingredientName = externalDrink[`strIngredient${i}`];
-        const measure = externalDrink[`strMeasure${i}`];
+        const ingredientKey = `strIngredient${i}` as const;
+        const measureKey = `strMeasure${i}` as const;
+        const ingredientName: string | null = externalDrink[ingredientKey];
+        const measure: string | null = externalDrink[measureKey];
 
         if (!ingredientName || ingredientName.trim() === '') continue;
 
@@ -167,7 +176,7 @@ export class CocktailsService {
           continue;
         }
 
-        const parsed = this.measureParser.parse(measure);
+        const parsed = this.measureParser.parse(measure ?? '');
 
         resolvedIngredients.push({
           ingredientId: match.ingredient.id,
@@ -205,6 +214,12 @@ export class CocktailsService {
       );
 
       forkedFromExternal = true;
+
+      await this.favoritesService.migrateFavoritePointer(
+        bartenderId,
+        cleanExternalId,
+        cocktail.id,
+      );
     }
 
     const preparationLog = this.preparationLogRepository.create({
@@ -222,6 +237,7 @@ export class CocktailsService {
       bartenderId,
       preparationLogId: savedLog.id,
       servings,
+      totalVolumeMl,
       force,
     });
 
@@ -267,15 +283,23 @@ export class CocktailsService {
   }
 
   async undo(logId: string) {
-    const result = await this.preparationLogRepository.manager.query(
-      `UPDATE preparation_log
+    interface UndoQueryRow {
+      id: string;
+      bartender_id: string | null;
+      status: string;
+      undone: boolean;
+    }
+
+    const result: UndoQueryRow[] =
+      await this.preparationLogRepository.manager.query<UndoQueryRow>(
+        `UPDATE preparation_log
        SET undone = true
        WHERE id = $1
          AND status = 'completed'
          AND undone = false
        RETURNING *`,
-      [logId],
-    );
+        [logId],
+      );
 
     if (!result || result.length === 0) {
       const log = await this.preparationLogRepository.findOne({
@@ -331,6 +355,41 @@ export class CocktailsService {
       deductedIngredients: log.deductedIngredients,
       undone: log.undone,
       createdAt: log.createdAt,
+    };
+  }
+
+  async cancelPreparation(logId: string) {
+    const log = await this.preparationLogRepository.findOne({
+      where: { id: logId },
+    });
+
+    if (!log) {
+      throw new NotFoundException(`Preparation log ${logId} not found`);
+    }
+
+    if (
+      log.status === 'completed' ||
+      log.status === 'cancelled' ||
+      log.status.startsWith('failed')
+    ) {
+      throw new BadRequestException(
+        `Cannot cancel preparation: Order is already in a terminal state (${log.status})`,
+      );
+    }
+
+    if (log.status === 'preparing') {
+      throw new BadRequestException(
+        'Cannot cancel preparation: Order is already being prepared',
+      );
+    }
+
+    log.status = 'cancelled';
+    const savedLog = await this.preparationLogRepository.save(log);
+
+    return {
+      message: 'Preparation cancelled successfully',
+      preparationLogId: savedLog.id,
+      status: 'cancelled',
     };
   }
 

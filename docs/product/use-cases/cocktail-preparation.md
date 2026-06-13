@@ -158,6 +158,25 @@
  * **Then** each creates a separate `PREPARATION_LOGS` entry with `status = 'queued'` and pushes an independent job to BullMQ.
  * **And** the `concurrency: 1` worker processes them sequentially.
  * **And** if the first job depletes the required ingredient, the second job will fail with `status = 'failed_insufficient_stock'`.
- * **And** no double-deduction occurs — the worker naturally serializes access to `bar_inventory`.
- * **Architectural Decision: Sequential Idempotency via Queue Serialization**
-   * **Explicit Trade-off:** We rely on BullMQ's sequential execution (`concurrency: 1`) rather than complex distributed idempotency keys. Double-clicks produce two queue jobs, but only the first can succeed against available inventory. We trade the elimination of an idempotency system for the acceptance of a visible `failed_insufficient_stock` log entry for the duplicate click.
+  * **And** no double-deduction occurs — the worker naturally serializes access to `bar_inventory`.
+  * **Architectural Decision: Sequential Idempotency via Queue Serialization**
+    * **Explicit Trade-off:** We rely on BullMQ's sequential execution (`concurrency: 1`) rather than complex distributed idempotency keys. Double-clicks produce two queue jobs, but only the first can succeed against available inventory. We trade the elimination of an idempotency system for the acceptance of a visible `failed_insufficient_stock` log entry for the duplicate click.
+
+**UC 4.22: Order Status Pipeline Flow**
+* **Given** a bartender submits a cocktail preparation order.
+* **When** the order is successfully registered.
+* **Then** the initial state is set to `queued` while awaiting processing.
+* **And** when the single-threaded BullMQ worker picks up the job, the status transitions to `evaluating`.
+* **And** the worker executes transactional checks against `bar_inventory` and returns the evaluation response.
+* **And** if stock is sufficient, the status transitions to `preparing` while actual physical/simulated preparation (inventory deductions) occurs.
+* **And** upon final database updates and commit, the status is set to `completed`.
+* **And** during the `evaluating` phase, a re-check of the preparation log's status ensures that a mid-flight cancellation (from another HTTP connection) is honored before stock is deducted.
+
+**UC 4.23: Mid-Flight Order Cancellation**
+* **Given** a cocktail preparation order is in the `queued` or `evaluating` status.
+* **When** the bartender requests a cancellation via `POST /preparations/:logId/cancel`.
+* **Then** the database status is immediately set to `cancelled`.
+* **And** if the single-threaded BullMQ worker has not yet picked up the job, it skips the job upon finding `status = 'cancelled'` without deducting stock.
+* **And** if the worker is midway through the evaluation phase, the re-check (UC 4.22) detects the cancelled status and aborts before any deductions occur.
+* **And** if the order has already transitioned to `preparing` or `completed` status, cancellation requests are strictly rejected with a `400 Bad Request` error.
+* **And** a cancelled order is visible in the preparation log as a terminal state, with no inventory impact.

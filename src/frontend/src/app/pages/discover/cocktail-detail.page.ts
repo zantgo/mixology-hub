@@ -127,12 +127,27 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           <div class="prepare-area">
             <app-badge type="makeable" label="Prepared!" icon="✓" />
           </div>
-        } @else if (orderStore.polling()) {
+        } @else if (orderStore.status() === 'cancelled') {
           <div class="prepare-area">
+            <app-badge type="unmakeable" label="Order Cancelled" icon="✗" />
+          </div>
+        } @else if (orderStore.polling()) {
+          <div class="prepare-area status-column">
             <app-button [loading]="true">
               <app-icon name="glass-water" [size]="20" />
-              {{ orderStore.status() === 'queued' ? 'Queueing...' : 'Preparing...' }}
+              @if (orderStore.status() === 'evaluating') {
+                Evaluating Stock Integrity...
+              } @else if (orderStore.status() === 'preparing') {
+                Pouring and Preparing...
+              } @else {
+                Queueing in Production Line...
+              }
             </app-button>
+            @if (orderStore.status() === 'queued' || orderStore.status() === 'evaluating') {
+              <app-button variant="outline" (action)="onCancel()" [disabled]="orderStore.cancelling()">
+                Cancel Order
+              </app-button>
+            }
           </div>
         } @else if (
           cocktail()!.makeability === 'makeable' || cocktail()!.makeability === 'almost'
@@ -286,6 +301,13 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
         background: var(--color-bg-primary);
       }
 
+      .status-column {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        align-items: center;
+      }
+
       @media (min-width: 768px) {
         .prepare-area {
           bottom: var(--space-4);
@@ -329,6 +351,13 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
           id: crypto.randomUUID(),
           message: 'Order failed due to a system error. Please try again.',
           type: 'error',
+        });
+      } else if (status === 'cancelled') {
+        this.announcer.announce('order cancelled', 'assertive');
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: 'Order cancelled successfully.',
+          type: 'info',
         });
       }
     });
@@ -385,5 +414,18 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
       message: 'Order queued. Waiting for inventory confirmation...',
       type: 'info',
     });
+  }
+
+  onCancel(): void {
+    const logId = this.orderStore.currentLogId();
+    if (logId) {
+      this.orderStore.cancel(logId).then(() => {
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: 'Order cancelled successfully.',
+          type: 'info',
+        });
+      });
+    }
   }
 }

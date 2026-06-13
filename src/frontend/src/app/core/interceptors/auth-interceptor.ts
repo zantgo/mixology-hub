@@ -6,6 +6,17 @@ import { AuthStore } from '../stores/auth.store';
 let isRefreshing = false;
 let refreshSubject: Subject<boolean> | null = null;
 
+function getCookie(name: string): string | null {
+  const nameLenPlus = name.length + 1;
+  return (
+    document.cookie
+      .split(';')
+      .map((c) => c.trim())
+      .filter((cookie) => cookie.substring(0, nameLenPlus) === `${name}=`)
+      .map((cookie) => decodeURIComponent(cookie.substring(nameLenPlus)))[0] || null
+  );
+}
+
 function waitForRefresh(): Observable<boolean> {
   if (!refreshSubject) {
     refreshSubject = new Subject<boolean>();
@@ -36,17 +47,22 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const isPublicAuth = publicPaths.some((path) => urlPath.endsWith(path));
 
   const token = authStore.getAccessToken();
-  let cloned = req;
+  const csrfToken = getCookie('csrf_token');
+
+  const headers: Record<string, string> = {};
 
   if (token && !isPublicAuth) {
-    cloned = req.clone({
-      setHeaders: { Authorization: `Bearer ${token}` },
-    });
+    headers['Authorization'] = `Bearer ${token}`;
   }
 
-  if (isPublicAuth) {
-    cloned = req.clone({ withCredentials: true });
+  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    headers['X-CSRF-Token'] = csrfToken;
   }
+
+  const cloned = req.clone({
+    setHeaders: headers,
+    withCredentials: true,
+  });
 
   return next(cloned).pipe(
     catchError((error: HttpErrorResponse) => {
@@ -58,8 +74,16 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
               finalizeRefresh(success);
               if (success) {
                 const newToken = authStore.getAccessToken();
+                const retryHeaders: Record<string, string> = {
+                  Authorization: `Bearer ${newToken}`,
+                };
+                const currentCsrf = getCookie('csrf_token');
+                if (currentCsrf && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+                  retryHeaders['X-CSRF-Token'] = currentCsrf;
+                }
                 const retryReq = req.clone({
-                  setHeaders: { Authorization: `Bearer ${newToken}` },
+                  setHeaders: retryHeaders,
+                  withCredentials: true,
                 });
                 return next(retryReq);
               }
@@ -78,8 +102,16 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
           switchMap((success) => {
             if (success) {
               const newToken = authStore.getAccessToken();
+              const retryHeaders: Record<string, string> = {
+                Authorization: `Bearer ${newToken}`,
+              };
+              const currentCsrf = getCookie('csrf_token');
+              if (currentCsrf && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+                retryHeaders['X-CSRF-Token'] = currentCsrf;
+              }
               const retryReq = req.clone({
-                setHeaders: { Authorization: `Bearer ${newToken}` },
+                setHeaders: retryHeaders,
+                withCredentials: true,
               });
               return next(retryReq);
             }

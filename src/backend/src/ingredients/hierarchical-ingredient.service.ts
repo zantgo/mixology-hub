@@ -10,6 +10,15 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Ingredient } from './entities/ingredient.entity';
 
+interface RedisLikeStore {
+  client?: {
+    scanIterator?: (options: {
+      MATCH: string;
+      COUNT?: number;
+    }) => AsyncIterable<string>;
+  };
+}
+
 export interface IngredientMatch {
   ingredient: Ingredient;
   matchType: 'exact' | 'hierarchical' | 'synonym' | 'fuzzy';
@@ -184,7 +193,7 @@ export class HierarchicalIngredientService {
       }
 
       // Check for consistency in base units among similar ingredients
-      const unitConsistency = await this.checkUnitConsistency(hierarchy);
+      const unitConsistency = this.checkUnitConsistency(hierarchy);
       if (!unitConsistency.isConsistent) {
         issues.push(
           `Inconsistent base units in ingredient hierarchy: ${unitConsistency.message}`,
@@ -197,13 +206,15 @@ export class HierarchicalIngredientService {
         suggestions,
       };
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to validate ingredient hierarchy for ${ingredientId}:`,
-        error,
+        errorMessage,
       );
       return {
         isValid: false,
-        issues: [`Validation failed: ${error.message}`],
+        issues: [`Validation failed: ${errorMessage}`],
         suggestions: ['Check ingredient relationships in database'],
       };
     }
@@ -749,12 +760,12 @@ export class HierarchicalIngredientService {
     );
   }
 
-  private async checkUnitConsistency(hierarchy: {
+  private checkUnitConsistency(hierarchy: {
     ingredient: Ingredient;
     ancestors: Ingredient[];
     descendants: Ingredient[];
     siblings: Ingredient[];
-  }): Promise<{ isConsistent: boolean; message: string }> {
+  }): { isConsistent: boolean; message: string } {
     const allIngredients = [
       hierarchy.ingredient,
       ...hierarchy.ancestors,
@@ -826,7 +837,8 @@ export class HierarchicalIngredientService {
   // Cache management
   async clearCache(): Promise<void> {
     try {
-      const store = (this.cacheManager as any).store;
+      const store = (this.cacheManager as Cache & { store?: RedisLikeStore })
+        .store;
       if (store?.client?.scanIterator) {
         // Redis store: delete all keys matching our prefix
         let cleared = 0;
@@ -846,9 +858,11 @@ export class HierarchicalIngredientService {
         );
       }
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.warn(
         'Failed to clear ingredient hierarchy cache:',
-        error.message,
+        errorMessage,
       );
     }
   }

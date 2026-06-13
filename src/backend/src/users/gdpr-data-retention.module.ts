@@ -9,6 +9,7 @@ import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
 import { Favorite } from '../favorites/entities/favorite.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
+import { Ingredient } from '../ingredients/entities/ingredient.entity';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.en
       Favorite,
       Cocktail,
       CocktailIngredient,
+      Ingredient,
     ]),
   ],
   providers: [GdprDataRetentionService],

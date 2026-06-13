@@ -8,7 +8,6 @@ import {
   Delete,
   Query,
   UseGuards,
-  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { IngredientsService } from './ingredients.service';
@@ -17,6 +16,11 @@ import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+
+interface AuthenticatedUser {
+  id: string;
+}
 
 @ApiTags('Ingredients')
 @ApiBearerAuth()
@@ -27,8 +31,11 @@ export class IngredientsController {
 
   @Post()
   @ApiOperation({ summary: 'Create a new ingredient in the global catalog' })
-  create(@Request() req, @Body() createIngredientDto: CreateIngredientDto) {
-    return this.ingredientsService.create(createIngredientDto, req.user.id);
+  create(
+    @GetUser() user: AuthenticatedUser,
+    @Body() createIngredientDto: CreateIngredientDto,
+  ) {
+    return this.ingredientsService.create(createIngredientDto, user.id);
   }
 
   @Public()

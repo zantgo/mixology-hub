@@ -19,6 +19,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { McpModule } from './mcp/mcp.module';
 import { EmailModule } from './email/email.module';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
+import { CsrfGuard } from './auth/guards/csrf.guard';
 
 @Module({
   imports: [
@@ -59,6 +60,10 @@ import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
     {
       provide: APP_GUARD,
       useClass: CustomThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: CsrfGuard,
     },
   ],
 })

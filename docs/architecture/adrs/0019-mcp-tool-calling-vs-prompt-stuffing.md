@@ -77,5 +77,5 @@ The LLM selectively invokes only the tools it needs for the current user request
 ## Implementation Notes
 - MCP tool definitions are declared once and served to both SSE and stdio transports from the same source.
 - Tool parameter validation uses the same `class-validator` DTOs used elsewhere in the NestJS backend.
-- The `AI_AUDIT_READ_SAMPLE_RATE` env var controls audit sampling (default: `0.1` = 10%).
+- The `AI_AUDIT_READ_SAMPLE_RATE` env var controls audit sampling as an integer percentage from 0 to 100 (default: `10` = 10% sampling rate).
 - Rate limiting on tool calls is per-MCP-session to prevent runaway LLM loops from exhausting resources.

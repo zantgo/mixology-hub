@@ -8,6 +8,8 @@ import { SystemSettings } from '../users/entities/system-settings.entity';
 import { User } from '../users/entities/user.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
+import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
@@ -19,6 +21,8 @@ import { AuthModule } from '../auth/auth.module';
       User,
       Cocktail,
       Ingredient,
+      BarInventory,
+      CocktailIngredient,
     ]),
     AuthModule,
   ],

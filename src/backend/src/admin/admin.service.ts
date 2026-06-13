@@ -2,18 +2,24 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { ReportedContent } from '../cocktails/entities/reported-content.entity';
 import { HiddenExternalCocktails } from '../cocktails/entities/hidden-external-cocktails.entity';
 import { SystemSettings } from '../users/entities/system-settings.entity';
+import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
+import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Decimal } from 'decimal.js';
 
 @Injectable()
 export class AdminService {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(ReportedContent)
     private readonly reportRepository: Repository<ReportedContent>,
     @InjectRepository(HiddenExternalCocktails)
@@ -53,36 +59,94 @@ export class AdminService {
       throw new NotFoundException('Report not found');
     }
     report.status = status;
-    report.reviewedBy = { id: reviewedBy } as any;
+    report.reviewedBy = { id: reviewedBy } as User;
     report.reviewedAt = new Date();
     return this.reportRepository.save(report);
   }
 
-  async mergeIngredients(sourceId: string, targetId: string, adminId: string) {
-    const source = await this.ingredientRepository.findOne({
-      where: { id: sourceId },
-    });
-    const target = await this.ingredientRepository.findOne({
-      where: { id: targetId },
-    });
+  async mergeIngredients(sourceId: string, targetId: string) {
+    return await this.dataSource.transaction(async (manager) => {
+      const source = await manager.findOne(Ingredient, {
+        where: { id: sourceId },
+      });
+      const target = await manager.findOne(Ingredient, {
+        where: { id: targetId },
+      });
 
-    if (!source || !target) {
-      throw new NotFoundException('Source or target ingredient not found');
+      if (!source || !target) {
+        throw new NotFoundException('Source or target ingredient not found');
+      }
+
+      if (source.baseUnit !== target.baseUnit) {
+        throw new ConflictException(
+          `Cannot merge ingredients: Base unit mismatch (${source.baseUnit} vs ${target.baseUnit}).`,
+        );
+      }
+
+      await manager
+        .createQueryBuilder()
+        .update(CocktailIngredient)
+        .set({ ingredient: target })
+        .where('ingredient_id = :sourceId', { sourceId })
+        .execute();
+
+      const sourceStock = await manager.findOne(BarInventory, {
+        where: { ingredient: { id: sourceId } },
+      });
+      const targetStock = await manager.findOne(BarInventory, {
+        where: { ingredient: { id: targetId } },
+      });
+
+      if (sourceStock) {
+        if (targetStock) {
+          const combinedQty = new Decimal(targetStock.quantity.toString()).plus(
+            new Decimal(sourceStock.quantity.toString()),
+          );
+          targetStock.quantity = combinedQty;
+          await manager.save(targetStock);
+          await manager.remove(sourceStock);
+        } else {
+          sourceStock.ingredient = target;
+          await manager.save(sourceStock);
+        }
+      }
+
+      await manager
+        .createQueryBuilder()
+        .update(Ingredient)
+        .set({ parentId: targetId })
+        .where('parent_id = :sourceId', { sourceId })
+        .execute();
+
+      await manager.remove(source);
+
+      return { message: 'Ingredients merged successfully', targetId };
+    });
+  }
+
+  async mapSynonym(ingredientId: string, synonym: string) {
+    const ingredient = await this.ingredientRepository.findOne({
+      where: { id: ingredientId },
+    });
+    if (!ingredient) {
+      throw new NotFoundException('Ingredient not found');
     }
 
-    // Merge: move all children from source to target, then delete source
-    const children = await this.ingredientRepository.find({
-      where: { parent: { id: sourceId } },
-    });
+    const normalizedSynonym = synonym.toLowerCase().trim();
+    const existingSynonyms = ingredient.synonyms
+      ? ingredient.synonyms.split(',').map((s) => s.toLowerCase().trim())
+      : [];
 
-    for (const child of children) {
-      child.parent = target;
-      await this.ingredientRepository.save(child);
+    if (existingSynonyms.includes(normalizedSynonym)) {
+      throw new ConflictException(
+        'Synonym is already mapped to this ingredient.',
+      );
     }
 
-    await this.ingredientRepository.remove(source);
+    existingSynonyms.push(normalizedSynonym);
+    ingredient.synonyms = existingSynonyms.join(',');
 
-    return { message: 'Ingredients merged successfully', targetId };
+    return await this.ingredientRepository.save(ingredient);
   }
 
   async hideExternalCocktail(
@@ -151,7 +215,7 @@ export class AdminService {
       });
     } else {
       setting.settingValue = value;
-      setting.updatedBy = { id: updatedBy } as any;
+      setting.updatedBy = { id: updatedBy } as User;
     }
 
     return this.settingsRepository.save(setting);

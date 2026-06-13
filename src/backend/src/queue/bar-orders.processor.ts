@@ -7,14 +7,16 @@ import { Decimal } from 'decimal.js';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
+import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { UnitConverterService } from '../utils/unit-converter.service';
 
-interface PrepareJobPayload {
+export interface PrepareJobPayload {
   type: 'prepare' | 'undo' | 'batch-prepare' | 'batch-undo';
   cocktailId?: string;
   bartenderId: string;
   preparationLogId: string;
   servings?: number;
+  totalVolumeMl?: number;
   force?: boolean;
   batchOrders?: Array<{
     cocktailId: string;
@@ -64,6 +66,7 @@ export class BarOrdersProcessor extends WorkerHost {
       bartenderId,
       preparationLogId,
       servings = 1,
+      totalVolumeMl,
       force,
     } = job.data;
     this.logger.log(
@@ -82,6 +85,16 @@ export class BarOrdersProcessor extends WorkerHost {
           throw new Error(`PreparationLog ${preparationLogId} not found`);
         }
 
+        if (preparationLog.status === 'cancelled') {
+          this.logger.log(
+            `Preparation job ${preparationLogId} skipped because it was cancelled.`,
+          );
+          return { status: 'cancelled', logId: preparationLogId };
+        }
+
+        preparationLog.status = 'evaluating';
+        await transactionalEntityManager.save(preparationLog);
+
         const cocktail = await transactionalEntityManager.findOne(Cocktail, {
           where: { id: cocktailId },
           relations: ['ingredients'],
@@ -92,17 +105,36 @@ export class BarOrdersProcessor extends WorkerHost {
           throw new Error(`Cocktail ${cocktailId} not found`);
         }
 
-        // Lock all inventory rows at once for greedy synonym matching
         const allStock = await transactionalEntityManager
           .createQueryBuilder(BarInventory, 'bi')
+          .innerJoinAndSelect('bi.ingredient', 'ingredient')
           .setLock('pessimistic_write')
           .getMany();
 
         const deductions: Record<string, unknown>[] = [];
-
         const remainingStock = new Map(
           allStock.map((row) => [row.id, { row, quantity: row.quantity }]),
         );
+        let preparingSet = false;
+
+        const partBased = cocktail.ingredients.some(
+          (i) => i.unit === 'part' || i.unit === 'parts',
+        );
+        let partSize = new Decimal(30);
+        if (partBased) {
+          const totalParts = cocktail.ingredients.reduce(
+            (sum, i) =>
+              sum.plus(
+                i.unit === 'part' || i.unit === 'parts'
+                  ? new Decimal(i.amount)
+                  : new Decimal(0),
+              ),
+            new Decimal(0),
+          );
+          if (totalVolumeMl && totalParts.gt(0)) {
+            partSize = new Decimal(totalVolumeMl).div(totalParts);
+          }
+        }
 
         for (const req of cocktail.ingredients) {
           if (!req.ingredient || !req.ingredient.id) {
@@ -113,75 +145,70 @@ export class BarOrdersProcessor extends WorkerHost {
             );
           }
 
-          const amountPerServing = this.unitConverter.convert(
-            req.amount,
-            req.unit,
-            req.ingredient.baseUnit,
-            req.ingredient,
-          );
-          const totalAmount = amountPerServing.times(new Decimal(servings));
+          let totalAmount: Decimal;
+          if (req.unit === 'part' || req.unit === 'parts') {
+            const calculatedMl = partSize.times(new Decimal(req.amount));
+            totalAmount = this.unitConverter.convert(
+              calculatedMl,
+              'ml',
+              req.ingredient.baseUnit,
+              req.ingredient,
+            );
+          } else {
+            const safeAmount = req.amount ? req.amount : new Decimal(0);
+            const amountPerServing = this.unitConverter.convert(
+              safeAmount,
+              req.unit,
+              req.ingredient.baseUnit,
+              req.ingredient,
+            );
+            totalAmount = amountPerServing.times(new Decimal(servings));
+          }
+
           const requiredName = req.ingredient.name.toLowerCase().trim();
 
-          // Find eligible inventory rows: direct ID match + synonym matches
-          const eligible: Array<{
-            rowId: string;
-            ingredientName: string;
-            quantity: Decimal;
-            excess: Decimal;
-          }> = [];
-
+          const eligible: Array<{ rowId: string; quantity: Decimal }> = [];
           for (const [rowId, entry] of remainingStock) {
             const row = entry.row;
             if (!row.ingredient) continue;
 
-            // Direct ID match
-            if (row.ingredient.id === req.ingredient.id) {
-              if (entry.quantity.gte(totalAmount)) {
-                eligible.push({
-                  rowId,
-                  ingredientName: row.ingredient.name,
-                  quantity: entry.quantity,
-                  excess: entry.quantity.minus(totalAmount),
-                });
-              }
-              continue;
-            }
-
-            // Synonym match: inventory ingredient name or synonyms match required name
             const rowName = row.ingredient.name.toLowerCase().trim();
-            let isSynonym = false;
-            if (rowName === requiredName) {
-              isSynonym = true;
-            } else if (row.ingredient.synonyms) {
-              const synNames = row.ingredient.synonyms
-                .split(',')
-                .map((s) => s.toLowerCase().trim());
-              if (synNames.includes(requiredName)) {
-                isSynonym = true;
-              }
-            }
+            const synNames = row.ingredient.synonyms
+              ? row.ingredient.synonyms
+                  .split(',')
+                  .map((s) => s.toLowerCase().trim())
+              : [];
 
-            if (isSynonym && entry.quantity.gte(totalAmount)) {
-              eligible.push({
-                rowId,
-                ingredientName: row.ingredient.name,
-                quantity: entry.quantity,
-                excess: entry.quantity.minus(totalAmount),
-              });
+            if (
+              row.ingredient.id === req.ingredient.id ||
+              rowName === requiredName ||
+              synNames.includes(requiredName)
+            ) {
+              eligible.push({ rowId, quantity: entry.quantity });
             }
           }
 
-          // Greedy: pick the row with smallest excess (least overflow)
-          eligible.sort((a, b) => a.excess.comparedTo(b.excess));
+          let remainingToDeduct = new Decimal(totalAmount);
+          const allocations: Array<{
+            rowId: string;
+            amount: Decimal;
+            name: string;
+          }> = [];
 
-          const bestMatch = eligible[0] || null;
+          eligible.sort((a, b) => b.quantity.comparedTo(a.quantity));
 
-          if (!bestMatch) {
-            const isOptional =
-              (req as any).is_optional === true ||
-              (req as any).type === 'garnish' ||
-              (req as any).type === 'rinse';
+          const reqAny = req as Record<string, unknown>;
+          const isOptional =
+            reqAny.is_optional === true ||
+            reqAny.type === 'garnish' ||
+            reqAny.type === 'rinse';
 
+          let totalAvailable = new Decimal(0);
+          for (const stockUnit of eligible) {
+            totalAvailable = totalAvailable.plus(stockUnit.quantity);
+          }
+
+          if (totalAvailable.lt(totalAmount)) {
             if (force || isOptional) {
               deductions.push({
                 ingredientId: req.ingredient.id,
@@ -196,57 +223,72 @@ export class BarOrdersProcessor extends WorkerHost {
 
             preparationLog.status = 'failed_insufficient_stock';
             await transactionalEntityManager.save(preparationLog);
-            this.logger.warn(
-              `Insufficient stock for ingredient ${req.ingredient.name}: ` +
-                `need ${totalAmount}`,
+            return {
+              status: 'failed_insufficient_stock',
+              logId: preparationLogId,
+            };
+          }
+
+          for (const stockUnit of eligible) {
+            if (remainingToDeduct.isZero()) break;
+            const entry = remainingStock.get(stockUnit.rowId)!;
+            const deductAmt = Decimal.min(remainingToDeduct, entry.quantity);
+
+            if (deductAmt.gt(0)) {
+              allocations.push({
+                rowId: stockUnit.rowId,
+                amount: deductAmt,
+                name: entry.row.ingredient.name,
+              });
+              remainingToDeduct = remainingToDeduct.minus(deductAmt);
+            }
+          }
+
+          if (!preparingSet && allocations.length > 0) {
+            const currentLog = await transactionalEntityManager.findOne(
+              PreparationLog,
+              { where: { id: preparationLogId } },
             );
-            return {
-              status: 'failed_insufficient_stock',
-              logId: preparationLogId,
-            };
-          }
-
-          // Deduct from the best match row
-          const result = await transactionalEntityManager
-            .createQueryBuilder()
-            .update(BarInventory)
-            .set({ quantity: () => `quantity - ${totalAmount.toString()}` })
-            .where('id = :rowId', { rowId: bestMatch.rowId })
-            .andWhere('quantity >= :amount', {
-              amount: totalAmount.toString(),
-            })
-            .execute();
-
-          if (!result.affected || result.affected === 0) {
-            preparationLog.status = 'failed_insufficient_stock';
+            if (currentLog?.status === 'cancelled') {
+              return { status: 'cancelled', logId: preparationLogId };
+            }
+            preparationLog.status = 'preparing';
             await transactionalEntityManager.save(preparationLog);
-            return {
-              status: 'failed_insufficient_stock',
-              logId: preparationLogId,
-            };
+            preparingSet = true;
           }
 
-          // Update cached quantity for subsequent iterations
-          const newQty = bestMatch.quantity.minus(totalAmount);
-          remainingStock.set(bestMatch.rowId, {
-            row: remainingStock.get(bestMatch.rowId)!.row,
-            quantity: newQty,
-          });
+          for (const alloc of allocations) {
+            const result = await transactionalEntityManager
+              .createQueryBuilder()
+              .update(BarInventory)
+              .set({ quantity: () => `quantity - ${alloc.amount.toString()}` })
+              .where('id = :rowId', { rowId: alloc.rowId })
+              .andWhere('quantity >= :amount', {
+                amount: alloc.amount.toString(),
+              })
+              .execute();
 
-          deductions.push({
-            ingredientId: req.ingredient.id,
-            ingredientName: req.ingredient.name,
-            amount: totalAmount.toString(),
-            unit: req.ingredient.baseUnit,
-            actualInventoryRow: bestMatch.ingredientName,
-            unitConverted: {
-              from: { amount: req.amount.toString(), unit: req.unit },
-              to: {
-                amount: totalAmount.toString(),
-                unit: req.ingredient.baseUnit,
-              },
-            },
-          });
+            if (!result.affected || result.affected === 0) {
+              preparationLog.status = 'failed_insufficient_stock';
+              await transactionalEntityManager.save(preparationLog);
+              return {
+                status: 'failed_insufficient_stock',
+                logId: preparationLogId,
+              };
+            }
+
+            const entry = remainingStock.get(alloc.rowId)!;
+            entry.quantity = entry.quantity.minus(alloc.amount);
+
+            deductions.push({
+              ingredientId: req.ingredient.id,
+              ingredientName: req.ingredient.name,
+              amount: alloc.amount.toString(),
+              unit: req.ingredient.baseUnit,
+              actualInventoryRow: alloc.name,
+              inventoryRowId: alloc.rowId,
+            });
+          }
         }
 
         preparationLog.status = 'completed';
@@ -260,17 +302,16 @@ export class BarOrdersProcessor extends WorkerHost {
         );
         return { status: 'completed', logId: preparationLogId };
       })
-      .catch(async (error) => {
-        this.logger.error(`Failed to process prepare job: ${error.message}`);
+      .catch(async (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to process prepare job: ${message}`);
 
         try {
           await this.preparationLogRepository.update(preparationLogId, {
             status: 'failed_other',
           });
-        } catch (updateError) {
-          this.logger.error(
-            `Failed to update preparation log status: ${updateError}`,
-          );
+        } catch {
+          // Best-effort status update — ignore failures
         }
 
         throw error;
@@ -293,7 +334,18 @@ export class BarOrdersProcessor extends WorkerHost {
         if (!log)
           throw new Error(`PreparationLog ${preparationLogId} not found`);
 
+        if (log.status === 'cancelled') {
+          this.logger.log(
+            `Batch preparation job ${preparationLogId} skipped because it was cancelled.`,
+          );
+          return { status: 'cancelled', logId: preparationLogId };
+        }
+
+        log.status = 'evaluating';
+        await tx.save(log);
+
         const allDeductions: Record<string, unknown>[] = [];
+        let preparingSet = false;
 
         for (const order of batchOrders) {
           const cocktail = await tx.findOne(Cocktail, {
@@ -309,8 +361,9 @@ export class BarOrdersProcessor extends WorkerHost {
           for (const req of cocktail.ingredients) {
             if (!req.ingredient?.id) continue;
 
+            const safeAmount = req.amount ? req.amount : new Decimal(0);
             const amountPerServing = this.unitConverter.convert(
-              req.amount,
+              safeAmount,
               req.unit,
               req.ingredient.baseUnit,
               req.ingredient,
@@ -330,10 +383,11 @@ export class BarOrdersProcessor extends WorkerHost {
             const currentQuantity = barStock
               ? barStock.quantity
               : new Decimal(0);
+            const reqAny = req as Record<string, unknown>;
             const isOptional =
-              (req as any).is_optional === true ||
-              (req as any).type === 'garnish' ||
-              (req as any).type === 'rinse';
+              reqAny.is_optional === true ||
+              reqAny.type === 'garnish' ||
+              reqAny.type === 'rinse';
 
             if (currentQuantity.lessThan(totalAmount)) {
               if (order.force || isOptional) {
@@ -355,6 +409,18 @@ export class BarOrdersProcessor extends WorkerHost {
                 status: 'failed_insufficient_stock',
                 logId: preparationLogId,
               };
+            }
+
+            if (!preparingSet) {
+              const currentLog = await tx.findOne(PreparationLog, {
+                where: { id: preparationLogId },
+              });
+              if (currentLog?.status === 'cancelled') {
+                return { status: 'cancelled', logId: preparationLogId };
+              }
+              log.status = 'preparing';
+              await tx.save(log);
+              preparingSet = true;
             }
 
             await tx
@@ -388,13 +454,16 @@ export class BarOrdersProcessor extends WorkerHost {
 
         return { status: 'completed', logId: preparationLogId };
       })
-      .catch(async (error) => {
-        this.logger.error(`Batch prepare failed: ${error.message}`);
+      .catch(async (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Batch prepare failed: ${message}`);
         try {
           await this.preparationLogRepository.update(preparationLogId, {
             status: 'failed_other',
           });
-        } catch {}
+        } catch {
+          // Best-effort status update — ignore failures
+        }
         throw error;
       });
   }
@@ -429,6 +498,16 @@ export class BarOrdersProcessor extends WorkerHost {
 
         if (!ingredientId || !amount) continue;
 
+        const ingredient = await tx.findOne(Ingredient, {
+          where: { id: ingredientId },
+        });
+
+        if (!ingredient) {
+          throw new Error(
+            `Internal Server Error: Cannot restore inventory. Ingredient taxonomy has been mutated. Missing ID: ${ingredientId}`,
+          );
+        }
+
         const barStock = await tx
           .createQueryBuilder(BarInventory, 'bi')
           .setLock('pessimistic_write')
@@ -436,8 +515,14 @@ export class BarOrdersProcessor extends WorkerHost {
           .getOne();
 
         if (!barStock) {
-          this.logger.warn(
-            `Cannot restore ingredient ${deduction.ingredientName}: inventory row deleted`,
+          const newStock = tx.create(BarInventory, {
+            ingredient,
+            quantity: new Decimal(amount),
+            expirationDate: null,
+          });
+          await tx.save(newStock);
+          this.logger.log(
+            `Recreated deleted inventory row for ${String(deduction.ingredientName)} with ${amount}`,
           );
           continue;
         }
@@ -502,29 +587,47 @@ export class BarOrdersProcessor extends WorkerHost {
 
           const ingredientId = deduction.ingredientId as string;
           const amount = deduction.amount as string;
+          const rowId = deduction.inventoryRowId as string;
 
-          const barStock = await transactionalEntityManager
-            .createQueryBuilder(BarInventory, 'bi')
-            .setLock('pessimistic_write')
-            .where('bi.ingredient_id = :ingredientId', { ingredientId })
-            .getOne();
+          const ingredient = await transactionalEntityManager.findOne(
+            Ingredient,
+            {
+              where: { id: ingredientId },
+            },
+          );
 
-          if (!barStock) {
-            this.logger.warn(
-              `Cannot restore ingredient ${deduction.ingredientName}: no inventory row found (possibly deleted)`,
+          if (!ingredient) {
+            throw new Error(
+              `Internal Server Error: Cannot restore inventory. Ingredient taxonomy has been mutated. Missing ID: ${ingredientId}`,
             );
-            continue;
           }
 
-          await transactionalEntityManager
-            .createQueryBuilder()
-            .update(BarInventory)
-            .set({ quantity: () => `quantity + ${amount}` })
-            .where('ingredient_id = :ingredientId', { ingredientId })
-            .execute();
+          let barStock = await transactionalEntityManager.findOne(
+            BarInventory,
+            {
+              where: { id: rowId },
+            },
+          );
+
+          if (!barStock) {
+            barStock = transactionalEntityManager.create(BarInventory, {
+              id: rowId,
+              ingredient,
+              quantity: new Decimal(amount),
+              expirationDate: null,
+            });
+            await transactionalEntityManager.save(barStock);
+          } else {
+            await transactionalEntityManager
+              .createQueryBuilder()
+              .update(BarInventory)
+              .set({ quantity: () => `quantity + ${amount}` })
+              .where('id = :rowId', { rowId })
+              .execute();
+          }
 
           this.logger.log(
-            `Restored ${amount} of ${deduction.ingredientName} (${ingredientId})`,
+            `Restored ${amount} of ${String(deduction.ingredientName)} (${ingredientId})`,
           );
         }
 
@@ -536,8 +639,9 @@ export class BarOrdersProcessor extends WorkerHost {
         );
         return { status: 'undone', logId: preparationLogId };
       })
-      .catch(async (error) => {
-        this.logger.error(`Failed to process undo job: ${error.message}`);
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to process undo job: ${message}`);
         throw error;
       });
   }

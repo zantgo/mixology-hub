@@ -11,8 +11,58 @@ import { CocktailsService } from './cocktails.service';
 import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { BarInventoryService } from '../inventory/bar-inventory.service';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { MeasureParserService } from '../utils/measure-parser.service';
+
+export interface CocktailDbDrink {
+  idDrink: string;
+  strDrink: string;
+  strInstructions: string | null;
+  strCategory: string | null;
+  strAlcoholic: string;
+  strGlass: string | null;
+  strTags: string | null;
+  [key: `strIngredient${number}`]: string | null;
+  [key: `strMeasure${number}`]: string | null;
+}
+
+export interface FormattedCocktail {
+  id: string;
+  externalId: string;
+  name: string;
+  description: string;
+  instructions: string;
+  is_public: boolean;
+  source: string;
+  image_full: string | null;
+  image_thumb: string | null;
+  category: string | null;
+  alcoholic: boolean;
+  glass: string | null;
+  tags: string[];
+  ingredients: FormattedCocktailIngredient[];
+  makeabilityScore?: number;
+  isMakeable?: boolean;
+  metadata: {
+    complexityScore: number;
+    ingredientCount: number;
+    estimatedVolumeMl: number;
+    lastUpdated: string;
+    source: string;
+  };
+}
+
+export interface FormattedCocktailIngredient {
+  measure: string;
+  amount: number;
+  unit: string;
+  ingredient: {
+    id: string;
+    name: string;
+    externalId?: string;
+  };
+}
 
 export interface SearchFilters {
   ingredient?: string;
@@ -37,7 +87,7 @@ export interface SearchOptions {
 }
 
 export interface FetchSearchResult {
-  data: any[];
+  data: FormattedCocktail[];
   meta: {
     currentPage: number;
     nextPage: number | null;
@@ -70,9 +120,13 @@ export class CocktailAggregatorService {
    * Fetch a single external cocktail by its TheCocktailDB ID, mapped to local format.
    * Used by FavoritesService to hydrate external favorites.
    */
-  async getExternalCocktailById(externalId: string) {
+  async getExternalCocktailById(
+    externalId: string,
+  ): Promise<FormattedCocktail | null> {
     try {
-      const drink = await this.externalService.getCocktailById(externalId);
+      const drink = (await this.externalService.getCocktailById(
+        externalId,
+      )) as CocktailDbDrink | null;
       if (!drink) return null;
       return this.mapExternalToLocal(drink);
     } catch (err) {
@@ -109,17 +163,13 @@ export class CocktailAggregatorService {
       );
 
       // Try to get cached results
-      let cachedResults = await this.cacheManager.get<any[]>(
+      let cachedResults = await this.cacheManager.get<FormattedCocktail[]>(
         `search:${cacheKey}`,
       );
 
-      if (!cachedResults) {
+      if (!cachedResults || !Array.isArray(cachedResults)) {
         // Cache miss - fetch fresh data
-        cachedResults = await this.fetchSearchResults(
-          sanitizedName,
-          options,
-          userId,
-        );
+        cachedResults = await this.fetchSearchResults(sanitizedName, options);
         // Cache results for 1 minute (reduced from 5 to prevent Redis memory bloat)
         await this.cacheManager.set(`search:${cacheKey}`, cachedResults, 60000);
       }
@@ -195,12 +245,15 @@ export class CocktailAggregatorService {
     }
   }
 
-  private applyFilters(cocktails: any[], filters: SearchFilters): any[] {
+  private applyFilters(
+    cocktails: FormattedCocktail[],
+    filters: SearchFilters,
+  ): FormattedCocktail[] {
     return cocktails.filter((cocktail) => {
       // Ingredient filter
       if (filters.ingredient) {
         const normalizedFilter = filters.ingredient.toLowerCase().trim();
-        const hasIngredient = cocktail.ingredients.some((ing: any) => {
+        const hasIngredient = cocktail.ingredients.some((ing) => {
           const ingName = ing.ingredient?.name as string | undefined;
           return (
             ingName && ingName.toLowerCase().trim().includes(normalizedFilter)
@@ -253,27 +306,32 @@ export class CocktailAggregatorService {
   }
 
   private applyStrictInclusionFilter(
-    cocktails: any[],
+    cocktails: FormattedCocktail[],
     requiredIngredients: string[],
-  ): any[] {
+  ): FormattedCocktail[] {
     const normalized = requiredIngredients.map((ing) =>
       ing.toLowerCase().trim(),
     );
 
     return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map(
-        (ing: any) => (ing.ingredient?.name || '').toLowerCase().trim(),
+      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
+        (ing.ingredient?.name || '').toLowerCase().trim(),
       );
 
       return normalized.every((req) =>
-        cocktailIngredientNames.some((cName: string) => cName.includes(req)),
+        cocktailIngredientNames.some((cName) => cName.includes(req)),
       );
     });
   }
 
-  private async calculateMakeabilityScores(cocktails: any[]): Promise<any[]> {
+  private async calculateMakeabilityScores(
+    cocktails: FormattedCocktail[],
+  ): Promise<FormattedCocktail[]> {
     try {
-      const inventory = await this.inventoryService.getInventory();
+      const inventory = await this.inventoryService.getInventory({
+        limit: 9999,
+        page: 1,
+      });
       const inventoryData = inventory.data;
 
       return Promise.all(
@@ -300,8 +358,8 @@ export class CocktailAggregatorService {
   }
 
   private async calculateMakeabilityScore(
-    cocktail: any,
-    inventory: any[],
+    cocktail: FormattedCocktail,
+    inventory: BarInventory[],
   ): Promise<number> {
     if (!cocktail.ingredients || cocktail.ingredients.length === 0) {
       return 0;
@@ -337,7 +395,7 @@ export class CocktailAggregatorService {
         );
         if (match && match.confidence >= 0.8) {
           const substitute = inventory.find(
-            (item: any) => item.ingredient.id === match.ingredient.id,
+            (item) => item.ingredient.id === match.ingredient.id,
           );
           if (substitute) {
             matchedIngredients += match.confidence;
@@ -355,33 +413,36 @@ export class CocktailAggregatorService {
   }
 
   private sortCocktails(
-    cocktails: any[],
+    cocktails: FormattedCocktail[],
     sortBy?: string,
     sortOrder?: string,
-  ): any[] {
+  ): FormattedCocktail[] {
     const order = sortOrder === 'desc' ? -1 : 1;
 
     return [...cocktails].sort((a, b) => {
       switch (sortBy) {
-        case 'makeability':
-          const scoreA = a.makeabilityScore || 0;
-          const scoreB = b.makeabilityScore || 0;
+        case 'makeability': {
+          const scoreA: number = a.makeabilityScore || 0;
+          const scoreB: number = b.makeabilityScore || 0;
           return (scoreB - scoreA) * order;
+        }
 
-        case 'complexity':
-          const complexityA = a.ingredients?.length || 0;
-          const complexityB = b.ingredients?.length || 0;
+        case 'complexity': {
+          const complexityA: number = a.ingredients?.length || 0;
+          const complexityB: number = b.ingredients?.length || 0;
           return (complexityB - complexityA) * order;
+        }
 
         case 'popularity':
           // Placeholder - would need popularity data
           return 0;
 
         case 'name':
-        default:
-          const nameA = a.name?.toLowerCase() || '';
-          const nameB = b.name?.toLowerCase() || '';
+        default: {
+          const nameA: string = a.name?.toLowerCase() || '';
+          const nameB: string = b.name?.toLowerCase() || '';
           return nameA.localeCompare(nameB) * order;
+        }
       }
     });
   }
@@ -389,21 +450,23 @@ export class CocktailAggregatorService {
   /**
    * Enhanced mapper with validation and additional metadata.
    */
-  private async mapExternalToLocal(drink: any) {
+  private mapExternalToLocal(drink: CocktailDbDrink): FormattedCocktail | null {
     if (!drink || !drink.idDrink || !drink.strDrink) {
       return null;
     }
 
-    const ingredients: any[] = [];
+    const ingredients: FormattedCocktailIngredient[] = [];
     let totalVolumeMl = new Decimal(0);
 
     // TheCocktailDB uses strIngredient1 up to 15
     for (let i = 1; i <= 15; i++) {
-      const ingredientName = drink[`strIngredient${i}`];
-      const measure = drink[`strMeasure${i}`];
+      const ingredientKey = `strIngredient${i}` as const;
+      const measureKey = `strMeasure${i}` as const;
+      const ingredientName: string | null = drink[ingredientKey];
+      const measure: string | null = drink[measureKey];
 
       if (ingredientName && ingredientName.trim() !== '') {
-        const parsedMeasure = this.measureParser.parse(measure);
+        const parsedMeasure = this.measureParser.parse(measure ?? '');
 
         ingredients.push({
           measure: measure ? measure.trim() : 'to taste',
@@ -486,37 +549,37 @@ export class CocktailAggregatorService {
   }
 
   private applyExclusionFilter(
-    cocktails: any[],
+    cocktails: FormattedCocktail[],
     excludedIngredients: string[],
-  ): any[] {
+  ): FormattedCocktail[] {
     const normalized = excludedIngredients.map((ing) =>
       ing.toLowerCase().trim(),
     );
 
     return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map(
-        (ing: any) => (ing.ingredient?.name || '').toLowerCase().trim(),
+      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
+        (ing.ingredient?.name || '').toLowerCase().trim(),
       );
 
       return !normalized.some((excl) =>
-        cocktailIngredientNames.some((cName: string) => cName.includes(excl)),
+        cocktailIngredientNames.some((cName) => cName.includes(excl)),
       );
     });
   }
 
   private applyIngredientsAnyFilter(
-    cocktails: any[],
+    cocktails: FormattedCocktail[],
     anyIngredients: string[],
-  ): any[] {
+  ): FormattedCocktail[] {
     const normalized = anyIngredients.map((ing) => ing.toLowerCase().trim());
 
     return cocktails.filter((cocktail) => {
-      const cocktailIngredientNames = (cocktail.ingredients || []).map(
-        (ing: any) => (ing.ingredient?.name || '').toLowerCase().trim(),
+      const cocktailIngredientNames = (cocktail.ingredients || []).map((ing) =>
+        (ing.ingredient?.name || '').toLowerCase().trim(),
       );
 
       return normalized.some((req) =>
-        cocktailIngredientNames.some((cName: string) => cName.includes(req)),
+        cocktailIngredientNames.some((cName) => cName.includes(req)),
       );
     });
   }
@@ -543,36 +606,40 @@ export class CocktailAggregatorService {
   private async fetchSearchResults(
     name: string,
     options: SearchOptions,
-    userId?: string,
-  ): Promise<any[]> {
+  ): Promise<FormattedCocktail[]> {
     // 1. Fetch data from all sources in parallel
+    const hasQuery = name && name.trim().length > 0;
     const [localCocktails, externalCocktails] = await Promise.all([
       options.includeLocal !== false
         ? this.fetchLocalCocktails(name, options)
-        : Promise.resolve([]),
-      options.includeExternal !== false
+        : Promise.resolve([] as FormattedCocktail[]),
+      options.includeExternal !== false && hasQuery
         ? this.fetchExternalCocktails(name)
-        : Promise.resolve([]),
+        : Promise.resolve([] as CocktailDbDrink[]),
     ]);
 
     // 2. Normalize and combine
-    const normalizedExternal = Array.isArray(externalCocktails)
-      ? (
-          await Promise.all(
-            externalCocktails.map((drink) => this.mapExternalToLocal(drink)),
-          )
-        ).filter(Boolean)
+    const normalizedExternal: (FormattedCocktail | null)[] = Array.isArray(
+      externalCocktails,
+    )
+      ? externalCocktails.map((drink: CocktailDbDrink) =>
+          this.mapExternalToLocal(drink),
+        )
       : [];
+    const validExternal = normalizedExternal.filter(
+      (item): item is FormattedCocktail => item !== null,
+    );
 
-    let unifiedList = [...localCocktails, ...normalizedExternal];
+    let unifiedList: FormattedCocktail[] = [
+      ...localCocktails,
+      ...validExternal,
+    ];
 
     // 2b. Deduplicate: local cocktails take precedence over external ones with matching name (case-insensitive)
     const localNames = new Set(
-      localCocktails
-        .map((c: any) => c.name?.toLowerCase().trim())
-        .filter(Boolean),
+      localCocktails.map((c) => c.name?.toLowerCase().trim()).filter(Boolean),
     );
-    unifiedList = unifiedList.filter((item: any) => {
+    unifiedList = unifiedList.filter((item) => {
       if (
         item.source === 'api' &&
         localNames.has(item.name?.toLowerCase().trim())
@@ -627,24 +694,24 @@ export class CocktailAggregatorService {
   private async fetchLocalCocktails(
     name: string,
     options?: SearchOptions,
-  ): Promise<any[]> {
+  ): Promise<FormattedCocktail[]> {
     const MAX_LOCAL_FETCH = 100;
 
     try {
       if (name) {
-        const result = await (this.localService as any).searchByName(
+        const result = await this.localService.searchByName(
           name,
           { limit: MAX_LOCAL_FETCH, page: 1 },
           { fuzzy: options?.fuzzy ?? false },
         );
-        return result.data;
+        return result.data as FormattedCocktail[];
       }
 
       const response = await this.localService.findAll({
         limit: MAX_LOCAL_FETCH,
         page: 1,
       });
-      return response.data;
+      return response.data as FormattedCocktail[];
     } catch (error) {
       this.logger.warn('Failed to fetch local cocktails:', error);
 
@@ -655,17 +722,17 @@ export class CocktailAggregatorService {
             limit: MAX_LOCAL_FETCH,
             page: 1,
           });
-          return response.data.filter(
-            (c: any) =>
-              c.name.toLowerCase().includes(name.toLowerCase()) ||
+          return (response.data as FormattedCocktail[]).filter(
+            (c) =>
+              (c.name ?? '').toLowerCase().includes(name.toLowerCase()) ||
               (c.description &&
                 c.description.toLowerCase().includes(name.toLowerCase())) ||
-              c.ingredients.some((ing: any) =>
+              c.ingredients.some((ing) =>
                 ing.ingredient.name.toLowerCase().includes(name.toLowerCase()),
               ),
           );
-        } catch (fallbackError) {
-          this.logger.warn('Fallback local fetch also failed:', fallbackError);
+        } catch (_fallbackError) {
+          this.logger.warn('Fallback local fetch also failed:', _fallbackError);
           return [];
         }
       }
@@ -673,22 +740,27 @@ export class CocktailAggregatorService {
     }
   }
 
-  private async fetchExternalCocktails(name: string): Promise<any[]> {
+  private async fetchExternalCocktails(
+    name: string,
+  ): Promise<CocktailDbDrink[]> {
     try {
       if (!name) {
-        const randomCocktails: any[] = [];
+        const randomCocktails: CocktailDbDrink[] = [];
         for (let i = 0; i < 3; i++) {
           try {
-            const random = await this.externalService.getRandomCocktail();
+            const random =
+              (await this.externalService.getRandomCocktail()) as CocktailDbDrink | null;
             if (random) randomCocktails.push(random);
-          } catch (error) {
+          } catch (_) {
             // Ignore individual random cocktail failures
           }
         }
         return randomCocktails;
       }
 
-      return await this.externalService.searchByName(name);
+      return (await this.externalService.searchByName(
+        name,
+      )) as CocktailDbDrink[];
     } catch (error) {
       this.logger.warn('Failed to fetch external cocktails:', error);
       return [];

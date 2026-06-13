@@ -2,9 +2,12 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { Decimal } from 'decimal.js';
 import { BarInventory } from './entities/bar-inventory.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -12,6 +15,15 @@ import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AddBarInventoryDto } from './dto/add-bar-inventory.dto';
 import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
+
+interface RedisLikeStore {
+  client?: {
+    scanIterator?: (options: {
+      MATCH: string;
+      COUNT?: number;
+    }) => AsyncIterable<string>;
+  };
+}
 
 @Injectable()
 export class BarInventoryService {
@@ -22,6 +34,7 @@ export class BarInventoryService {
     private readonly ingredientRepository: Repository<Ingredient>,
     private readonly unitConverter: UnitConverterService,
     private readonly dataSource: DataSource,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   private isMassUnit(unit: string): boolean {
@@ -32,6 +45,20 @@ export class BarInventoryService {
     return ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes'].includes(
       unit.toLowerCase(),
     );
+  }
+
+  private async clearMakeabilityCache() {
+    const store = (this.cacheManager as Cache & { store?: RedisLikeStore })
+      .store;
+    if (store?.client?.scanIterator) {
+      for await (const key of store.client.scanIterator({
+        MATCH: 'makeability:*',
+      })) {
+        await this.cacheManager.del(key);
+      }
+    } else {
+      await this.cacheManager.clear();
+    }
   }
 
   async addToInventory(dto: AddBarInventoryDto) {
@@ -77,7 +104,9 @@ export class BarInventoryService {
       if (dto.expirationDate) {
         existing.expirationDate = new Date(dto.expirationDate);
       }
-      return this.inventoryRepository.save(existing);
+      const result = await this.inventoryRepository.save(existing);
+      await this.clearMakeabilityCache();
+      return result;
     }
 
     const newItem = this.inventoryRepository.create({
@@ -85,7 +114,9 @@ export class BarInventoryService {
       quantity: normalizedQuantity,
       expirationDate: dto.expirationDate ? new Date(dto.expirationDate) : null,
     });
-    return this.inventoryRepository.save(newItem);
+    const result = await this.inventoryRepository.save(newItem);
+    await this.clearMakeabilityCache();
+    return result;
   }
 
   async getInventory(paginationQuery?: PaginationQueryDto) {
@@ -154,7 +185,9 @@ export class BarInventoryService {
         ? new Date(dto.expirationDate)
         : null;
     }
-    return this.inventoryRepository.save(item);
+    const result = await this.inventoryRepository.save(item);
+    await this.clearMakeabilityCache();
+    return result;
   }
 
   async removeFromInventory(id: string) {
@@ -163,6 +196,7 @@ export class BarInventoryService {
       throw new NotFoundException(`Inventory item ${id} not found`);
     }
     await this.inventoryRepository.remove(item);
+    await this.clearMakeabilityCache();
     return { message: 'Inventory item removed successfully' };
   }
 
@@ -207,12 +241,14 @@ export class BarInventoryService {
           results.push(await manager.save(newItem));
         }
       }
+      await this.clearMakeabilityCache();
       return results;
     });
   }
 
   async bulkDelete(ids: string[]) {
     await this.inventoryRepository.delete(ids);
+    await this.clearMakeabilityCache();
     return { message: `${ids.length} inventory items deleted` };
   }
 }

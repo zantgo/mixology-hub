@@ -13,6 +13,7 @@ import {
   UploadedFile,
   BadRequestException,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -25,7 +26,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CocktailsService } from './cocktails.service';
-import { CocktailAggregatorService } from './cocktail-aggregator.service';
+import {
+  CocktailAggregatorService,
+  type SearchOptions,
+  type SearchFilters,
+} from './cocktail-aggregator.service';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
@@ -41,14 +46,16 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 
+type MulterCallback = (error: Error | null, acceptFile: boolean) => void;
+
 @ApiTags('Cocktails')
 @ApiBearerAuth()
 @Controller('cocktails')
 export class CocktailsController {
   private static readonly IMAGE_FILE_FILTER = (
-    req: any,
+    _req: Request,
     file: Express.Multer.File,
-    cb: Function,
+    cb: MulterCallback,
   ) => {
     if (file && file.mimetype.match(/^image\/(jpeg|png|webp)$/)) {
       cb(null, true);
@@ -79,17 +86,17 @@ export class CocktailsController {
     }),
   )
   async create(
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
     @UploadedFile() file: Express.Multer.File,
     @GetUser() user: User,
   ) {
     let createCocktailDto: CreateCocktailDto;
 
     // Check if we have multipart/form-data with JSON in 'data' field
-    if (body && body.data) {
+    if (body && typeof body.data === 'string') {
       try {
-        createCocktailDto = JSON.parse(body.data);
-      } catch (error) {
+        createCocktailDto = JSON.parse(body.data) as CreateCocktailDto;
+      } catch (_) {
         throw new BadRequestException('Invalid JSON data in form field "data"');
       }
       // Re-validate the parsed JSON through DTO validation
@@ -169,6 +176,11 @@ export class CocktailsController {
     description: 'Number of servings (default: 1)',
   })
   @ApiQuery({
+    name: 'totalVolumeMl',
+    required: false,
+    description: 'Target total volume in ml for part-based recipes',
+  })
+  @ApiQuery({
     name: 'force',
     required: false,
     description: 'Force prepare with partial ingredients',
@@ -177,12 +189,14 @@ export class CocktailsController {
     @Param('id') id: string,
     @GetUser() user: User,
     @Query('servings') servings?: string,
+    @Query('totalVolumeMl') totalVolumeMl?: string,
     @Query('force') force?: string,
   ) {
     return this.cocktailsService.prepare(
       id,
       user.id,
       servings ? parseInt(servings, 10) : 1,
+      totalVolumeMl ? parseFloat(totalVolumeMl) : undefined,
       force === 'true',
     );
   }
@@ -202,6 +216,14 @@ export class CocktailsController {
   })
   undo(@Param('logId') logId: string) {
     return this.cocktailsService.undo(logId);
+  }
+
+  @Post('preparations/:logId/cancel')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel an in-flight cocktail preparation order' })
+  cancelPreparation(@Param('logId') logId: string) {
+    return this.cocktailsService.cancelPreparation(logId);
   }
 
   @Post(':id/rate')
@@ -280,6 +302,18 @@ export class CocktailsController {
     required: false,
     description: 'Filter by glass type (e.g., Highball glass, Martini glass)',
   })
+  @ApiQuery({
+    name: 'excludeIngredients',
+    required: false,
+    description:
+      'Comma-separated ingredient names. Exclude cocktails containing ANY of them.',
+  })
+  @ApiQuery({
+    name: 'ingredientsAny',
+    required: false,
+    description:
+      'Comma-separated ingredient names. Return cocktails containing AT LEAST ONE of them (OR logic).',
+  })
   async findAll(
     @Query() paginationQuery: PaginationQueryDto,
     @Query('name') name?: string,
@@ -287,12 +321,34 @@ export class CocktailsController {
     @Query('includeIngredients') includeIngredients?: string,
     @Query('category') category?: string,
     @Query('glassware') glassware?: string,
+    @Query('excludeIngredients') excludeIngredients?: string,
+    @Query('ingredientsAny') ingredientsAny?: string,
   ) {
-    if (name || fuzzy || includeIngredients || category || glassware) {
-      const searchOptions: any = {
+    if (
+      name ||
+      fuzzy ||
+      includeIngredients ||
+      category ||
+      glassware ||
+      excludeIngredients ||
+      ingredientsAny
+    ) {
+      const searchOptions: SearchOptions = {
         fuzzy: fuzzy === 'true',
         includeIngredients: includeIngredients
           ? includeIngredients
+              .split(',')
+              .map((i) => i.trim())
+              .filter(Boolean)
+          : undefined,
+        excludeIngredients: excludeIngredients
+          ? excludeIngredients
+              .split(',')
+              .map((i) => i.trim())
+              .filter(Boolean)
+          : undefined,
+        ingredientsAny: ingredientsAny
+          ? ingredientsAny
               .split(',')
               .map((i) => i.trim())
               .filter(Boolean)
@@ -301,10 +357,10 @@ export class CocktailsController {
       };
 
       if (category) {
-        searchOptions.filters.category = category;
+        searchOptions.filters!.category = category;
       }
       if (glassware) {
-        searchOptions.filters.glassType = glassware;
+        searchOptions.filters!.glassType = glassware;
       }
 
       return this.aggregatorService.searchUnified(
@@ -334,17 +390,17 @@ export class CocktailsController {
   )
   async update(
     @Param('id') id: string,
-    @Body() body: any,
+    @Body() body: Record<string, unknown>,
     @UploadedFile() file: Express.Multer.File,
     @GetUser() user: User,
   ) {
     let updateCocktailDto: UpdateCocktailDto;
 
     // Check if we have multipart/form-data with JSON in 'data' field
-    if (body && body.data) {
+    if (body && typeof body.data === 'string') {
       try {
-        updateCocktailDto = JSON.parse(body.data);
-      } catch (error) {
+        updateCocktailDto = JSON.parse(body.data) as UpdateCocktailDto;
+      } catch (_) {
         throw new BadRequestException('Invalid JSON data in form field "data"');
       }
       // Re-validate the parsed JSON through DTO validation

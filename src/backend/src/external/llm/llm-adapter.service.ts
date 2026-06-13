@@ -77,7 +77,9 @@ export class LlmAdapterService implements IAiProvider {
       const rawContent = response.data.choices[0].message.content;
 
       if (!rawContent) {
-        throw new BadGatewayException('LLM returned an empty or blocked response.');
+        throw new BadGatewayException(
+          'LLM returned an empty or blocked response.',
+        );
       }
 
       // Robust JSON extraction: find from first '{' to last '}'
@@ -324,7 +326,9 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
 
   private extractRecipeJson(rawContent: string): AiRecipe {
     if (!rawContent) {
-      throw new BadGatewayException('LLM returned an empty or blocked response.');
+      throw new BadGatewayException(
+        'LLM returned an empty or blocked response.',
+      );
     }
     const startIdx = rawContent.indexOf('{');
     const endIdx = rawContent.lastIndexOf('}');

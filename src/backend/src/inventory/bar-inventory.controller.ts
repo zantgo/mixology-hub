@@ -21,6 +21,17 @@ import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 
+interface AuthenticatedUser {
+  id: string;
+  email: string;
+  displayName: string;
+  role: string;
+  emailVerified: boolean;
+  lastLoginAt: Date | null;
+  createdAt: Date;
+  token: string;
+}
+
 @ApiTags('Bar Inventory')
 @ApiBearerAuth()
 @Controller('bar-inventory')
@@ -55,7 +66,10 @@ export class BarInventoryController {
   @Post()
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Add stock to bar inventory (ADMIN ONLY)' })
-  addToInventory(@Body() dto: AddBarInventoryDto, @GetUser() user: any) {
+  addToInventory(
+    @Body() dto: AddBarInventoryDto,
+    @GetUser() _user: AuthenticatedUser,
+  ) {
     return this.inventoryService.addToInventory(dto);
   }
 

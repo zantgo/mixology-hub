@@ -294,3 +294,69 @@ describe('AI Service - Recipe Saving', () => {
   });
 });
 ```
+
+## MCP Transport & Handshake Integration
+
+**Example TDD for MCP Ticketing & Session Lifecycle:**
+```typescript
+describe('MCP Transport & Handshake Integration', () => {
+  it('should generate a one-time ticket and validate it successfully', async () => {
+    const ticketService = app.get(McpTicketService);
+    const userId = 'user-uuid-123';
+
+    // 1. Generate ticket
+    const ticket = await ticketService.generateTicket(userId);
+    expect(ticket).toBeDefined();
+    expect(ticket.length).toBe(64); // 32-byte hex
+
+    // 2. Validate ticket (destroys the ticket after use)
+    const session = await ticketService.validateTicket(ticket);
+    expect(session.userId).toBe(userId);
+    expect(session.ticketId).toBeDefined();
+
+    // 3. Re-validation of same ticket should fail (single-use constraint)
+    await expect(ticketService.validateTicket(ticket))
+      .rejects
+      .toThrow('Invalid or expired ticket');
+  });
+
+  it('should validate tool parameters against schemas before execution', async () => {
+    const mcpServer = app.get(McpServerService);
+    const session = { userId: 'user-123', ticketId: 'session-123', createdAt: new Date() };
+
+    // Attempt tool call with invalid parameter type (string instead of number)
+    const invalidCall = {
+      name: 'convert_units',
+      arguments: {
+        quantity: 'two', // Invalid
+        fromUnit: 'oz',
+        toUnit: 'ml'
+      }
+    };
+
+    const result = await mcpServer.executeTool(invalidCall, session);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid parameters');
+  });
+
+  it('should reject tool calls after session expiry', async () => {
+    const ticketService = app.get(McpTicketService);
+    const mcpServer = app.get(McpServerService);
+
+    const userId = 'user-uuid-456';
+    const ticket = await ticketService.generateTicket(userId);
+    const session = await ticketService.validateTicket(ticket);
+
+    // Simulate session expiry by advancing time
+    jest.advanceTimersByTime(31 * 60 * 1000); // 31 minutes
+
+    const call = {
+      name: 'get_bar_inventory',
+      arguments: { limit: 10 }
+    };
+
+    const result = await mcpServer.executeTool(call, session);
+    expect(result.isError).toBe(true);
+  });
+});
+```

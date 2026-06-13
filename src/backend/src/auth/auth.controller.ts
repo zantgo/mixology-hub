@@ -23,6 +23,17 @@ import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { Public } from './decorators/public.decorator';
 
+interface AuthenticatedRequest extends ExpressRequest {
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    emailVerified: boolean;
+    lastLoginAt: Date | null;
+    createdAt: Date;
+  };
+}
+
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
@@ -77,7 +88,8 @@ export class AuthController {
     @Req() req: ExpressRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const refreshToken = req.cookies?.refreshToken;
+    const cookies = req.cookies as Record<string, string>;
+    const refreshToken = cookies.refreshToken;
     if (!refreshToken) {
       throw new UnauthorizedException('No refresh token');
     }
@@ -94,12 +106,16 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'User successfully logged out' })
-  async logout(@Request() req, @Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Request() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const authHeader = req.headers.authorization;
     const accessToken = authHeader?.startsWith('Bearer ')
       ? authHeader.substring(7)
       : authHeader;
-    const refreshToken = req.cookies?.refreshToken;
+    const cookies = req.cookies as Record<string, string>;
+    const refreshToken = cookies.refreshToken;
     res.clearCookie('refreshToken', {
       path: '/auth',
       httpOnly: true,
@@ -120,7 +136,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user from all devices' })
   @ApiResponse({ status: 200, description: 'User logged out from all devices' })
-  async logoutAll(@Request() req) {
+  async logoutAll(@Request() req: AuthenticatedRequest) {
     return this.authService.logoutAll(req.user.id);
   }
 
@@ -175,7 +191,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'User profile retrieved' })
-  async getProfile(@Request() req) {
+  getProfile(@Request() req: AuthenticatedRequest) {
     return {
       id: req.user.id,
       email: req.user.email,

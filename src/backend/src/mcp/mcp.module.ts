@@ -8,7 +8,6 @@ import { AiToolAudit } from '../ai/entities/ai-tool-audit.entity';
 import { InventoryModule } from '../inventory/inventory.module';
 import { CocktailsModule } from '../cocktails/cocktails.module';
 import { UtilsModule } from '../utils/utils.module';
-import { QueueModule } from '../queue/queue.module';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({

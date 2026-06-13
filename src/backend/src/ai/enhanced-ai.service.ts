@@ -82,6 +82,64 @@ export interface AiRecipeValidationResult {
   suggestions: string[];
 }
 
+interface ParsedRecipeData {
+  name?: string;
+  description?: string;
+  instructions?: string | string[];
+  ingredients?: Array<{
+    name: string;
+    amount: number;
+    unit: string;
+    note?: string;
+  }>;
+  metadata?: {
+    theme?: string;
+    difficulty?: string;
+    preparationTime?: string;
+    servingSize?: number;
+    language?: string;
+  };
+}
+
+interface RecipeToolArgs {
+  limit?: number;
+  name?: string;
+  cocktailId?: string;
+  amount?: number;
+  from?: string;
+  to?: string;
+}
+
+interface IngredientValidationResult {
+  valid: Array<{ name: string; match?: unknown }>;
+  invalid: string[];
+  suggestions: Array<{ original: string; suggestion: string }>;
+}
+
+interface ToolInventoryItem {
+  ingredient?: { name?: string; baseUnit?: string };
+  quantity?: { toString(): string };
+  unit?: string;
+}
+
+interface ToolSearchCocktailItem {
+  id: string;
+  name: string;
+  source: string;
+  ingredients?: Array<unknown>;
+}
+
+interface AiHistoryEntry {
+  id: string;
+  name: string;
+  description: string;
+  validationScore: number;
+  isValid: boolean;
+  savedAsCocktailId: string | null;
+  createdAt: Date;
+  attempts: number;
+}
+
 @Injectable()
 export class EnhancedAiService {
   private readonly logger = new Logger(EnhancedAiService.name);
@@ -167,7 +225,7 @@ export class EnhancedAiService {
 
     // 5. Generate recipe with multiple attempts using MCP tool calling (ADR 0019)
     const maxAttempts = sanitizedRequest.options?.maxAttempts || 3;
-    let bestRecipe: any = null;
+    let bestRecipe: AiRecipeResponse | null = null;
     let bestValidation: AiRecipeValidationResult | null = null;
 
     const sanitizedIngredientNames = validatedIngredients.valid.map(
@@ -186,7 +244,7 @@ export class EnhancedAiService {
           sanitizedIngredientNames,
           this.recipeTools,
           (toolName: string, args: any) =>
-            this.executeRecipeTool(toolName, args),
+            this.executeRecipeTool(toolName, args as RecipeToolArgs),
           {
             theme: sanitizedRequest.theme,
             modifiers: sanitizedRequest.modifiers,
@@ -201,7 +259,7 @@ export class EnhancedAiService {
           rawRecipe,
           sanitizedRequest,
         );
-        const validation = await this.validateGeneratedRecipe(
+        const validation = this.validateGeneratedRecipe(
           parsedRecipe,
           validatedIngredients,
         );
@@ -224,13 +282,15 @@ export class EnhancedAiService {
             validation.issues,
           );
         }
-      } catch (error) {
+      } catch (error: unknown) {
         this.logger.error(`Attempt ${attempt} failed:`, error);
 
         if (attempt === maxAttempts) {
+          const message =
+            error instanceof Error ? error.message : String(error);
           throw new InternalServerErrorException(
             `Failed to generate valid recipe after ${maxAttempts} attempts. ` +
-              `Last error: ${error.message}`,
+              `Last error: ${message}`,
           );
         }
       }
@@ -291,16 +351,15 @@ export class EnhancedAiService {
       throw new NotFoundException('AI recipe not found or access denied');
     }
 
-    let recipeData: any;
+    let recipeData: ParsedRecipeData;
     try {
-      recipeData = JSON.parse(original.recipe_data || '{}');
+      const rawRecipeJson: string = (original.recipe_data as string) || '{}';
+      recipeData = JSON.parse(rawRecipeJson) as ParsedRecipeData;
     } catch {
       throw new BadRequestException('Original recipe data is corrupt');
     }
 
-    const ingredientNames = (recipeData.ingredients || []).map(
-      (i: any) => i.name || i,
-    );
+    const ingredientNames = (recipeData.ingredients || []).map((i) => i.name);
 
     if (ingredientNames.length === 0) {
       throw new BadRequestException('No ingredients found in original recipe');
@@ -310,7 +369,8 @@ export class EnhancedAiService {
       ingredients: ingredientNames,
       theme: recipeData.metadata?.theme,
       modifiers: ['different variation'],
-      difficulty: recipeData.metadata?.difficulty,
+      difficulty: recipeData.metadata
+        ?.difficulty as AiRecipeRequest['difficulty'],
       servingSize: recipeData.metadata?.servingSize,
       language: recipeData.metadata?.language,
     });
@@ -331,13 +391,14 @@ export class EnhancedAiService {
     }
 
     // 2. Parse the stored recipe
-    const recipeData = JSON.parse(aiRecord.recipe_data);
+    const recipeJson: string = aiRecord.recipe_data as string;
+    const recipeData = JSON.parse(recipeJson) as ParsedRecipeData;
 
     // 3. Re-validate with strict rules if requested
-    const validation = await this.validateGeneratedRecipe(
-      recipeData,
+    const validation = this.validateGeneratedRecipe(
+      recipeData as unknown as AiRecipeResponse,
       {
-        valid: recipeData.ingredients,
+        valid: recipeData.ingredients || [],
         invalid: [],
         suggestions: [],
       },
@@ -353,23 +414,26 @@ export class EnhancedAiService {
 
     // 4. Map ingredients to database entities
     const ingredientEntities = await this.mapIngredientsToEntities(
-      recipeData.ingredients,
+      recipeData.ingredients || [],
     );
 
     // 5. Create cocktail entity
+    const ingredients = recipeData.ingredients || [];
     const cocktail = this.cocktailRepository.create({
       name: recipeData.name,
       description: recipeData.description,
-      instructions: recipeData.instructions.join('\n'),
+      instructions: Array.isArray(recipeData.instructions)
+        ? recipeData.instructions.join('\n')
+        : recipeData.instructions || '',
       is_public: options?.makePublic || false,
       source: 'ai',
       user: { id: userId },
       ingredients: ingredientEntities.map((ingredient, index) => {
         const cocktailIngredient = new CocktailIngredient();
         cocktailIngredient.ingredient = ingredient;
-        cocktailIngredient.amount = recipeData.ingredients[index].amount;
-        cocktailIngredient.unit = recipeData.ingredients[index].unit;
-        cocktailIngredient.measure = recipeData.ingredients[index].note || '';
+        cocktailIngredient.amount = new Decimal(ingredients[index].amount);
+        cocktailIngredient.unit = ingredients[index].unit;
+        cocktailIngredient.measure = ingredients[index].note || '';
         return cocktailIngredient;
       }),
     });
@@ -391,7 +455,7 @@ export class EnhancedAiService {
   async getAiRecipeHistory(
     userId: string,
     pagination: PaginationQueryDto,
-  ): Promise<{ data: any[]; total: number }> {
+  ): Promise<{ data: AiHistoryEntry[]; total: number }> {
     const { limit = 10, page = 1 } = pagination;
     const offset = (page - 1) * limit;
     const [records, total] = await this.aiRepository.findAndCount({
@@ -401,16 +465,20 @@ export class EnhancedAiService {
       take: limit,
     });
 
-    const data = records.map((record) => ({
-      id: record.id,
-      name: JSON.parse(record.recipe_data).name,
-      description: JSON.parse(record.recipe_data).description,
-      validationScore: record.validation_score,
-      isValid: record.is_valid,
-      savedAsCocktailId: record.saved_as_cocktail_id,
-      createdAt: record.created_at,
-      attempts: record.attempts,
-    }));
+    const data: AiHistoryEntry[] = records.map((record) => {
+      const recipeJson: string = record.recipe_data as string;
+      const parsed = JSON.parse(recipeJson) as ParsedRecipeData;
+      return {
+        id: record.id,
+        name: parsed.name || '',
+        description: parsed.description || '',
+        validationScore: record.validation_score,
+        isValid: record.is_valid,
+        savedAsCocktailId: record.saved_as_cocktail_id,
+        createdAt: record.created_at,
+        attempts: record.attempts,
+      };
+    });
 
     return { data, total };
   }
@@ -442,12 +510,16 @@ export class EnhancedAiService {
       throw new NotFoundException('AI recipe not found or access denied');
     }
 
-    const recipeData = JSON.parse(aiRecord.recipe_data);
-    const validation = await this.validateGeneratedRecipe(recipeData, {
-      valid: recipeData.ingredients,
-      invalid: [],
-      suggestions: [],
-    });
+    const recipeJson: string = aiRecord.recipe_data as string;
+    const recipeData = JSON.parse(recipeJson) as ParsedRecipeData;
+    const validation = this.validateGeneratedRecipe(
+      recipeData as unknown as AiRecipeResponse,
+      {
+        valid: recipeData.ingredients || [],
+        invalid: [],
+        suggestions: [],
+      },
+    );
 
     return validation;
   }
@@ -455,7 +527,7 @@ export class EnhancedAiService {
   private async consumeUserQuota(userId: string): Promise<void> {
     const today = new Date().toISOString().split('T')[0];
 
-    const result = await this.quotaRepository.manager.query(
+    const rawResult: unknown = await this.quotaRepository.manager.query(
       `INSERT INTO user_ai_quotas (user_id, quota_date, usage_count, last_updated_at)
        VALUES ($1, $2, 1, NOW())
        ON CONFLICT (user_id, quota_date)
@@ -464,8 +536,8 @@ export class EnhancedAiService {
        RETURNING usage_count`,
       [userId, today],
     );
-
-    const newCount: number = result[0]?.usage_count ?? 1;
+    const rows = rawResult as Array<{ usage_count: number }>;
+    const newCount: number = rows[0]?.usage_count ?? 1;
     if (newCount > this.MAX_RECIPES_PER_DAY) {
       throw new ForbiddenException(
         `Daily limit of ${this.MAX_RECIPES_PER_DAY} AI recipes exceeded. ` +
@@ -503,7 +575,8 @@ export class EnhancedAiService {
       /new\s+system\s+prompt/i,
     ];
 
-    const MAX_LENGTH = 500;
+    const isStrictInventoryMode = request.ingredients.length > 5;
+    const maxLength = isStrictInventoryMode ? 2000 : 500;
 
     // Sanitize ingredient names with character whitelisting + length limits
     const sanitizedIngredients = request.ingredients.map((ingredient) => {
@@ -512,7 +585,7 @@ export class EnhancedAiService {
         throw new BadRequestException('Ingredient names cannot be empty');
       }
       // Truncate and apply character whitelist
-      const truncated = trimmed.slice(0, MAX_LENGTH);
+      const truncated = trimmed.slice(0, maxLength);
       const sanitized = truncated
         .replace(/[^\p{L}\p{N}\s,.\-'/&%()]/gu, '')
         .trim();
@@ -645,8 +718,9 @@ export class EnhancedAiService {
           }
         } else {
           // Check if it exists in external API
-          const externalCheck =
-            await this.externalService.searchByIngredient(ingredient);
+          const externalCheck = (await this.externalService.searchByIngredient(
+            ingredient,
+          )) as Array<unknown> | null;
           if (externalCheck && externalCheck.length > 0) {
             valid.push({ name: ingredient });
           } else {
@@ -750,7 +824,10 @@ export class EnhancedAiService {
     ];
   }
 
-  private async executeRecipeTool(toolName: string, args: any): Promise<any> {
+  private async executeRecipeTool(
+    toolName: string,
+    args: RecipeToolArgs,
+  ): Promise<Record<string, unknown>> {
     switch (toolName) {
       case 'get_bar_inventory': {
         const limit = args.limit || 50;
@@ -758,19 +835,23 @@ export class EnhancedAiService {
           limit,
           page: 1,
         });
-        const items = (result as any).data || [];
-        return items.map((item: any) => ({
-          name: item.ingredient?.name || 'Unknown',
-          quantity: item.quantity?.toString(),
-          unit: item.unit || item.ingredient?.baseUnit || 'units',
-        }));
+        const items = (result as { data?: ToolInventoryItem[] }).data || [];
+        return {
+          items: items.map((item) => ({
+            name: item.ingredient?.name || 'Unknown',
+            quantity: item.quantity?.toString() || '0',
+            unit: item.unit || item.ingredient?.baseUnit || 'units',
+          })),
+        };
       }
       case 'search_cocktails': {
         const result = await this.aggregatorService.searchUnified(
           args.name || '',
           { limit: args.limit || 10, page: 1 },
         );
-        const cocktails = ((result as any).data || []).map((c: any) => ({
+        const cocktails = (
+          (result as { data?: ToolSearchCocktailItem[] }).data || []
+        ).map((c) => ({
           id: c.id,
           name: c.name,
           source: c.source,
@@ -801,12 +882,14 @@ export class EnhancedAiService {
         try {
           const result = this.unitConverter.convert(
             new Decimal(args.amount || 0),
-            args.from,
-            args.to,
+            args.from || '',
+            args.to || '',
           );
           return { result: result.toString(), from: args.from, to: args.to };
-        } catch (err: any) {
-          return { error: err.message };
+        } catch (error: unknown) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return { error: message };
         }
       }
       default:
@@ -814,32 +897,57 @@ export class EnhancedAiService {
     }
   }
 
+  private sanitizeHtml(text: string): string {
+    if (!text) return '';
+    return text.replace(/<\/?[^>]+(>|$)/g, '').trim();
+  }
+
   private buildRecipeFromParsed(
-    parsed: any,
+    parsed: ParsedRecipeData,
     request: AiRecipeRequest,
   ): AiRecipeResponse {
+    const rawInstructions = Array.isArray(parsed.instructions)
+      ? parsed.instructions
+      : parsed.instructions
+        ? [parsed.instructions]
+        : [];
+
+    const sanitizedInstructions = rawInstructions.map((step) =>
+      this.sanitizeHtml(step),
+    );
+    const sanitizedIngredients = (parsed.ingredients || []).map(
+      (ing: { name: string; amount: number; unit: string; note?: string }) => ({
+        name: this.sanitizeHtml(ing.name),
+        amount: parseFloat(String(ing.amount)) || 1,
+        unit: this.sanitizeHtml(ing.unit),
+        note: ing.note ? this.sanitizeHtml(ing.note) : undefined,
+      }),
+    );
+
     return {
       id: `ai-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
-      name:
+      name: this.sanitizeHtml(
         parsed.name ||
-        `AI Generated ${request.theme ? request.theme + ' ' : ''}Cocktail`,
-      description: parsed.description || 'An AI-generated cocktail recipe',
-      instructions: Array.isArray(parsed.instructions)
-        ? parsed.instructions
-        : parsed.instructions
-          ? [parsed.instructions]
-          : [],
+          `AI Generated ${request.theme ? request.theme + ' ' : ''}Cocktail`,
+      ),
+      description: this.sanitizeHtml(
+        parsed.description || 'An AI-generated cocktail recipe',
+      ),
+      instructions: sanitizedInstructions,
       ingredients:
-        parsed.ingredients ||
-        request.ingredients.map((ing, index) => ({
-          name: ing,
-          amount: 1,
-          unit: 'oz',
-          note: 'Adjust to taste',
-        })),
+        parsed.ingredients && parsed.ingredients.length > 0
+          ? sanitizedIngredients
+          : request.ingredients.map((ing) => ({
+              name: ing,
+              amount: 1,
+              unit: 'oz',
+              note: 'Adjust to taste',
+            })),
       metadata: {
         difficulty: request.difficulty || 'medium',
-        preparationTime: parsed.metadata?.preparationTime || '5 minutes',
+        preparationTime: this.sanitizeHtml(
+          parsed.metadata?.preparationTime || '5 minutes',
+        ),
         servingSize: request.servingSize || 1,
         theme: request.theme,
         safetyWarnings: [],
@@ -855,11 +963,11 @@ export class EnhancedAiService {
     };
   }
 
-  private async validateGeneratedRecipe(
+  private validateGeneratedRecipe(
     recipe: AiRecipeResponse,
-    ingredientValidation: any,
+    ingredientValidation: IngredientValidationResult,
     strict: boolean = false,
-  ): Promise<AiRecipeValidationResult> {
+  ): AiRecipeValidationResult {
     const issues: AiRecipeValidationResult['issues'] = [];
     const warnings: string[] = [];
     const suggestions: string[] = [];

@@ -4,9 +4,12 @@ import { environment } from '../../../environments/environment';
 
 export type PreparationStatus =
   | 'queued'
+  | 'evaluating'
+  | 'preparing'
   | 'completed'
   | 'failed_insufficient_stock'
-  | 'failed_other';
+  | 'failed_other'
+  | 'cancelled';
 
 export interface PreparationStatusResponse {
   preparationLogId: string;
@@ -35,6 +38,7 @@ export class OrderStore {
   readonly cocktailName = signal<string | null>(null);
   readonly polling = signal<boolean>(false);
   readonly undoing = signal<boolean>(false);
+  readonly cancelling = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
   private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -112,7 +116,12 @@ export class OrderStore {
 
   get isTerminal(): boolean {
     const s = this.status();
-    return s === 'completed' || s === 'failed_insufficient_stock' || s === 'failed_other';
+    return (
+      s === 'completed' ||
+      s === 'failed_insufficient_stock' ||
+      s === 'failed_other' ||
+      s === 'cancelled'
+    );
   }
 
   undo(logId: string): Promise<any> {
@@ -126,12 +135,26 @@ export class OrderStore {
       });
   }
 
+  cancel(logId: string): Promise<any> {
+    this.cancelling.set(true);
+    return this.http
+      .post(`${environment.apiUrl}/cocktails/preparations/${logId}/cancel`, {})
+      .toPromise()
+      .then((res: any) => {
+        this.status.set('cancelled');
+        this.stopPolling();
+        return res;
+      })
+      .finally(() => this.cancelling.set(false));
+  }
+
   reset(): void {
     this.stopPolling();
     this.currentLogId.set(null);
     this.status.set(null);
     this.cocktailName.set(null);
     this.undoing.set(false);
+    this.cancelling.set(false);
     this.error.set(null);
   }
 }

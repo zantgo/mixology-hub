@@ -68,7 +68,7 @@ export class Cocktail {
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'created_by' })
   @Expose()
-  user: User;
+  user: User | null;
 
   @OneToMany(() => CocktailIngredient, (ci) => ci.cocktail, { cascade: true })
   @Expose()

@@ -18,7 +18,7 @@ export class ColumnNumericTransformer implements ValueTransformer {
     }
     try {
       return new Decimal(data);
-    } catch (error) {
+    } catch {
       throw new Error(`Invalid decimal value from database: ${data}`);
     }
   }

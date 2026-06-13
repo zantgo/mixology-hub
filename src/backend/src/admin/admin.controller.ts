@@ -13,6 +13,8 @@ import { AuthService } from '../auth/auth.service';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { ReviewReportDto } from './dto/review-report.dto';
 import { MergeIngredientsDto } from './dto/merge-ingredients.dto';
 import { HideExternalCocktailDto } from './dto/hide-external-cocktail.dto';
@@ -50,6 +52,17 @@ export class AdminController {
       dto.targetId,
       dto.adminId,
     );
+  }
+
+  // Ingredient synonym mapping (UC 1.24)
+
+  @Post('ingredients/:id/synonyms')
+  async mapSynonym(
+    @Param('id') id: string,
+    @Body('synonym') synonym: string,
+    @GetUser() user: User,
+  ) {
+    return this.adminService.mapSynonym(id, synonym, user.id);
   }
 
   // Hidden external cocktails

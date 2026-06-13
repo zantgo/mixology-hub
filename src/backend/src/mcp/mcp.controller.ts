@@ -16,6 +16,17 @@ import { McpServerService } from './mcp-server.service';
 import { McpTicketService } from './mcp-ticket.service';
 import { McpToolCall, McpSession } from './mcp.types';
 
+interface JsonRpcMessage {
+  jsonrpc: string;
+  id: string | null;
+  method?: string;
+  params?: McpToolCall;
+}
+
+interface AuthenticatedRequest extends Request {
+  user: { id: string };
+}
+
 @ApiTags('MCP')
 @ApiBearerAuth()
 @Controller('api/mcp')
@@ -32,9 +43,8 @@ export class McpController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @ApiOperation({ summary: 'Generate a one-time MCP ticket (30s TTL)' })
-  async generateTicket(@Req() req: Request) {
-    const user = (req as any).user;
-    const ticket = await this.ticketService.generateTicket(user.id);
+  async generateTicket(@Req() req: AuthenticatedRequest) {
+    const ticket = await this.ticketService.generateTicket(req.user.id);
     return { ticket, expiresIn: 30 };
   }
 
@@ -92,7 +102,7 @@ export class McpController {
     }
 
     try {
-      const msg = req.body;
+      const msg = req.body as JsonRpcMessage;
       const tools = this.mcpServer.getTools();
 
       switch (msg.method) {
@@ -100,26 +110,26 @@ export class McpController {
           sseRes.write(`data: ${JSON.stringify({ type: 'tools', tools })}\n\n`);
           break;
 
-        case 'tools/call':
-          const toolCall: McpToolCall = msg.params;
+        case 'tools/call': {
+          const toolCall: McpToolCall = msg.params as McpToolCall;
           const result = await this.mcpServer.executeTool(toolCall, session);
           sseRes.write(
             `data: ${JSON.stringify({ type: 'tool_result', id: msg.id, result })}\n\n`,
           );
           break;
+        }
 
         default:
           sseRes.write(
-            `data: ${JSON.stringify({ type: 'error', message: `Unknown method: ${msg.method}` })}\n\n`,
+            `data: ${JSON.stringify({ type: 'error', message: `Unknown method: ${msg.method ?? 'undefined'}` })}\n\n`,
           );
       }
 
       res.json({ ok: true });
-    } catch (err: any) {
-      sseRes.write(
-        `data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`,
-      );
-      res.status(500).json({ error: err.message });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sseRes.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+      res.status(500).json({ error: message });
     }
   }
 }

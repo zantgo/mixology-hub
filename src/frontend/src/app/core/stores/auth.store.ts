@@ -31,12 +31,13 @@ export class AuthStore {
   private refreshInProgress: Promise<boolean> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimeoutWarning: ReturnType<typeof setTimeout> | null = null;
+  private idleEventsSubscription: any = null;
 
   startIdleTimer(): void {
     this.stopIdleTimer();
     this.resetIdleTimer();
 
-    merge(
+    this.idleEventsSubscription = merge(
       fromEvent(document, 'mousedown'),
       fromEvent(document, 'keydown'),
       fromEvent(document, 'touchstart'),
@@ -78,6 +79,10 @@ export class AuthStore {
     if (this.idleTimeoutWarning) {
       clearTimeout(this.idleTimeoutWarning);
       this.idleTimeoutWarning = null;
+    }
+    if (this.idleEventsSubscription) {
+      this.idleEventsSubscription.unsubscribe();
+      this.idleEventsSubscription = null;
     }
   }
 
@@ -167,8 +172,17 @@ export class AuthStore {
           next: (res) => {
             this.accessToken = res.accessToken;
             this.isAuthenticated.set(true);
-            this.refreshInProgress = null;
-            resolve(true);
+
+            this.loadProfile().subscribe({
+              next: () => {
+                this.refreshInProgress = null;
+                resolve(true);
+              },
+              error: () => {
+                this.refreshInProgress = null;
+                resolve(false);
+              },
+            });
           },
           error: () => {
             this.refreshInProgress = null;

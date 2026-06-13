@@ -54,8 +54,8 @@ export class FavoritesService {
     const qb = this.favoriteRepository
       .createQueryBuilder('favorite')
       .leftJoinAndSelect('favorite.cocktail', 'cocktail')
-      .where('favorite.user_id = :userId', { userId })
-      .andWhere('(cocktail.id IS NULL OR cocktail.is_deleted = false)');
+      .where('favorite.user_id = :userId', { userId });
+    // Soft-deleted cocktails are included to allow frontend tombstone rendering (UC 6.6)
 
     if (search) {
       qb.andWhere('cocktail.name ILIKE :search', { search: `%${search}%` });
@@ -161,5 +161,20 @@ export class FavoritesService {
   async remove(userId: string, id: string) {
     const favorite = await this.findOne(userId, id);
     return await this.favoriteRepository.remove(favorite);
+  }
+
+  async migrateFavoritePointer(
+    userId: string,
+    externalId: string,
+    localId: string,
+  ): Promise<void> {
+    const favorite = await this.favoriteRepository.findOne({
+      where: { user: { id: userId }, external_cocktail_id: externalId },
+    });
+    if (favorite) {
+      favorite.external_cocktail_id = null;
+      favorite.cocktail = { id: localId } as Cocktail;
+      await this.favoriteRepository.save(favorite);
+    }
   }
 }

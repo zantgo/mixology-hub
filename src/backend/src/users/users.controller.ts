@@ -1,14 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Request } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -17,12 +7,52 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
+interface AuthenticatedRequest extends Request {
+  user: { id: string; [key: string]: unknown };
+}
+
 @ApiTags('Users')
 @ApiBearerAuth()
 @Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  @Get('me/preferences')
+  @ApiOperation({ summary: 'Get current user preferences' })
+  getPreferences(@Request() req: AuthenticatedRequest) {
+    return this.usersService.getPreferences(req.user.id);
+  }
+
+  @Patch('me/preferences')
+  @ApiOperation({ summary: 'Update current user preferences' })
+  updatePreferences(
+    @Request() req: AuthenticatedRequest,
+    @Body() preferencesDto: Record<string, unknown>,
+  ) {
+    return this.usersService.updatePreferences(req.user.id, preferencesDto);
+  }
+
+  @Get('me/cocktails')
+  @ApiOperation({ summary: 'Get cocktails authored by current user' })
+  getAuthoredCocktails(
+    @Request() req: AuthenticatedRequest,
+    @Query() paginationQuery: PaginationQueryDto,
+  ) {
+    return this.usersService.getAuthoredCocktails(req.user.id, paginationQuery);
+  }
+
+  @Get('me/preparations')
+  @ApiOperation({ summary: 'Get recent preparations for current user' })
+  getRecentPreparations(
+    @Request() req: AuthenticatedRequest,
+    @Query() paginationQuery: PaginationQueryDto,
+  ) {
+    return this.usersService.getRecentPreparations(
+      req.user.id,
+      paginationQuery,
+    );
+  }
 
   @Post()
   @UseGuards(AdminGuard)

@@ -16,10 +16,15 @@ jest.mock('../ingredients/entities/ingredient.entity', () => ({
 
 import { Job } from 'bullmq';
 import { Decimal } from 'decimal.js';
-import { BarOrdersProcessor } from './bar-orders.processor';
+import { DataSource, Repository } from 'typeorm';
+import {
+  BarOrdersProcessor,
+  type PrepareJobPayload,
+} from './bar-orders.processor';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { UnitConverterService } from '../utils/unit-converter.service';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 
@@ -61,7 +66,9 @@ function makeLog(overrides: any = {}): PreparationLog {
   } as PreparationLog;
 }
 
-function makeJob(overrides: any = {}): Job {
+function makeJob(
+  overrides: Partial<PrepareJobPayload> = {},
+): Job<PrepareJobPayload> {
   return {
     id: 'job-1',
     data: {
@@ -72,12 +79,13 @@ function makeJob(overrides: any = {}): Job {
       force: false,
       ...overrides,
     },
-  } as Job;
+  } as Job<PrepareJobPayload>;
 }
 
 function createMocks() {
   const qb = {
     setLock: jest.fn().mockReturnThis(),
+    innerJoinAndSelect: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     getOne: jest.fn(),
@@ -89,23 +97,24 @@ function createMocks() {
   const tm = {
     findOne: jest.fn(),
     save: jest.fn(),
+    create: jest.fn(),
     createQueryBuilder: jest.fn().mockReturnValue(qb),
   };
   const ds = {
-    transaction: jest.fn().mockImplementation(async (cb: Function) => {
-      try {
-        return await cb(tm);
-      } catch (e) {
-        throw e;
-      }
-    }),
+    transaction: jest
+      .fn()
+      .mockImplementation(
+        async (
+          cb: (manager: typeof tm) => Promise<unknown>,
+        ): Promise<unknown> => cb(tm),
+      ),
   };
   const prepRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
   const processor = new BarOrdersProcessor(
-    ds as any,
-    {} as any,
-    {} as any,
-    prepRepo as any,
+    ds as unknown as DataSource,
+    {} as unknown as Repository<BarInventory>,
+    {} as unknown as Repository<Cocktail>,
+    prepRepo as unknown as Repository<PreparationLog>,
     new UnitConverterService(),
   );
   return { qb, tm, ds, prepRepo, processor };
@@ -118,7 +127,10 @@ describe('BarOrdersProcessor - prepare', () => {
     const cocktail = makeCocktail();
     const job = makeJob();
 
-    tm.findOne.mockResolvedValueOnce(log).mockResolvedValueOnce(cocktail);
+    tm.findOne
+      .mockResolvedValueOnce(log)
+      .mockResolvedValueOnce(cocktail)
+      .mockResolvedValueOnce(log);
     qb.getMany.mockResolvedValue([
       {
         id: 'stock-1',
@@ -131,7 +143,9 @@ describe('BarOrdersProcessor - prepare', () => {
     const result = await processor.process(job);
     expect(result.status).toBe('completed');
     expect(result.logId).toBe('log-1');
-    const lastSave = tm.save.mock.calls.at(-1)?.[0];
+    const lastSave = (
+      tm.save.mock.calls.at(-1) as [PreparationLog] | undefined
+    )?.[0];
     expect(lastSave.status).toBe('completed');
     expect(lastSave.deductedIngredients).toHaveLength(1);
   });
@@ -165,7 +179,10 @@ describe('BarOrdersProcessor - prepare', () => {
         makeCocktailIngredient({ amount: 30, unit: 'ml', ingredient: ing2 }),
       ],
     });
-    tm.findOne.mockResolvedValueOnce(makeLog()).mockResolvedValueOnce(cocktail);
+    tm.findOne
+      .mockResolvedValueOnce(makeLog())
+      .mockResolvedValueOnce(cocktail)
+      .mockResolvedValueOnce(makeLog());
     qb.getMany.mockResolvedValue([
       {
         id: 'stock-1',
@@ -182,9 +199,13 @@ describe('BarOrdersProcessor - prepare', () => {
 
     const result = await processor.process(makeJob({ force: true }));
     expect(result.status).toBe('completed');
-    const lastSave = tm.save.mock.calls.at(-1)?.[0];
+    const lastSave = (
+      tm.save.mock.calls.at(-1) as [PreparationLog] | undefined
+    )?.[0];
     expect(lastSave.deductedIngredients).toHaveLength(2);
-    expect(lastSave.deductedIngredients[0].skipped).toBe(true);
+    expect(
+      (lastSave.deductedIngredients?.[0] as Record<string, unknown>)?.skipped,
+    ).toBe(true);
   });
 
   it('should throw when log not found', async () => {
@@ -223,7 +244,8 @@ describe('BarOrdersProcessor - prepare', () => {
     const { qb, tm, processor } = createMocks();
     tm.findOne
       .mockResolvedValueOnce(makeLog())
-      .mockResolvedValueOnce(makeCocktail());
+      .mockResolvedValueOnce(makeCocktail())
+      .mockResolvedValueOnce(makeLog());
     qb.getMany.mockResolvedValue([
       {
         id: 'stock-1',
@@ -240,39 +262,77 @@ describe('BarOrdersProcessor - prepare', () => {
   it('should convert units during preparation', async () => {
     const { qb, tm, processor } = createMocks();
     const ing = makeIngredient({ baseUnit: 'ml' });
-    tm.findOne.mockResolvedValueOnce(makeLog()).mockResolvedValueOnce(
-      makeCocktail({
-        ingredients: [
-          makeCocktailIngredient({ amount: 2, unit: 'oz', ingredient: ing }),
-        ],
-      }),
-    );
+    tm.findOne
+      .mockResolvedValueOnce(makeLog())
+      .mockResolvedValueOnce(
+        makeCocktail({
+          ingredients: [
+            makeCocktailIngredient({ amount: 2, unit: 'oz', ingredient: ing }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(makeLog());
     qb.getMany.mockResolvedValue([
       { id: 'stock-1', quantity: new Decimal(100), ingredient: ing },
     ]);
     qb.execute.mockResolvedValue({ affected: 1 });
 
     await processor.process(makeJob());
-    expect(qb.set.mock.calls[0][0]).toBeDefined();
+    expect((qb.set.mock.calls[0] as unknown[])[0]).toBeDefined();
   });
 
   it('should multiply by servings', async () => {
     const { qb, tm, processor } = createMocks();
     const ing = makeIngredient({ baseUnit: 'ml' });
-    tm.findOne.mockResolvedValueOnce(makeLog()).mockResolvedValueOnce(
-      makeCocktail({
-        ingredients: [
-          makeCocktailIngredient({ amount: 50, unit: 'ml', ingredient: ing }),
-        ],
-      }),
-    );
+    tm.findOne
+      .mockResolvedValueOnce(makeLog())
+      .mockResolvedValueOnce(
+        makeCocktail({
+          ingredients: [
+            makeCocktailIngredient({ amount: 50, unit: 'ml', ingredient: ing }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(makeLog());
     qb.getMany.mockResolvedValue([
       { id: 'stock-1', quantity: new Decimal(200), ingredient: ing },
     ]);
     qb.execute.mockResolvedValue({ affected: 1 });
 
     await processor.process(makeJob({ servings: 3 }));
-    expect(qb.set.mock.calls[0][0]).toBeDefined();
+    expect((qb.set.mock.calls[0] as unknown[])[0]).toBeDefined();
+  });
+
+  it('should skip job when preparation was cancelled before processing', async () => {
+    const { tm, processor } = createMocks();
+    const log = makeLog({ status: 'cancelled' });
+    tm.findOne.mockResolvedValueOnce(log);
+
+    const result = await processor.process(makeJob());
+    expect(result.status).toBe('cancelled');
+    expect(result.logId).toBe('log-1');
+  });
+
+  it('should cancel mid-flight when re-check catches cancelled status', async () => {
+    const { qb, tm, processor } = createMocks();
+    const evaluatingLog = makeLog({ status: 'evaluating' });
+    const cancelledLog = makeLog({ status: 'cancelled' });
+    const cocktail = makeCocktail();
+    tm.findOne
+      .mockResolvedValueOnce(evaluatingLog)
+      .mockResolvedValueOnce(cocktail)
+      .mockResolvedValueOnce(cancelledLog);
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'stock-1',
+        quantity: new Decimal(100),
+        ingredient: { id: 'ing-1', name: 'Vodka' },
+      },
+    ]);
+
+    const result = await processor.process(makeJob());
+    expect(result.status).toBe('cancelled');
+    expect(result.logId).toBe('log-1');
   });
 });
 
@@ -303,7 +363,9 @@ describe('BarOrdersProcessor - undo', () => {
     const result = await processor.process(makeJob({ type: 'undo' }));
     expect(result.status).toBe('undone');
     expect(qb.set.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(qb.set.mock.calls[0][0].quantity).toBeDefined();
+    expect(
+      (qb.set.mock.calls[0] as Record<string, unknown>[])[0].quantity,
+    ).toBeDefined();
     expect(tm.save).toHaveBeenCalled();
   });
 

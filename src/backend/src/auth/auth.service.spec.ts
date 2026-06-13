@@ -66,6 +66,9 @@ describe('AuthService', () => {
       create: jest.fn(),
       save: jest.fn(),
       update: jest.fn(),
+      manager: {
+        transaction: jest.fn(),
+      },
     };
 
     tokenBlacklistRepository = {
@@ -141,7 +144,7 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should successfully register a new user', async () => {
+    it('should successfully register a new user with default profile', async () => {
       const registerDto: RegisterDto = {
         email: 'newuser@example.com',
         password: 'Password123!',
@@ -155,12 +158,22 @@ describe('AuthService', () => {
         email: registerDto.email,
         displayName: registerDto.displayName,
         emailVerified: false,
+        emailVerificationToken: 'mock-verification-token',
         passwordHash: 'hashedPassword',
         refreshToken: null,
       };
 
       userRepository.create.mockReturnValue(savedUser);
-      userRepository.save.mockResolvedValue(savedUser);
+      userRepository.manager.transaction.mockImplementation(async (cb: any) => {
+        const mockEntityManager = {
+          save: jest
+            .fn()
+            .mockResolvedValueOnce(savedUser)
+            .mockResolvedValueOnce({}),
+          create: jest.fn().mockReturnValue({}),
+        };
+        return cb(mockEntityManager);
+      });
       jwtService.signAsync
         .mockResolvedValueOnce('mock-access-token')
         .mockResolvedValueOnce('mock-refresh-token');
@@ -171,7 +184,7 @@ describe('AuthService', () => {
       await service.register(registerDto);
 
       expect(refreshTokenRepository.save).toHaveBeenCalled();
-      expect(userRepository.save).toHaveBeenCalled();
+      expect(userRepository.manager.transaction).toHaveBeenCalled();
     });
 
     it('should throw ConflictException if user already exists', async () => {

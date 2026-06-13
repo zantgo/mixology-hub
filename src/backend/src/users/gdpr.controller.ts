@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Post,
-  Get,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
-  Request,
-} from '@nestjs/common';
+import { Request } from 'express';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import {
   ApiTags,
@@ -16,6 +8,10 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+
+interface AuthenticatedRequest extends Request {
+  user: { id: string; [key: string]: unknown };
+}
 
 @ApiTags('GDPR')
 @ApiBearerAuth()
@@ -28,7 +24,7 @@ export class GdprController {
   @ApiOperation({ summary: 'Export all user data (GDPR right to access)' })
   @ApiResponse({ status: 200, description: 'User data exported successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async exportUserData(@Request() req) {
+  async exportUserData(@Request() req: AuthenticatedRequest) {
     const data = await this.gdprService.exportUserData(req.user.id);
     return {
       success: true,
@@ -45,7 +41,7 @@ export class GdprController {
   })
   @ApiResponse({ status: 202, description: 'Deletion request accepted' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async requestAccountDeletion(@Request() req) {
+  async requestAccountDeletion(@Request() req: AuthenticatedRequest) {
     const success = await this.gdprService.deleteUserAccount(req.user.id);
 
     return {
@@ -66,7 +62,7 @@ export class GdprController {
     status: 403,
     description: 'Forbidden - Admin access required',
   })
-  async getRetentionStats(@Request() req) {
+  async getRetentionStats(@Request() req: AuthenticatedRequest) {
     const stats = await this.gdprService.getRetentionStats();
 
     return {
@@ -86,8 +82,8 @@ export class GdprController {
     status: 403,
     description: 'Forbidden - Admin access required',
   })
-  async runCleanup(@Request() req) {
-    this.gdprService.runDataRetentionCleanup();
+  runCleanup(@Request() req: AuthenticatedRequest) {
+    void this.gdprService.runDataRetentionCleanup();
 
     return {
       success: true,

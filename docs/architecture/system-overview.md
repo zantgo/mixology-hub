@@ -170,3 +170,27 @@ The system implements a comprehensive RBAC system with two primary roles: `barte
 - **Bartender Access:** Staff — browse recipes, check makeability, submit "Prepare" orders via the BullMQ queue, view preparation history.
 - **Queue-Based Concurrency:** All inventory-deducting operations (cocktail preparation) flow through a single-threaded BullMQ worker (`concurrency: 1`), mathematically eliminating race conditions. See ADR 0017.
 - **Audit Logging:** All admin actions are logged for security and compliance purposes.
+
+### 5. B2B Shared Inventory Architecture
+
+**Queue-Based Concurrency:** All inventory-deducting operations (cocktail preparation) flow through a single-threaded BullMQ worker (`concurrency: 1`), mathematically eliminating race conditions. See ADR 0017.
+
+---
+
+## 🤖 MCP Agentic Architecture
+
+MixologyHub exposes itself as an MCP (Model Context Protocol) Server to both internal AI orchestration and external LLM clients.
+
+### Client Modalities: Internal vs. External
+
+The MCP architecture supports two distinct execution patterns:
+
+1. **Internal Orchestration (Application Flow):**
+   When a user requests an AI recipe via the frontend (`POST /ai`), the `LlmAdapterService` acts as the coordinator. It manages the prompt context, passes the tools schema, and handles execution internally. The frontend is entirely decoupled from the MCP protocol.
+
+2. **External Orchestration (API Flow):**
+   External developers or local IDE extensions (e.g., Claude Desktop) can connect directly to the exposed stdio stream (`mcp-server.ts`) or the SSE endpoints (`/api/mcp/sse`). In this mode, the external agent directly invokes tools to interact with the single-bar inventory database.
+
+### MCP Tool Audit Configuration
+
+- **`AI_AUDIT_READ_SAMPLE_RATE`**: Controls audit sampling for read-only tools as an integer percentage from 0 to 100 (default: 10 = 10% sampling rate). Write operations are always audited unconditionally.

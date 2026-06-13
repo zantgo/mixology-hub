@@ -19,7 +19,10 @@ import { FixArchitecturalInconsistencies1733702400000 } from '../migrations/1733
         autoLoadEntities: true,
         synchronize: true,
         migrationsRun: true,
-        migrations: [FixArchitecturalInconsistencies1733702400000, AddPgTrgm1746496000000],
+        migrations: [
+          FixArchitecturalInconsistencies1733702400000,
+          AddPgTrgm1746496000000,
+        ],
         retryAttempts: 3,
         retryDelay: 3000,
       }),

@@ -8,15 +8,18 @@ import { AuthController } from './auth.controller';
 import { AuthCleanupService } from './auth-cleanup.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { SystemSettings } from '../users/entities/system-settings.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { CsrfGuard } from './guards/csrf.guard';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       User,
+      UserProfile,
       TokenBlacklist,
       RefreshToken,
       SystemSettings,
@@ -36,8 +39,14 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
       }),
     }),
   ],
-  providers: [AuthService, AuthCleanupService, JwtStrategy, JwtAuthGuard],
+  providers: [
+    AuthService,
+    AuthCleanupService,
+    JwtStrategy,
+    JwtAuthGuard,
+    CsrfGuard,
+  ],
   controllers: [AuthController],
-  exports: [AuthService, JwtAuthGuard],
+  exports: [AuthService, JwtAuthGuard, CsrfGuard],
 })
 export class AuthModule {}

@@ -233,10 +233,13 @@ describe('CocktailAggregatorService', () => {
     it('should correctly map external drink to local format', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.getRandomCocktail.mockResolvedValue(mockExternalDrink);
+      externalService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
-      const result = await service.searchUnified('', { page: 1, limit: 10 });
+      const result = await service.searchUnified('mojito', {
+        page: 1,
+        limit: 10,
+      });
 
       const externalResult = result.data.find((d: any) => d.source === 'api');
       expect(externalResult).toBeDefined();
@@ -462,10 +465,13 @@ describe('CocktailAggregatorService', () => {
     it('should return null images for external cocktails', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.getRandomCocktail.mockResolvedValue(mockExternalDrink);
+      externalService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
-      const result = await service.searchUnified('', { page: 1, limit: 10 });
+      const result = await service.searchUnified('mojito', {
+        page: 1,
+        limit: 10,
+      });
       const ext = result.data.find((d: any) => d.source === 'api');
 
       expect(ext).toBeDefined();

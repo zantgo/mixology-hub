@@ -12,9 +12,12 @@ import { Cocktail } from './cocktail.entity';
 
 export type PreparationStatus =
   | 'queued'
+  | 'evaluating'
+  | 'preparing'
   | 'completed'
   | 'failed_insufficient_stock'
-  | 'failed_other';
+  | 'failed_other'
+  | 'cancelled';
 
 @Entity('preparation_logs')
 export class PreparationLog {

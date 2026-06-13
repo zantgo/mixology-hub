@@ -49,6 +49,7 @@ This document outlines the strategic direction and planned features for Mixology
 - ✅ MCP (Model Context Protocol) server with 6 tools
 - ✅ MCP tool call audit trail + parameter validation
 - ✅ AI response payload size bounding (50KB)
+- ✅ Configurable MCP audit sampling via `AI_AUDIT_READ_SAMPLE_RATE` (integer percentage 0–100, default 10 = 10%)
 
 ### Developer Experience
 - ✅ Frontend lint/format scripts (Prettier)

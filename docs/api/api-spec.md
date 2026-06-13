@@ -853,11 +853,19 @@ Generates a one-time authentication ticket for an MCP session. Requires a valid 
 - **Error (401):** Invalid or expired JWT.
 
 #### `GET /api/mcp/sse`
-Establishes an SSE (Server-Sent Events) stream for MCP tool communication. The client passes the ticket obtained from `POST /api/mcp/ticket` as a query parameter or header.
+Establishes a unidirectional SSE (Server-Sent Events) stream to send JSON-RPC events from the server to the LLM client.
 
 - **Query Parameters:** `ticket` (required, single-use, 30-second TTL)
-- **Response (200):** SSE stream. The connection sends tool invocation events. The client responds with tool results over the same stream.
-- **Error (401):** Invalid, expired, or already-used ticket.
+- **Response (200 OK):** `text/event-stream` connection.
+
+#### `POST /api/mcp/messages`
+The client-to-server gateway. Because SSE is unidirectional, the LLM client must send all JSON-RPC requests, tool calls, and tool execution results back to the server using this endpoint.
+
+- **Query Parameters:** `sessionId` (required, matches the active SSE session)
+- **Request Body (JSON):** A standard JSON-RPC 2.0 message payload (e.g., tool response, initialized notification).
+- **Response (200 OK):** `{ "ok": true }`
+- **Error (404):** No active SSE connection for the given session ID.
+- **Error (401):** Session not found or expired.
 
 **Available Tools:**
 

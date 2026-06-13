@@ -107,6 +107,11 @@ export class McpServerService {
               type: 'string',
               description: 'Target unit (ml, oz, g, etc.)',
             },
+            ingredient: {
+              type: 'string',
+              description:
+                'Ingredient name for density-based conversion (required for mass<->volume)',
+            },
           },
           required: ['quantity', 'fromUnit', 'toUnit'],
         },
@@ -189,18 +194,15 @@ export class McpServerService {
       };
     }
 
-    const startTime = Date.now();
-    let resultStatus: 'success' | 'error' = 'error';
+    const resultStatus: 'success' | 'error' = 'error';
     let result: McpToolResult;
 
-    // Validate parameters against tool's inputSchema
     if (tool.inputSchema) {
       const validate = ajv.compile(tool.inputSchema);
       const valid = validate(toolCall.arguments || {});
       if (!valid) {
         const errors = validate.errors?.map(
-          (e) =>
-            `${(e as any).instancePath || (e as any).dataPath || ''} ${e.message}`,
+          (e) => `${e.instancePath || e.dataPath || ''} ${e.message}`,
         );
         return {
           content: [
@@ -217,15 +219,19 @@ export class McpServerService {
     try {
       result = await this.dispatchTool(toolCall, session);
       resultStatus = result.isError ? 'error' : 'success';
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       result = {
-        content: [{ type: 'text', text: `Error: ${error.message}` }],
+        content: [{ type: 'text', text: `Error: ${message}` }],
         isError: true,
       };
     }
 
     await this.auditToolCall(tool, toolCall, resultStatus, session).catch(
-      (err) => this.logger.error(`Audit failed: ${err.message}`),
+      (err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`Audit failed: ${message}`);
+      },
     );
 
     return result;
@@ -266,12 +272,22 @@ export class McpServerService {
       limit,
       page: 1,
     });
-    const items = (result as any).data || result;
-    const summary = (items as any[]).map((item: any) => ({
-      name: item.ingredient?.name || 'Unknown',
-      quantity: item.quantity?.toString(),
-      unit: item.ingredient?.baseUnit || 'units',
-    }));
+    interface InventoryItem {
+      ingredient?: { name?: string; baseUnit?: string };
+      quantity?: { toString: () => string };
+    }
+    interface InventoryResult {
+      data?: InventoryItem[];
+    }
+    const typedResult = result as InventoryResult;
+    const items = typedResult.data || (result as InventoryItem[]);
+    const summary = (Array.isArray(items) ? items : []).map(
+      (item: InventoryItem) => ({
+        name: item.ingredient?.name || 'Unknown',
+        quantity: item.quantity?.toString(),
+        unit: item.ingredient?.baseUnit || 'units',
+      }),
+    );
     return {
       content: [{ type: 'text', text: JSON.stringify(summary, null, 2) }],
     };
@@ -287,7 +303,20 @@ export class McpServerService {
       limit,
       page,
     });
-    const cocktails = ((result as any).data || []).map((c: any) => ({
+    interface CocktailSummary {
+      id: string;
+      name: string;
+      source: string;
+      ingredients?: unknown[];
+      isMakeable?: boolean | null;
+      makeabilityScore?: number | null;
+    }
+    interface SearchResult {
+      data?: CocktailSummary[];
+      meta?: { totalItems?: number };
+    }
+    const typedResult = result as SearchResult;
+    const cocktails = (typedResult.data || []).map((c: CocktailSummary) => ({
       id: c.id,
       name: c.name,
       source: c.source,
@@ -302,7 +331,7 @@ export class McpServerService {
           text: JSON.stringify(
             {
               cocktails,
-              total: (result as any).meta?.totalItems || cocktails.length,
+              total: typedResult.meta?.totalItems || cocktails.length,
             },
             null,
             2,
@@ -318,23 +347,31 @@ export class McpServerService {
     const cocktailId = args.cocktailId as string;
     try {
       const cocktail = await this.cocktailsService.findOne(cocktailId);
+      interface CocktailIngredientRef {
+        ingredient?: { name?: string } | null;
+        amount?: unknown;
+        unit?: string;
+        measure?: string;
+      }
       const detail = {
         id: cocktail.id,
         name: cocktail.name,
         description: cocktail.description,
         instructions: cocktail.instructions,
-        ingredients: (cocktail.ingredients || []).map((ci: any) => ({
-          name: ci.ingredient?.name,
-          amount: ci.amount,
-          unit: ci.unit,
-          measure: ci.measure,
-        })),
-        source: cocktail.source,
+        ingredients: (cocktail.ingredients || []).map(
+          (ci: CocktailIngredientRef) => ({
+            name: ci.ingredient?.name,
+            amount: ci.amount,
+            unit: ci.unit,
+            measure: ci.measure,
+          }),
+        ),
+        source: (cocktail as { source?: string }).source,
       };
       return {
         content: [{ type: 'text', text: JSON.stringify(detail, null, 2) }],
       };
-    } catch (error: any) {
+    } catch {
       return {
         content: [{ type: 'text', text: `Cocktail not found: ${cocktailId}` }],
         isError: true,
@@ -348,8 +385,25 @@ export class McpServerService {
     const quantity = Number(args.quantity);
     const fromUnit = args.fromUnit as string;
     const toUnit = args.toUnit as string;
+    const ingredientName = args.ingredient as string | undefined;
+
     try {
-      const result = this.unitConverter.convert(quantity, fromUnit, toUnit);
+      let ingredientEntity: unknown = undefined;
+      if (ingredientName) {
+        const match =
+          await this.hierarchicalService.findBestMatch(ingredientName);
+        if (match) {
+          ingredientEntity = match.ingredient;
+        }
+      }
+
+      const result = this.unitConverter.convert(
+        quantity,
+        fromUnit,
+        toUnit,
+        ingredientEntity as Parameters<typeof this.unitConverter.convert>[3],
+      );
+
       return {
         content: [
           {
@@ -363,9 +417,10 @@ export class McpServerService {
           },
         ],
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
-        content: [{ type: 'text', text: `Conversion error: ${error.message}` }],
+        content: [{ type: 'text', text: `Conversion error: ${message}` }],
         isError: true,
       };
     }
@@ -379,22 +434,21 @@ export class McpServerService {
     const servings = (args.servings as number) || 1;
     const force = !!args.force;
 
-    const cocktailsService = this.cocktailsService as any;
     try {
-      const result = await cocktailsService.prepare(
+      const result = await this.cocktailsService.prepare(
         cocktailId,
         session.userId,
         servings,
+        undefined,
         force,
       );
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
-        content: [
-          { type: 'text', text: `Preparation failed: ${error.message}` },
-        ],
+        content: [{ type: 'text', text: `Preparation failed: ${message}` }],
         isError: true,
       };
     }
@@ -410,7 +464,18 @@ export class McpServerService {
         limit: 200,
         page: 1,
       });
-      const items = (inventory as any).data || inventory || [];
+      interface InventoryItemWithIngredient {
+        ingredient?: { id?: string; name?: string; baseUnit?: string };
+        quantity?: Decimal;
+      }
+      interface InventoryResult {
+        data?: InventoryItemWithIngredient[];
+      }
+      const typedInventory = inventory as InventoryResult;
+      const items =
+        typedInventory.data ||
+        (inventory as InventoryItemWithIngredient[]) ||
+        [];
       const missing: string[] = [];
       let matchedCount = new Decimal(0);
       const totalIngredients = (cocktail.ingredients || []).length || 1;
@@ -420,8 +485,8 @@ export class McpServerService {
         const requiredId = ci.ingredient?.id;
         let found = false;
 
-        const directMatch = (items as any[]).find(
-          (item: any) =>
+        const directMatch = items.find(
+          (item: InventoryItemWithIngredient) =>
             item.ingredient?.id === requiredId ||
             item.ingredient?.name?.toLowerCase().trim() === requiredName,
         );
@@ -439,7 +504,6 @@ export class McpServerService {
               found = true;
             }
           } catch {
-            // Unit conversion failed, fall back to simple comparison
             if (directMatch.quantity?.gte(ci.amount || 0)) {
               matchedCount = matchedCount.plus(1);
               found = true;
@@ -461,8 +525,9 @@ export class McpServerService {
               },
             );
             if (match && match.confidence >= 0.8) {
-              const substitute = (items as any[]).find(
-                (item: any) => item.ingredient?.id === match.ingredient.id,
+              const substitute = items.find(
+                (item: InventoryItemWithIngredient) =>
+                  item.ingredient?.id === match.ingredient.id,
               );
               if (substitute && ci.amount) {
                 try {
@@ -479,14 +544,16 @@ export class McpServerService {
                     found = true;
                   }
                 } catch {
-                  // Fallback
+                  // Unit conversion failed
                 }
               } else if (substitute && !ci.amount) {
                 matchedCount = matchedCount.plus(new Decimal(match.confidence));
                 found = true;
               }
             }
-          } catch {}
+          } catch {
+            // Best-match lookup failed
+          }
         }
 
         if (!found) {
@@ -510,9 +577,10 @@ export class McpServerService {
           },
         ],
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       return {
-        content: [{ type: 'text', text: `Check failed: ${error.message}` }],
+        content: [{ type: 'text', text: `Check failed: ${message}` }],
         isError: true,
       };
     }

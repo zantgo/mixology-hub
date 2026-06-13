@@ -9,6 +9,7 @@ import { UiStore } from '../../core/stores/ui.store';
 import { ButtonComponent } from '../../shared/components/button/button.component';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { environment } from '../../../environments/environment';
+import { CanComponentDeactivate } from '../../core/guards/unsaved-changes.guard';
 
 const ALLOWED_UNITS = [
   'ml',
@@ -439,7 +440,7 @@ const ALLOWED_UNITS = [
     `,
   ],
 })
-export class CreatePage {
+export class CreatePage implements CanComponentDeactivate {
   private fb = inject(FormBuilder);
   private cocktailApi = inject(CocktailService);
   private http = inject(HttpClient);
@@ -469,6 +470,13 @@ export class CreatePage {
     this.addIngredient();
   }
 
+  canDeactivate(): boolean {
+    if (this.form.dirty && !this.submitting()) {
+      return confirm('You have unsaved changes. Are you sure you want to leave this page?');
+    }
+    return true;
+  }
+
   get ingredientsArray(): FormArray {
     return this.form.get('ingredients') as FormArray;
   }
@@ -484,8 +492,8 @@ export class CreatePage {
   }
 
   addIngredient(): void {
-    const idx = this.ingredientsArray.length;
-    this.ingredientsArray.push(this.createIngredientGroup());
+    const group = this.createIngredientGroup();
+    this.ingredientsArray.push(group);
 
     const state = this.perRowState();
     state.push({ searchResults: [], searchOpen: false });
@@ -493,9 +501,12 @@ export class CreatePage {
 
     const subject = new Subject<string>();
     subject.pipe(debounceTime(300), distinctUntilChanged()).subscribe((term) => {
+      const currentIdx = this.ingredientsArray.controls.indexOf(group);
+      if (currentIdx === -1) return;
+
       if (term.length < 1) {
         const s = this.perRowState();
-        if (s[idx]) s[idx].searchResults = [];
+        if (s[currentIdx]) s[currentIdx].searchResults = [];
         this.perRowState.set([...s]);
         return;
       }
@@ -504,17 +515,18 @@ export class CreatePage {
         .subscribe({
           next: (res: any) => {
             const s = this.perRowState();
-            if (s[idx]) s[idx].searchResults = res.data || res || [];
+            if (s[currentIdx]) s[currentIdx].searchResults = res.data || res || [];
             this.perRowState.set([...s]);
           },
           error: () => {
             const s = this.perRowState();
-            if (s[idx]) s[idx].searchResults = [];
+            if (s[currentIdx]) s[currentIdx].searchResults = [];
             this.perRowState.set([...s]);
           },
         });
     });
-    this.searchSubjects.set(idx, subject);
+    const initialIdx = this.ingredientsArray.length - 1;
+    this.searchSubjects.set(initialIdx, subject);
   }
 
   removeIngredient(i: number): void {
@@ -638,6 +650,7 @@ export class CreatePage {
 
     this.cocktailApi.createCocktailWithImage(data, this.imageFile).subscribe({
       next: (cocktail) => {
+        this.form.markAsPristine();
         this.submitting.set(false);
         this.announcer.announce('cocktail created', 'assertive');
         this.uiStore.addToast({

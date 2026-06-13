@@ -151,9 +151,10 @@ describe('AuthController', () => {
     it('should return error when no refresh token cookie', async () => {
       const req = { cookies: {} };
       const res = { cookie: jest.fn() };
-      const result = await controller.refreshToken(req as any, res as any);
+      await expect(
+        controller.refreshToken(req as any, res as any),
+      ).rejects.toThrow('No refresh token');
 
-      expect(result).toEqual({ error: 'No refresh token' });
       expect(authService.refreshToken).not.toHaveBeenCalled();
     });
   });

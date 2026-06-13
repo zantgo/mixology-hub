@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, MoreThan, In } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from './entities/user.entity';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
@@ -13,6 +13,7 @@ import { CocktailRating } from '../cocktails/entities/cocktail-rating.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { TokenBlacklist } from '../auth/entities/token-blacklist.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
+import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { ConfigService } from '@nestjs/config';
 
 export interface DataRetentionPolicy {
@@ -58,6 +59,8 @@ export class GdprDataRetentionService {
     private readonly tokenBlacklistRepository: Repository<TokenBlacklist>,
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepository: Repository<RefreshToken>,
+    @InjectRepository(Ingredient)
+    private readonly ingredientRepository: Repository<Ingredient>,
     private readonly configService: ConfigService,
   ) {
     // Load retention policy from config or use defaults
@@ -116,7 +119,10 @@ export class GdprDataRetentionService {
 
       this.logger.log(`GDPR cleanup completed: ${JSON.stringify(results)}`);
     } catch (error) {
-      this.logger.error('GDPR data retention cleanup failed', error.stack);
+      this.logger.error(
+        'GDPR data retention cleanup failed',
+        (error as Error).stack,
+      );
     }
   }
 
@@ -159,7 +165,10 @@ export class GdprDataRetentionService {
         await this.anonymizeUser(user);
         anonymizedCount++;
       } catch (error) {
-        this.logger.error(`Failed to anonymize user ${user.id}`, error.message);
+        this.logger.error(
+          `Failed to anonymize user ${user.id}`,
+          (error as Error).message,
+        );
       }
     }
 
@@ -195,7 +204,10 @@ export class GdprDataRetentionService {
         await this.userRepository.delete(user.id);
         deletedCount++;
       } catch (error) {
-        this.logger.error(`Failed to delete user ${user.id}`, error.message);
+        this.logger.error(
+          `Failed to delete user ${user.id}`,
+          (error as Error).message,
+        );
       }
     }
 
@@ -285,16 +297,29 @@ export class GdprDataRetentionService {
    * Delete all data associated with a user
    */
   private async deleteUserData(userId: string): Promise<void> {
-    // Delete user-created cocktails first (hard delete via repository to respect cascade)
+    // Delete user-created cocktails: anonymize public, hard-delete private
     const userCocktails = await this.cocktailRepository.find({
       where: { user: { id: userId } },
       relations: ['ingredients'],
     });
     for (const cocktail of userCocktails) {
-      await this.cocktailRepository.remove(cocktail);
+      if (cocktail.is_public) {
+        // Anonymize public cocktails to preserve favorites/history for other users
+        cocktail.user = null;
+        await this.cocktailRepository.save(cocktail);
+      } else {
+        // Hard delete private cocktails not visible to others
+        await this.cocktailRepository.remove(cocktail);
+      }
     }
 
     // Note: BarInventory is NOT deleted — it belongs to the bar, not the individual user
+
+    // Anonymize custom ingredients created by user (GDPR Right to be Forgotten)
+    await this.ingredientRepository.update(
+      { createdBy: userId },
+      { createdBy: null },
+    );
 
     // Delete user profile
     await this.profileRepository.delete({ user: { id: userId } });
@@ -308,7 +333,7 @@ export class GdprDataRetentionService {
     // Delete AI quotas
     await this.quotaRepository.delete({ user: { id: userId } });
 
-    this.logger.log(`Deleted all data for user ${userId}`);
+    this.logger.log(`Deleted and anonymized data for user ${userId}`);
   }
 
   /**
@@ -422,7 +447,7 @@ export class GdprDataRetentionService {
     } catch (error) {
       this.logger.error(
         `Failed to delete user account ${userId}`,
-        error.message,
+        (error as Error).message,
       );
       return false;
     }

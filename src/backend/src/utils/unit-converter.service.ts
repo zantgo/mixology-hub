@@ -32,6 +32,10 @@ export class UnitConverterService {
     sprig: new Decimal(1),
     leaves: new Decimal(1),
     leaf: new Decimal(1),
+    piece: new Decimal(1),
+    whole: new Decimal(1),
+    item: new Decimal(1),
+    unit: new Decimal(1),
   };
 
   convert(
@@ -79,7 +83,7 @@ export class UnitConverterService {
           ? requiredAmount
           : new Decimal(requiredAmount);
       return stockInRequiredUnit.gte(req);
-    } catch (e) {
+    } catch {
       return false;
     }
   }

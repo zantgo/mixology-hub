@@ -12,7 +12,10 @@ export interface Favorite {
     name: string;
     imageThumb?: string;
     imageFull?: string;
-  };
+    isDeleted?: boolean;
+    description?: string;
+  } | null;
+  external_cocktail_data?: any;
   createdAt: string;
 }
 

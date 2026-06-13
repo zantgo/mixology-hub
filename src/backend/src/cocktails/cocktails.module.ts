@@ -6,6 +6,7 @@ import { CocktailsController } from './cocktails.controller';
 import { Cocktail } from './entities/cocktail.entity';
 import { CocktailIngredient } from './entities/cocktail-ingredient.entity';
 import { CocktailRating } from './entities/cocktail-rating.entity';
+import { ExternalCocktailRating } from './entities/external-cocktail-rating.entity';
 import { PreparationLog } from './entities/preparation-log.entity';
 import { ReportedContent } from './entities/reported-content.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -18,6 +19,7 @@ import { UtilsModule } from '../utils/utils.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { ImageService } from '../images/image.service';
 import { ImageCleanupService } from '../images/image-cleanup.service';
+import { FavoritesModule } from '../favorites/favorites.module';
 
 @Module({
   imports: [
@@ -25,6 +27,7 @@ import { ImageCleanupService } from '../images/image-cleanup.service';
       Cocktail,
       CocktailIngredient,
       CocktailRating,
+      ExternalCocktailRating,
       ReportedContent,
       PreparationLog,
       Ingredient,
@@ -35,6 +38,7 @@ import { ImageCleanupService } from '../images/image-cleanup.service';
     ExternalModule,
     IngredientsModule,
     forwardRef(() => InventoryModule),
+    forwardRef(() => FavoritesModule),
   ],
   controllers: [CocktailsController],
   providers: [

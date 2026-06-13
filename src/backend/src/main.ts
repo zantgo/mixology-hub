@@ -10,15 +10,26 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseTimeInterceptor } from './common/interceptors/response-time.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    forceCloseConnections: true,
+  });
 
   app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cookieParser());
   app.enableShutdownHooks();
 
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.ENABLE_MOCK_AUTH === 'true'
+  ) {
+    throw new Error(
+      'FATAL: ENABLE_MOCK_AUTH=true is not permitted in production (ADR 0003)',
+    );
+  }
+
   // Serve static files from uploads directory
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads/',
   });
 
@@ -71,4 +82,5 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+
+void bootstrap();

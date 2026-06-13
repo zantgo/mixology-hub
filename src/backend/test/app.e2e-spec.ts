@@ -31,7 +31,7 @@ describe('App (e2e)', () => {
     return request(app.getHttpServer())
       .get('/health')
       .expect(200)
-      .expect((res) => {
+      .expect((res: { body: Record<string, unknown> }) => {
         expect(res.body).toHaveProperty('status');
         expect(res.body).toHaveProperty('checks');
         expect(res.body.checks).toHaveProperty('db');
@@ -57,7 +57,7 @@ describe('App (e2e)', () => {
     return request(app.getHttpServer())
       .get('/cocktails?limit=5')
       .expect(200)
-      .expect((res) => {
+      .expect((res: { body: Record<string, unknown> }) => {
         expect(res.body).toHaveProperty('data');
         expect(res.body).toHaveProperty('meta');
         expect(res.body.meta).toHaveProperty('currentPage');
@@ -68,7 +68,7 @@ describe('App (e2e)', () => {
     return request(app.getHttpServer())
       .get('/cocktails?name=margarita&fuzzy=true&limit=5')
       .expect(200)
-      .expect((res) => {
+      .expect((res: { body: { meta: unknown } }) => {
         expect(res.body.meta).toBeDefined();
       });
   });
