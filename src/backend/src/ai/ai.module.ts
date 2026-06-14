@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
-import { AiService } from './ai.service';
-import { EnhancedAiService } from './enhanced-ai.service';
+import { AiRecipeService } from './ai.service';
 import { AiController } from './ai.controller';
-import { Ai } from './entities/ai.entity';
-import { UserAiQuotas } from './entities/user-ai-quotas.entity';
+import { AiGeneratedRecipe } from './entities/ai.entity';
+import { UserAiQuota } from './entities/user-ai-quota.entity';
 import { AiToolAudit } from './entities/ai-tool-audit.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -21,8 +20,8 @@ import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      Ai,
-      UserAiQuotas,
+      AiGeneratedRecipe,
+      UserAiQuota,
       AiToolAudit,
       User,
       Ingredient,
@@ -37,7 +36,7 @@ import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
     UtilsModule,
   ],
   controllers: [AiController],
-  providers: [AiService, EnhancedAiService, AiAuditInterceptor],
-  exports: [AiService, EnhancedAiService],
+  providers: [AiRecipeService, AiAuditInterceptor],
+  exports: [AiRecipeService],
 })
 export class AiModule {}

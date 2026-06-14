@@ -162,6 +162,86 @@ import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.com
                 <p class="form-error">{{ mergeError() }}</p>
               }
             </div>
+
+            <h2 class="section-title">Promote Custom Ingredient to Global</h2>
+            <div class="merge-form card" style="margin-bottom: var(--space-6);">
+              <div class="form-group">
+                <label class="form-label">Search Custom Ingredient</label>
+                <input
+                  type="text"
+                  class="form-input"
+                  [(ngModel)]="promoteSearchQuery"
+                  name="promoteSearchQuery"
+                  placeholder="Search custom ingredients..."
+                  (input)="searchPromoteIngredients()"
+                />
+                @if (promoteResults.length > 0) {
+                  <ul class="search-dropdown">
+                    @for (r of promoteResults; track r.id) {
+                      <li (click)="selectPromoteIngredient(r)">
+                        {{ r.name }} ({{ r.isGlobal ? 'Global' : 'Custom' }})
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (promoteIngredientId) {
+                  <p class="selected">Selected for Promotion: {{ promoteIngredientName }}</p>
+                }
+              </div>
+              <app-button
+                [disabled]="!promoteIngredientId || promoting()"
+                [loading]="promoting()"
+                (action)="doPromote()"
+                >Promote to Global Catalog</app-button
+              >
+              @if (promoteError()) {
+                <p class="form-error">{{ promoteError() }}</p>
+              }
+            </div>
+
+            <h2 class="section-title">Map Ingredient Synonym</h2>
+            <div class="merge-form card">
+              <div class="form-group">
+                <label class="form-label">Canonical Base Ingredient</label>
+                <input
+                  type="text"
+                  class="form-input"
+                  [(ngModel)]="synonymSearchQuery"
+                  name="synonymSearchQuery"
+                  placeholder="Search canonical ingredient..."
+                  (input)="searchSynonymIngredients()"
+                />
+                @if (synonymResults.length > 0) {
+                  <ul class="search-dropdown">
+                    @for (r of synonymResults; track r.id) {
+                      <li (click)="selectSynonymBase(r)">{{ r.name }}</li>
+                    }
+                  </ul>
+                }
+                @if (synonymBaseId) {
+                  <p class="selected">Selected Base: {{ synonymBaseName }}</p>
+                }
+              </div>
+              <div class="form-group">
+                <label class="form-label">New Synonym Name</label>
+                <input
+                  type="text"
+                  class="form-input"
+                  [(ngModel)]="newSynonymName"
+                  name="newSynonymName"
+                  placeholder="e.g. Triple Sec"
+                />
+              </div>
+              <app-button
+                [disabled]="!synonymBaseId || !newSynonymName.trim() || mappingSynonym()"
+                [loading]="mappingSynonym()"
+                (action)="doMapSynonym()"
+                >Map Synonym</app-button
+              >
+              @if (synonymError()) {
+                <p class="form-error">{{ synonymError() }}</p>
+              }
+            </div>
           </section>
         }
         @case ('hidden') {
@@ -246,6 +326,38 @@ import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.com
               @if (settingsError()) {
                 <p class="form-error">{{ settingsError() }}</p>
               }
+            </div>
+
+            <h2 class="section-title">Emergency Security Controls</h2>
+            <div class="settings-form card" style="border: 2px solid var(--color-error);">
+              <p
+                style="font-size: var(--font-size-body-small); color: var(--color-error); font-weight: var(--font-weight-semibold); line-height: var(--line-height-normal); margin-bottom: var(--space-2);"
+              >
+                CRITICAL WARNING: This action will instantly invalidate all active sessions across
+                the system by incrementing the global token salt version. Every logged-in
+                user—including you—will be signed out immediately and forced to log in again.
+              </p>
+              <div class="form-group">
+                <label class="form-label" for="revoke-reason">Mandatory Audit Log Reason *</label>
+                <input
+                  id="revoke-reason"
+                  type="text"
+                  class="form-input"
+                  [(ngModel)]="revokeReason"
+                  name="revokeReason"
+                  placeholder="e.g. Suspected session token hijack"
+                  [disabled]="revoking()"
+                />
+              </div>
+              <app-button
+                [disabled]="!revokeReason.trim() || revoking()"
+                [loading]="revoking()"
+                (action)="doGlobalRevoke()"
+                style="--color-primary: var(--color-error); --color-primary-dark: #d32f2f;"
+              >
+                <app-icon name="shield-alert" [size]="18" />
+                Execute Global Session Revocation
+              </app-button>
             </div>
           </section>
         }
@@ -438,6 +550,23 @@ export class AdminPage implements OnInit {
   merging = signal(false);
   mergeError = signal<string | null>(null);
 
+  // Promote ingredient
+  promoteSearchQuery = '';
+  promoteIngredientId = '';
+  promoteIngredientName = '';
+  promoteResults: any[] = [];
+  promoting = signal(false);
+  promoteError = signal<string | null>(null);
+
+  // Synonym mapping
+  synonymSearchQuery = '';
+  synonymBaseId = '';
+  synonymBaseName = '';
+  newSynonymName = '';
+  synonymResults: any[] = [];
+  mappingSynonym = signal(false);
+  synonymError = signal<string | null>(null);
+
   // Hidden cocktails
   hideExternalId = '';
   hideReason = '';
@@ -449,6 +578,107 @@ export class AdminPage implements OnInit {
   settingValue = '';
   loadingSettings = signal(false);
   settingsError = signal<string | null>(null);
+
+  // Global session revocation
+  revokeReason = '';
+  revoking = signal(false);
+
+  searchPromoteIngredients(): void {
+    if (this.promoteSearchQuery.length < 1) {
+      this.promoteResults = [];
+      return;
+    }
+    this.http
+      .get<
+        any[]
+      >(`${environment.apiUrl}/ingredients?name=${encodeURIComponent(this.promoteSearchQuery)}&limit=10`)
+      .subscribe({
+        next: (res: any) => {
+          const items = res.data || res || [];
+          this.promoteResults = items.filter((item: any) => !item.isGlobal);
+        },
+      });
+  }
+
+  selectPromoteIngredient(item: any): void {
+    this.promoteIngredientId = item.id;
+    this.promoteIngredientName = item.name;
+    this.promoteSearchQuery = item.name;
+    this.promoteResults = [];
+  }
+
+  doPromote(): void {
+    this.promoting.set(true);
+    this.promoteError.set(null);
+    this.http
+      .post(`${environment.apiUrl}/admin/ingredients/${this.promoteIngredientId}/promote`, {})
+      .subscribe({
+        next: () => {
+          this.promoting.set(false);
+          this.uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: `Ingredient "${this.promoteIngredientName}" promoted to global catalog successfully.`,
+            type: 'success',
+          });
+          this.promoteIngredientId = this.promoteIngredientName = this.promoteSearchQuery = '';
+        },
+        error: (err) => {
+          this.promoting.set(false);
+          this.promoteError.set(err.error?.message || 'Promotion failed.');
+        },
+      });
+  }
+
+  searchSynonymIngredients(): void {
+    if (this.synonymSearchQuery.length < 1) {
+      this.synonymResults = [];
+      return;
+    }
+    this.http
+      .get<
+        any[]
+      >(`${environment.apiUrl}/ingredients?name=${encodeURIComponent(this.synonymSearchQuery)}&limit=10`)
+      .subscribe({
+        next: (res: any) => {
+          this.synonymResults = res.data || res || [];
+        },
+      });
+  }
+
+  selectSynonymBase(item: any): void {
+    this.synonymBaseId = item.id;
+    this.synonymBaseName = item.name;
+    this.synonymSearchQuery = item.name;
+    this.synonymResults = [];
+  }
+
+  doMapSynonym(): void {
+    this.mappingSynonym.set(true);
+    this.synonymError.set(null);
+    this.http
+      .post(`${environment.apiUrl}/admin/ingredients/${this.synonymBaseId}/synonyms`, {
+        synonym: this.newSynonymName.trim(),
+      })
+      .subscribe({
+        next: () => {
+          this.mappingSynonym.set(false);
+          this.uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: `Synonym "${this.newSynonymName}" mapped to base ingredient successfully.`,
+            type: 'success',
+          });
+          this.synonymBaseId =
+            this.synonymBaseName =
+            this.synonymSearchQuery =
+            this.newSynonymName =
+              '';
+        },
+        error: (err) => {
+          this.mappingSynonym.set(false);
+          this.synonymError.set(err.error?.message || 'Synonym mapping failed.');
+        },
+      });
+  }
 
   ngOnInit(): void {
     this.loadReports();
@@ -634,6 +864,44 @@ export class AdminPage implements OnInit {
         error: (err) => {
           this.loadingSettings.set(false);
           this.settingsError.set(err.error?.message || 'Failed to save setting.');
+        },
+      });
+  }
+
+  doGlobalRevoke(): void {
+    if (!this.revokeReason.trim() || this.revoking()) return;
+
+    const confirmed = confirm(
+      'EMERGENCY WARNING: Are you completely sure you want to globally revoke all session tokens? You will be logged out immediately.',
+    );
+
+    if (!confirmed) return;
+
+    this.revoking.set(true);
+    this.http
+      .post<any>(`${environment.apiUrl}/admin/security/global-revoke`, {
+        reason: this.revokeReason.trim(),
+      })
+      .subscribe({
+        next: (res) => {
+          this.revoking.set(false);
+          this.revokeReason = '';
+          this.uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: `Successfully invalidated ${res.revoked || 0} active sessions globally.`,
+            type: 'success',
+          });
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        },
+        error: (err) => {
+          this.revoking.set(false);
+          this.uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: err.error?.message || 'Emergency revocation failed.',
+            type: 'error',
+          });
         },
       });
   }

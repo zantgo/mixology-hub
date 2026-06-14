@@ -11,7 +11,7 @@ import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { SystemSettings } from '../users/entities/system-settings.entity';
+import { SystemSetting } from '../users/entities/system-setting.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CsrfGuard } from './guards/csrf.guard';
 
@@ -22,7 +22,7 @@ import { CsrfGuard } from './guards/csrf.guard';
       UserProfile,
       TokenBlacklist,
       RefreshToken,
-      SystemSettings,
+      SystemSetting,
     ]),
     PassportModule,
     JwtModule.registerAsync({

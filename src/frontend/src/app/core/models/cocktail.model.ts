@@ -17,6 +17,7 @@ export interface Cocktail {
   isPublic: boolean;
   source: 'local' | 'api' | 'ai';
   externalId?: string;
+  isDeleted?: boolean;
   imageFull?: string;
   imageThumb?: string;
   ingredients: CocktailIngredient[];

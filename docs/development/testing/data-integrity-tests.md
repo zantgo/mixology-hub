@@ -1,8 +1,36 @@
 # Data Integrity Tests
 
-> **PENDING B2B MIGRATION:** These test specifications reference `UserInventoryService`. When the codebase is migrated, update to test `BarInventoryService` with the shared bar inventory model. Concurrency tests should verify BullMQ worker serialization, not basic `READ COMMITTED` behavior.
+## Concurrency & Queue Serialization Tests
 
-*Note: Data integrity tests are covered in other domain-specific test files:*
+All inventory mutations flow through a single-threaded BullMQ worker (`concurrency: 1`). Tests must verify that concurrent preparation requests are serialized and double-deductions are mathematically eliminated.
+
+```typescript
+describe('BarInventory - Concurrency & Serialization', () => {
+  it('should serialize concurrent prepare requests to prevent double-deductions', async () => {
+    const job1 = queue.add('prepare-cocktail', { cocktailId, bartenderId: '1' });
+    const job2 = queue.add('prepare-cocktail', { cocktailId, bartenderId: '2' });
+
+    await Promise.all([job1, job2]);
+
+    const logs = await preparationLogRepository.find({ order: { createdAt: 'ASC' } });
+    expect(logs[0].status).toBe('completed');
+    expect(logs[1].status).toBe('failed_insufficient_stock');
+  });
+
+  it('should prevent negative inventory balances under concurrent load', async () => {
+    await setupInventory({ ingredient: 'Vodka', quantity: 50 });
+    const requests = Array.from({ length: 5 }, (_, i) =>
+      queue.add('prepare-cocktail', { cocktailId, bartenderId: String(i) })
+    );
+    await Promise.all(requests);
+
+    const inventory = await barInventoryRepository.findOne({ where: { ingredient: 'Vodka' } });
+    expect(inventory.quantity.greaterThanOrEqualTo(0)).toBe(true);
+  });
+});
+```
+
+## Additional Test Specifications
 - **Decimal precision**: See `inventory-management-tests.md` (MeasureParserService tests)
 - **Unit conversion edge cases**: See `makeable-intelligence-tests.md` (UnitConverterService tests)
 - **Ingredient synonym resolution**: Implementation-specific tests would be added here

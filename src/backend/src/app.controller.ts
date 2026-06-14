@@ -1,10 +1,18 @@
-import { Controller, Get, Logger, Inject } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Logger,
+  Inject,
+  Res,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { AppService } from './app.service';
+import { ConfigService } from '@nestjs/config';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import type { Response } from 'express';
 
 @ApiTags('System')
 @Controller()
@@ -12,20 +20,22 @@ export class AppController {
   private readonly logger = new Logger(AppController.name);
 
   constructor(
-    private readonly appService: AppService,
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
   @ApiOperation({ summary: 'Root health check' })
   getHello(): string {
-    return this.appService.getHello();
+    return 'Hello World!';
   }
 
   @Get('health')
-  @ApiOperation({ summary: 'Health check endpoint (DB + Redis connectivity)' })
-  async getHealth() {
+  @ApiOperation({
+    summary: 'Health check endpoint (DB + Redis + AI connectivity)',
+  })
+  async getHealth(@Res({ passthrough: true }) res: Response) {
     const checks: Record<string, string> = {};
 
     try {
@@ -45,7 +55,27 @@ export class AppController {
       checks.redis = 'error';
     }
 
-    const allHealthy = Object.values(checks).every((v) => v === 'connected');
+    try {
+      const aiUrl = this.configService.get<string>('AI_API_URL');
+      const aiKey = this.configService.get<string>('AI_API_KEY');
+      if (aiUrl && aiKey) {
+        checks.ai_provider = 'configured';
+      } else {
+        checks.ai_provider = 'error';
+      }
+    } catch (err) {
+      this.logger.error(`AI health check failed: ${(err as Error).message}`);
+      checks.ai_provider = 'error';
+    }
+
+    const allHealthy = Object.values(checks).every(
+      (v) => v === 'connected' || v === 'configured',
+    );
+
+    if (!allHealthy) {
+      res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
     return {
       status: allHealthy ? 'ok' : 'degraded',
       checks,

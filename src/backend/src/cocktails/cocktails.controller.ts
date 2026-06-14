@@ -15,6 +15,8 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
@@ -29,7 +31,6 @@ import { CocktailsService } from './cocktails.service';
 import {
   CocktailAggregatorService,
   type SearchOptions,
-  type SearchFilters,
 } from './cocktail-aggregator.service';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 
@@ -38,7 +39,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User } from '../users/entities/user.entity';
 import { ImageService } from '../images/image.service';
-import { RatingService } from './services/rating.service';
+import { RatingService } from './rating.service';
 import { RateCocktailDto } from './dto/rate-cocktail.dto';
 import { ReportCocktailDto } from './dto/report-cocktail.dto';
 import { ReportedContent } from './entities/reported-content.entity';
@@ -96,7 +97,7 @@ export class CocktailsController {
     if (body && typeof body.data === 'string') {
       try {
         createCocktailDto = JSON.parse(body.data) as CreateCocktailDto;
-      } catch (_) {
+      } catch {
         throw new BadRequestException('Invalid JSON data in form field "data"');
       }
       // Re-validate the parsed JSON through DTO validation
@@ -137,14 +138,28 @@ export class CocktailsController {
       imagePaths = await this.imageService.processAndSaveImage(file);
     }
 
-    return this.cocktailsService.create(
-      {
-        ...createCocktailDto,
-        imageFull: imagePaths.full || undefined,
-        imageThumb: imagePaths.thumb || undefined,
-      },
-      user.id,
-    );
+    try {
+      return await this.cocktailsService.create(
+        {
+          ...createCocktailDto,
+          imageFull: imagePaths.full || undefined,
+          imageThumb: imagePaths.thumb || undefined,
+        },
+        user.id,
+      );
+    } catch (error) {
+      if (imagePaths.full) {
+        await fs
+          .unlink(path.join(process.cwd(), imagePaths.full))
+          .catch(() => {});
+      }
+      if (imagePaths.thumb) {
+        await fs
+          .unlink(path.join(process.cwd(), imagePaths.thumb))
+          .catch(() => {});
+      }
+      throw error;
+    }
   }
 
   @Post('batch-prepare')
@@ -196,7 +211,7 @@ export class CocktailsController {
       id,
       user.id,
       servings ? parseInt(servings, 10) : 1,
-      totalVolumeMl ? parseFloat(totalVolumeMl) : undefined,
+      totalVolumeMl,
       force === 'true',
     );
   }
@@ -260,9 +275,13 @@ export class CocktailsController {
     @GetUser() user: User,
     @Body() reportDto: ReportCocktailDto,
   ) {
+    const isExternal = id.startsWith('ext-') || !id.includes('-');
+    const cleanId = id.startsWith('ext-') ? id.slice(4) : id;
+
     const report = this.reportRepository.create({
       reportedBy: user,
-      cocktail: { id },
+      cocktail: !isExternal ? { id } : undefined,
+      externalCocktailId: isExternal ? cleanId : undefined,
       reportReason: reportDto.reportReason,
       details: reportDto.details || undefined,
       status: 'pending',
@@ -400,7 +419,7 @@ export class CocktailsController {
     if (body && typeof body.data === 'string') {
       try {
         updateCocktailDto = JSON.parse(body.data) as UpdateCocktailDto;
-      } catch (_) {
+      } catch {
         throw new BadRequestException('Invalid JSON data in form field "data"');
       }
       // Re-validate the parsed JSON through DTO validation
@@ -441,15 +460,29 @@ export class CocktailsController {
       imagePaths = await this.imageService.processAndSaveImage(file);
     }
 
-    return this.cocktailsService.update(
-      id,
-      {
-        ...updateCocktailDto,
-        imageFull: imagePaths.full || undefined,
-        imageThumb: imagePaths.thumb || undefined,
-      },
-      user.id,
-    );
+    try {
+      return await this.cocktailsService.update(
+        id,
+        {
+          ...updateCocktailDto,
+          imageFull: imagePaths.full || undefined,
+          imageThumb: imagePaths.thumb || undefined,
+        },
+        user.id,
+      );
+    } catch (error) {
+      if (imagePaths.full) {
+        await fs
+          .unlink(path.join(process.cwd(), imagePaths.full))
+          .catch(() => {});
+      }
+      if (imagePaths.thumb) {
+        await fs
+          .unlink(path.join(process.cwd(), imagePaths.thumb))
+          .catch(() => {});
+      }
+      throw error;
+    }
   }
 
   @Delete(':id')

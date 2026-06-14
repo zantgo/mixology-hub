@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Expose } from 'class-transformer';
 import { User } from '../../users/entities/user.entity';
@@ -74,6 +75,7 @@ export class PreparationLog {
   @Expose()
   undone: boolean;
 
+  @Index()
   @CreateDateColumn({ name: 'created_at' })
   @Expose({ name: 'createdAt' })
   createdAt: Date;

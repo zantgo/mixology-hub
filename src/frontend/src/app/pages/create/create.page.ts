@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, OnDestroy } from '@angular/core';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -455,7 +455,7 @@ const ALLOWED_UNITS = [
     `,
   ],
 })
-export class CreatePage implements CanComponentDeactivate {
+export class CreatePage implements CanComponentDeactivate, OnDestroy {
   private fb = inject(FormBuilder);
   private cocktailApi = inject(CocktailService);
   private http = inject(HttpClient);
@@ -494,6 +494,11 @@ export class CreatePage implements CanComponentDeactivate {
     return true;
   }
 
+  ngOnDestroy(): void {
+    this.searchSubjects.forEach((subject) => subject.complete());
+    this.searchSubjects.clear();
+  }
+
   get ingredientsArray(): FormArray {
     return this.form.get('ingredients') as FormArray;
   }
@@ -502,7 +507,7 @@ export class CreatePage implements CanComponentDeactivate {
     return this.fb.group({
       ingredientId: ['', [Validators.required]],
       ingredientName: ['', [Validators.required]],
-      amount: [1, [Validators.required, Validators.min(0.01)]],
+      amount: ['1', [Validators.required, Validators.min(0.01)]],
       unit: ['ml', [Validators.required]],
       measure: [''],
     });
@@ -611,9 +616,11 @@ export class CreatePage implements CanComponentDeactivate {
     const group = this.ingredientsArray.at(i) as FormGroup;
     if (!group) return;
     const raw = group.get('amount')?.value;
-    const num = typeof raw === 'string' ? parseFloat(raw) : raw;
-    if (!isNaN(num) && num >= 0) {
-      group.patchValue({ amount: num });
+    if (raw !== null && raw !== undefined && raw !== '') {
+      const num = Number(raw);
+      if (!isNaN(num) && num >= 0) {
+        group.patchValue({ amount: String(num) });
+      }
     }
     this.updateMeasure(i);
   }

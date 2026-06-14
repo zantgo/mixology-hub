@@ -3,14 +3,16 @@ import {
   IsNotEmpty,
   IsOptional,
   IsArray,
+  ArrayNotEmpty,
   ValidateNested,
   IsNumber,
   IsPositive,
   IsIn,
   Max,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { sanitizeHtml } from '../../common/utils/xss-sanitizer.util';
 
 const ALLOWED_UNITS = [
   'ml',
@@ -59,6 +61,9 @@ class CreateCocktailIngredientDto {
     example: 2,
     description: 'Numeric amount for inventory logic/calculation',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' ? parseFloat(value) : value,
+  )
   @IsNumber()
   @IsPositive()
   @Max(100000)
@@ -79,6 +84,9 @@ class CreateCocktailIngredientDto {
   })
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizeHtml(value) : value,
+  )
   measure: string;
 }
 
@@ -89,11 +97,17 @@ export class CreateCocktailDto {
   @ApiProperty({ example: 'Mojito', description: 'Name of the cocktail' })
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizeHtml(value) : value,
+  )
   name: string;
 
   @ApiProperty({ example: 'A refreshing mint drink', required: false })
   @IsString()
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizeHtml(value) : value,
+  )
   description?: string;
 
   @ApiProperty({
@@ -102,6 +116,9 @@ export class CreateCocktailDto {
   })
   @IsString()
   @IsNotEmpty()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizeHtml(value) : value,
+  )
   instructions: string;
 
   @ApiProperty({
@@ -109,6 +126,7 @@ export class CreateCocktailDto {
     description: 'List of ingredients with measurements',
   })
   @IsArray()
+  @ArrayNotEmpty()
   @ValidateNested({ each: true })
   @Type(() => CreateCocktailIngredientDto)
   ingredients: CreateCocktailIngredientDto[];

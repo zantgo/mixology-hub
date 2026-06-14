@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Decimal } from 'decimal.js';
@@ -22,12 +22,13 @@ import Ajv from 'ajv';
 const ajv = new Ajv({ allErrors: true });
 
 @Injectable()
-export class McpServerService {
+export class McpServerService implements OnApplicationShutdown {
   private readonly logger = new Logger(McpServerService.name);
   private readonly rateLimiter = new Map<string, number[]>();
   private readonly RATE_LIMIT = 30;
   private readonly RATE_WINDOW_MS = 60000;
   private readonly SESSION_TTL_MS = 30 * 60 * 1000;
+  private readonly cleanupInterval: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly barInventoryService: BarInventoryService,
@@ -40,7 +41,37 @@ export class McpServerService {
     @InjectRepository(AiToolAudit)
     private readonly auditRepository: Repository<AiToolAudit>,
     private readonly configService: ConfigService,
-  ) {}
+  ) {
+    this.cleanupInterval = setInterval(() => {
+      this.purgeExpiredRateLimiterKeys();
+    }, this.RATE_WINDOW_MS);
+  }
+
+  onApplicationShutdown(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+  }
+
+  private purgeExpiredRateLimiterKeys(): void {
+    const now = Date.now();
+    const windowStart = now - this.RATE_WINDOW_MS;
+    let purged = 0;
+
+    for (const [key, timestamps] of this.rateLimiter.entries()) {
+      const recent = timestamps.filter((t) => t >= windowStart);
+      if (recent.length === 0) {
+        this.rateLimiter.delete(key);
+        purged++;
+      } else {
+        this.rateLimiter.set(key, recent);
+      }
+    }
+
+    if (purged > 0) {
+      this.logger.debug(`Purged ${purged} expired rate limiter entries`);
+    }
+  }
 
   getTools(): McpToolDefinition[] {
     return [
@@ -151,6 +182,22 @@ export class McpServerService {
           required: ['cocktailId'],
         },
       },
+      {
+        name: 'get_preparation_status',
+        description:
+          'Get the real-time status of a queued cocktail preparation order',
+        isWrite: false,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            preparationLogId: {
+              type: 'string',
+              description: 'The UUID of the preparation log',
+            },
+          },
+          required: ['preparationLogId'],
+        },
+      },
     ];
   }
 
@@ -216,7 +263,7 @@ export class McpServerService {
       const valid = validate(toolCall.arguments || {});
       if (!valid) {
         const errors = validate.errors?.map(
-          (e) => `${e.instancePath || e.dataPath || ''} ${e.message}`,
+          (e) => `${(e as any).instancePath || ''} ${e.message}`,
         );
         return {
           content: [
@@ -253,8 +300,9 @@ export class McpServerService {
 
   private async dispatchTool(
     toolCall: McpToolCall,
-    session: McpSession,
+    _session: McpSession,
   ): Promise<McpToolResult> {
+    void _session;
     switch (toolCall.name) {
       case 'get_bar_inventory':
         return this.handleGetBarInventory(toolCall.arguments);
@@ -265,9 +313,11 @@ export class McpServerService {
       case 'convert_units':
         return this.handleConvertUnits(toolCall.arguments);
       case 'prepare_cocktail':
-        return this.handlePrepareCocktail(toolCall.arguments, session);
+        return this.handlePrepareCocktail(toolCall.arguments, _session);
       case 'check_makeability':
         return this.handleCheckMakeability(toolCall.arguments);
+      case 'get_preparation_status':
+        return this.handleGetPreparationStatus(toolCall.arguments);
       default:
         return {
           content: [
@@ -294,7 +344,7 @@ export class McpServerService {
       data?: InventoryItem[];
     }
     const typedResult = result as InventoryResult;
-    const items = typedResult.data || (result as InventoryItem[]);
+    const items = typedResult.data || (result as unknown as InventoryItem[]);
     const summary = (Array.isArray(items) ? items : []).map(
       (item: InventoryItem) => ({
         name: item.ingredient?.name || 'Unknown',
@@ -488,7 +538,7 @@ export class McpServerService {
       const typedInventory = inventory as InventoryResult;
       const items =
         typedInventory.data ||
-        (inventory as InventoryItemWithIngredient[]) ||
+        (inventory as unknown as InventoryItemWithIngredient[]) ||
         [];
       const missing: string[] = [];
       let matchedCount = new Decimal(0);
@@ -565,7 +615,9 @@ export class McpServerService {
                 found = true;
               }
             }
-          } catch {}
+          } catch {
+            // no-op: skip unmatched ingredients
+          }
         }
 
         if (!found) {
@@ -598,16 +650,39 @@ export class McpServerService {
     }
   }
 
+  private async handleGetPreparationStatus(
+    args: Record<string, unknown>,
+  ): Promise<McpToolResult> {
+    const preparationLogId = args.preparationLogId as string;
+    try {
+      const status =
+        await this.cocktailsService.getPreparationStatus(preparationLogId);
+      return {
+        content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text', text: `Failed to fetch status: ${message}` }],
+        isError: true,
+      };
+    }
+  }
+
   private async auditToolCall(
     tool: McpToolDefinition,
     call: McpToolCall,
     status: 'success' | 'error',
     session: McpSession,
   ): Promise<void> {
-    const sampleRate = this.configService.get<number>(
+    const rawSampleRate = this.configService.get<string | number>(
       'AI_AUDIT_READ_SAMPLE_RATE',
       10,
     );
+    const sampleRate =
+      typeof rawSampleRate === 'string'
+        ? parseFloat(rawSampleRate)
+        : rawSampleRate;
     const shouldAudit = tool.isWrite || Math.random() * 100 < sampleRate;
     if (!shouldAudit) return;
 

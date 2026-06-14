@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
-import { SystemSettings } from '../users/entities/system-settings.entity';
+import { SystemSetting } from '../users/entities/system-setting.entity';
 import { Decimal } from 'decimal.js';
 import * as bcrypt from 'bcrypt';
 import * as fs from 'fs';
@@ -31,8 +31,8 @@ export class SeederService implements OnModuleInit {
     private readonly profileRepository: Repository<UserProfile>,
     @InjectRepository(Ingredient)
     private readonly ingredientRepository: Repository<Ingredient>,
-    @InjectRepository(SystemSettings)
-    private readonly settingsRepository: Repository<SystemSettings>,
+    @InjectRepository(SystemSetting)
+    private readonly settingsRepository: Repository<SystemSetting>,
     private readonly configService: ConfigService,
   ) {}
 

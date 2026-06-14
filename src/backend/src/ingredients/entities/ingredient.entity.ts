@@ -8,6 +8,7 @@ import {
   Index,
   BeforeInsert,
   BeforeUpdate,
+  Check,
 } from 'typeorm';
 import { Decimal } from 'decimal.js';
 import { ApiProperty } from '@nestjs/swagger';
@@ -15,6 +16,7 @@ import { ColumnNumericTransformer } from '../../utils/column-numeric.transformer
 import { Transform } from 'class-transformer';
 
 @Entity('ingredients')
+@Check('"density" > 0')
 export class Ingredient {
   @ApiProperty({ description: 'Unique identifier of the ingredient' })
   @PrimaryGeneratedColumn('uuid')

@@ -5,6 +5,7 @@ import { FavoritesService } from './favorites.service';
 import { Favorite } from './entities/favorite.entity';
 import { User } from '../users/entities/user.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
+import { HiddenExternalCocktail } from '../cocktails/entities/hidden-external-cocktail.entity';
 import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
 
 describe('FavoritesService', () => {
@@ -12,19 +13,21 @@ describe('FavoritesService', () => {
   let favoriteRepo: any;
   let userRepo: any;
   let cocktailRepo: any;
+  let hiddenRepo: any;
   let aggregatorService: any;
 
   const mockUser = { id: 'user-1', email: 'test@example.com' };
   const mockCocktail = {
-    id: 'cock-1',
+    id: '123e4567-e89b-12d3-a456-426614174000',
     name: 'Test Cocktail',
-    is_deleted: false,
+    isDeleted: false,
   };
 
   beforeEach(async () => {
     favoriteRepo = {
       findOne: jest.fn(),
       find: jest.fn(),
+      count: jest.fn(),
       create: jest.fn(),
       save: jest.fn(),
       remove: jest.fn(),
@@ -33,6 +36,7 @@ describe('FavoritesService', () => {
 
     userRepo = { findOne: jest.fn() };
     cocktailRepo = { findOne: jest.fn() };
+    hiddenRepo = { find: jest.fn().mockResolvedValue([]) };
     aggregatorService = { getExternalCocktailById: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -41,6 +45,10 @@ describe('FavoritesService', () => {
         { provide: getRepositoryToken(Favorite), useValue: favoriteRepo },
         { provide: getRepositoryToken(User), useValue: userRepo },
         { provide: getRepositoryToken(Cocktail), useValue: cocktailRepo },
+        {
+          provide: getRepositoryToken(HiddenExternalCocktail),
+          useValue: hiddenRepo,
+        },
         { provide: CocktailAggregatorService, useValue: aggregatorService },
       ],
     }).compile();
@@ -53,15 +61,17 @@ describe('FavoritesService', () => {
       userRepo.findOne.mockResolvedValue(mockUser);
       cocktailRepo.findOne.mockResolvedValue(mockCocktail);
       favoriteRepo.create.mockReturnValue({
-        cocktail: { id: 'cock-1' },
+        cocktail: { id: '123e4567-e89b-12d3-a456-426614174000' },
         user: mockUser,
       });
       favoriteRepo.save.mockResolvedValue({
         id: 'fav-1',
-        cocktail: { id: 'cock-1' },
+        cocktail: { id: '123e4567-e89b-12d3-a456-426614174000' },
       });
 
-      const result = await service.create('user-1', { cocktailId: 'cock-1' });
+      const result = await service.create('user-1', {
+        cocktailId: '123e4567-e89b-12d3-a456-426614174000',
+      });
 
       expect(result).toBeDefined();
       expect(favoriteRepo.save).toHaveBeenCalled();
@@ -71,7 +81,9 @@ describe('FavoritesService', () => {
       userRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { cocktailId: 'cock-1' }),
+        service.create('user-1', {
+          cocktailId: '123e4567-e89b-12d3-a456-426614174000',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -80,20 +92,22 @@ describe('FavoritesService', () => {
       cocktailRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.create('user-1', { cocktailId: 'cock-1' }),
+        service.create('user-1', {
+          cocktailId: '123e4567-e89b-12d3-a456-426614174000',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
     it('should create external cocktail favorite', async () => {
       userRepo.findOne.mockResolvedValue(mockUser);
-      favoriteRepo.create.mockReturnValue({ external_cocktail_id: 'ext-123' });
+      favoriteRepo.create.mockReturnValue({ externalCocktailId: '123' });
       favoriteRepo.save.mockResolvedValue({
         id: 'fav-2',
-        external_cocktail_id: 'ext-123',
+        externalCocktailId: '123',
       });
 
       const result = await service.create('user-1', {
-        externalCocktailId: 'ext-123',
+        externalCocktailId: '123',
       });
 
       expect(result).toBeDefined();
@@ -106,14 +120,14 @@ describe('FavoritesService', () => {
       const mockFavorites = [
         {
           id: 'fav-1',
-          cocktailId: 'cock-1',
-          external_cocktail_id: null,
+          cocktailId: '123e4567-e89b-12d3-a456-426614174000',
+          externalCocktailId: null,
           cocktail: mockCocktail,
         },
         {
           id: 'fav-2',
           cocktailId: null,
-          external_cocktail_id: '11111',
+          externalCocktailId: '11111',
           cocktail: null,
         },
       ];
@@ -156,6 +170,31 @@ describe('FavoritesService', () => {
       await expect(service.remove('user-1', 'nonexistent')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('countFavorites', () => {
+    it('should return the count of favorites for a cocktail', async () => {
+      favoriteRepo.count.mockResolvedValue(5);
+
+      const result = await service.countFavorites(
+        '123e4567-e89b-12d3-a456-426614174000',
+      );
+
+      expect(result).toBe(5);
+      expect(favoriteRepo.count).toHaveBeenCalledWith({
+        where: { cocktail: { id: '123e4567-e89b-12d3-a456-426614174000' } },
+      });
+    });
+
+    it('should return 0 when no favorites exist', async () => {
+      favoriteRepo.count.mockResolvedValue(0);
+
+      const result = await service.countFavorites(
+        '123e4567-e89b-12d3-a456-426614174000',
+      );
+
+      expect(result).toBe(0);
     });
   });
 });

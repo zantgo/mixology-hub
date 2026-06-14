@@ -470,9 +470,9 @@ The global `ingredients` table is initially populated via a migration or seeder 
 - **Note:** User-initiated cocktail deletion uses soft delete (`is_deleted = true`) not CASCADE DELETE, to preserve Favorites relationships (UC 10.4, UC 2.9).
 - If a `Cocktail` is hard-deleted, `PREPARATION_LOGS.cocktail_id` is set to `NULL` (`ON DELETE SET NULL`) to preserve preparation history and enable undo functionality even after the original cocktail is deleted.
 
-2. **Concurrency Control for `PREPARATION_LOGS`:**
+2. **B2B Concurrency Management**
+The `bar_inventory` table serves as a single shared stock ledger for all bar staff. To protect against concurrent write collisions (race conditions) under standard `READ COMMITTED` isolation, all inventory-depleting preparation actions are serialized via an asynchronous BullMQ queue before the transaction starts. This guarantees that only one transaction modifies the inventory at any given millisecond.
 - The `status` column tracks job lifecycle: `queued` (awaiting BullMQ worker), `completed` (inventory deducted successfully), `failed_insufficient_stock` (not enough inventory), `failed_other` (infrastructure error).
-- All inventory deductions occur inside a single-threaded BullMQ Worker (`concurrency: 1`), which mathematically eliminates race conditions on `bar_inventory` rows.
 - The `undone` column in `PREPARATION_LOGS` is checked during undo operations to prevent duplicate undo (UC 4.19).
 
 2. **Eager Loading Optimization:**

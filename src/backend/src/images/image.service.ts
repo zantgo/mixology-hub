@@ -11,6 +11,22 @@ export class ImageService {
     'uploads',
     'cocktails',
   );
+  private readonly MAX_INPUT_PIXELS = parseInt(
+    process.env.IMAGE_MAX_INPUT_PIXELS || '4194304',
+    10,
+  );
+  private readonly WEBP_QUALITY_FULL = parseInt(
+    process.env.IMAGE_WEBP_QUALITY_FULL || '80',
+    10,
+  );
+  private readonly WEBP_QUALITY_THUMB = parseInt(
+    process.env.IMAGE_WEBP_QUALITY_THUMB || '75',
+    10,
+  );
+  private readonly WEBP_EFFORT = parseInt(
+    process.env.IMAGE_WEBP_EFFORT || '4',
+    10,
+  );
 
   async processAndSaveImage(
     file: Express.Multer.File,
@@ -33,15 +49,15 @@ export class ImageService {
 
     // Process Full Image (1024x1024, 1:1 Aspect Ratio, WebP, ~80% quality to stay under 300KB)
     // limitInputPixels prevents decompression bomb attacks (ADR 0016)
-    await sharp(file.buffer, { limitInputPixels: 268435456 }) // 16384^2 max
+    await sharp(file.buffer, { limitInputPixels: this.MAX_INPUT_PIXELS }) // 2048^2 max
       .resize(1024, 1024, { fit: 'cover', position: 'center' })
-      .webp({ quality: 80, effort: 4 }) // Effort 4 balances speed/compression
+      .webp({ quality: this.WEBP_QUALITY_FULL, effort: this.WEBP_EFFORT })
       .toFile(fullPath);
 
     // Process Thumbnail (300x300, 1:1 Aspect Ratio, WebP)
-    await sharp(file.buffer, { limitInputPixels: 268435456 })
+    await sharp(file.buffer, { limitInputPixels: this.MAX_INPUT_PIXELS })
       .resize(300, 300, { fit: 'cover', position: 'center' })
-      .webp({ quality: 75, effort: 4 })
+      .webp({ quality: this.WEBP_QUALITY_THUMB, effort: this.WEBP_EFFORT })
       .toFile(thumbPath);
 
     return {
@@ -71,15 +87,15 @@ export class ImageService {
 
     // Process Full Image (1024x1024, 1:1 Aspect Ratio, WebP, ~80% quality to stay under 300KB)
     // limitInputPixels prevents decompression bomb attacks (ADR 0016)
-    await sharp(buffer, { limitInputPixels: 268435456 })
+    await sharp(buffer, { limitInputPixels: this.MAX_INPUT_PIXELS })
       .resize(1024, 1024, { fit: 'cover', position: 'center' })
-      .webp({ quality: 80, effort: 4 })
+      .webp({ quality: this.WEBP_QUALITY_FULL, effort: this.WEBP_EFFORT })
       .toFile(fullPath);
 
     // Process Thumbnail (300x300, 1:1 Aspect Ratio, WebP)
-    await sharp(buffer, { limitInputPixels: 268435456 })
+    await sharp(buffer, { limitInputPixels: this.MAX_INPUT_PIXELS })
       .resize(300, 300, { fit: 'cover', position: 'center' })
-      .webp({ quality: 75, effort: 4 })
+      .webp({ quality: this.WEBP_QUALITY_THUMB, effort: this.WEBP_EFFORT })
       .toFile(thumbPath);
 
     return {

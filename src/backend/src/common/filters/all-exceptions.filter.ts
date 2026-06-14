@@ -11,6 +11,7 @@ import { Request, Response } from 'express';
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
+  private readonly MAX_LOG_LENGTH = 4096;
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -27,7 +28,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.message
         : 'Internal server error';
 
-    this.logger.error('Unhandled exception', {
+    const logPayload: Record<string, unknown> = {
       path: request.url,
       method: request.method,
       timestamp: new Date().toISOString(),
@@ -37,10 +38,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? {
               name: exception.name,
               message: exception.message,
-              stack: exception.stack,
+              stack: this.truncate(exception.stack),
             }
           : exception,
-    });
+    };
+
+    this.logger.error('Unhandled exception', logPayload);
 
     // Error alerting hook: log 5xx errors with structured metadata for
     // external monitoring systems (Datadog, Sentry, etc.) to pick up.
@@ -61,5 +64,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
     });
+  }
+
+  private truncate(value: unknown): string {
+    const str = typeof value === 'string' ? value : String(value ?? '');
+    return str.length > this.MAX_LOG_LENGTH
+      ? str.substring(0, this.MAX_LOG_LENGTH) + '...[truncated]'
+      : str;
   }
 }

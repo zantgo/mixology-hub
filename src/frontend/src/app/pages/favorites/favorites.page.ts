@@ -32,8 +32,8 @@ import { ButtonComponent } from '../../shared/components/button/button.component
               @if (item.cocktail) {
                 <app-cocktail-card [cocktail]="$any(item.cocktail)" />
               }
-              @if (item.external_cocktail_data) {
-                <app-cocktail-card [cocktail]="$any(item.external_cocktail_data)" />
+              @if (item.externalCocktailData) {
+                <app-cocktail-card [cocktail]="$any(item.externalCocktailData)" />
               }
             }
           </div>
@@ -122,11 +122,21 @@ export class FavoritesPage implements OnInit {
   readonly activeFavorites = computed(() =>
     this.favoriteStore
       .items()
-      .filter((item) => (item.cocktail && !item.cocktail.isDeleted) || item.external_cocktail_data),
+      .filter(
+        (item) =>
+          (item.cocktail && !item.cocktail.isDeleted) ||
+          (item.externalCocktailData && !item.externalCocktailData.isDeleted),
+      ),
   );
 
   readonly archivedFavorites = computed(() =>
-    this.favoriteStore.items().filter((item) => item.cocktail && item.cocktail.isDeleted),
+    this.favoriteStore
+      .items()
+      .filter(
+        (item) =>
+          (item.cocktail && item.cocktail.isDeleted) ||
+          (item.externalCocktailData && item.externalCocktailData.isDeleted),
+      ),
   );
 
   ngOnInit(): void {

@@ -111,7 +111,15 @@ export class AiAuditInterceptor implements NestInterceptor {
 
   private sanitizeArgs(body: any): Record<string, unknown> {
     if (!body) return {};
-    const { password, passwordHash, refreshToken, accessToken, ...safe } = body;
+    /* eslint-disable @typescript-eslint/no-unused-vars */
+    const {
+      password: _pw,
+      passwordHash: _ph,
+      refreshToken: _rt,
+      accessToken: _at,
+      ...safe
+    } = body;
+    /* eslint-enable @typescript-eslint/no-unused-vars */
     return safe;
   }
 }

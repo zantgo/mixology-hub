@@ -11,11 +11,11 @@ import {
   UseInterceptors,
   Request,
 } from '@nestjs/common';
-import { AiService } from './ai.service';
-import { EnhancedAiService } from './enhanced-ai.service';
+import { AiRecipeService } from './ai.service';
 import { CreateAiDto } from './dto/create-ai.dto';
 import { UpdateAiDto } from './dto/update-ai.dto';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
@@ -26,15 +26,13 @@ import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
 @UseGuards(JwtAuthGuard)
 @UseInterceptors(AiAuditInterceptor)
 export class AiController {
-  constructor(
-    private readonly aiService: AiService,
-    private readonly enhancedAiService: EnhancedAiService,
-  ) {}
+  constructor(private readonly aiService: AiRecipeService) {}
 
   @Post()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Generate a new cocktail recipe using AI' })
   create(@Request() req, @Body() createAiDto: CreateAiDto) {
-    return this.enhancedAiService.generateRecipe(req.user.id, {
+    return this.aiService.generateRecipe(req.user.id, {
       ingredients: createAiDto.ingredients,
       theme: createAiDto.theme,
       modifiers: createAiDto.modifiers,
@@ -47,7 +45,7 @@ export class AiController {
   @Patch(':id/regenerate')
   @ApiOperation({ summary: 'Regenerate a new AI recipe from the same prompt' })
   regenerate(@Request() req, @Param('id') id: string) {
-    return this.enhancedAiService.regenerateRecipe(req.user.id, id);
+    return this.aiService.regenerateRecipe(req.user.id, id);
   }
 
   @Post(':id/save-as-cocktail')
@@ -55,7 +53,7 @@ export class AiController {
     summary: 'Save an AI generated recipe into your local cocktail collection',
   })
   saveAsCocktail(@Request() req, @Param('id') id: string) {
-    return this.enhancedAiService.validateAndSaveRecipe(req.user.id, id);
+    return this.aiService.validateAndSaveRecipe(req.user.id, id);
   }
 
   @Get()
@@ -63,16 +61,13 @@ export class AiController {
     summary: 'Get history of AI generated recipes for the user with pagination',
   })
   findAll(@Request() req, @Query() paginationQuery: PaginationQueryDto) {
-    return this.enhancedAiService.getAiRecipeHistory(
-      req.user.id,
-      paginationQuery,
-    );
+    return this.aiService.getAiRecipeHistory(req.user.id, paginationQuery);
   }
 
   @Get('quota')
   @ApiOperation({ summary: 'Get remaining daily AI quota for the user' })
   getQuota(@Request() req) {
-    return this.enhancedAiService.getQuotaStatus(req.user.id);
+    return this.aiService.getQuotaStatus(req.user.id);
   }
 
   @Get(':id')

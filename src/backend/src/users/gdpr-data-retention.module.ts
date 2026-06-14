@@ -4,12 +4,15 @@ import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import { User } from './entities/user.entity';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { UserProfile } from './entities/user-profile.entity';
-import { Ai } from '../ai/entities/ai.entity';
-import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
+import { AiGeneratedRecipe } from '../ai/entities/ai.entity';
+import { UserAiQuota } from '../ai/entities/user-ai-quota.entity';
 import { Favorite } from '../favorites/entities/favorite.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
+import { CocktailRating } from '../cocktails/entities/cocktail-rating.entity';
+import { TokenBlacklist } from '../auth/entities/token-blacklist.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 
 @Module({
   imports: [
@@ -17,12 +20,15 @@ import { Ingredient } from '../ingredients/entities/ingredient.entity';
       User,
       BarInventory,
       UserProfile,
-      Ai,
-      UserAiQuotas,
+      AiGeneratedRecipe,
+      UserAiQuota,
       Favorite,
       Cocktail,
       CocktailIngredient,
       Ingredient,
+      CocktailRating,
+      TokenBlacklist,
+      RefreshToken,
     ]),
   ],
   providers: [GdprDataRetentionService],

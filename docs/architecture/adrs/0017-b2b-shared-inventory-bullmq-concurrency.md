@@ -13,7 +13,7 @@ MixologyHub is pivoting from a B2C architecture (where every user had their own 
    - `bartender`: Can browse recipes, check makeability, and submit "Prepare" orders. Cannot manually add/update stock.
 4. **Concurrent Bartenders:** Multiple bartenders may press "Prepare Drink" at the exact same millisecond, creating severe race conditions and potential deadlocks on the shared `bar_inventory` rows.
 
-The prior architecture explicitly accepted race conditions via a "No Concurrency Mandate" (documented in ADR 0001, ADR 0005, and `concurrency-removal-summary.md`). That mandate is no longer viable: in a shared-inventory environment, two simultaneous `SELECT` + `UPDATE` operations on the same ingredient row will inevitably cause double-deductions, negative inventory, or PostgreSQL deadlock errors under `READ COMMITTED`.
+The prior architecture explicitly accepted race conditions via a "No Concurrency Mandate" (documented in ADR 0001, ADR 0005, and `concurrency-serialization-summary.md`). That mandate is no longer viable: in a shared-inventory environment, two simultaneous `SELECT` + `UPDATE` operations on the same ingredient row will inevitably cause double-deductions, negative inventory, or PostgreSQL deadlock errors under `READ COMMITTED`.
 
 ## Decision
 We will implement **Redis-backed BullMQ** with a strict `concurrency: 1` setting for the `bar-orders` queue to serialize all cocktail preparation operations into a single-threaded processing pipeline.
@@ -113,7 +113,7 @@ export class BarOrdersWorker {
 
 ## Related Decisions
 - **Deprecates:** [ADR 0001: Use PostgreSQL for Inventory Management](./0001-use-postgresql-for-inventory.md) — The "No Concurrency / READ COMMITTED" trade-off within ADR 0001 is superseded by this ADR.
-- **Deprecates:** [concurrency-removal-summary.md](../concurrency-removal-summary.md) — The entire "No Concurrency Mandate" documented there is obsolete.
+- **Deprecates:** [concurrency-serialization-summary.md](../concurrency-serialization-summary.md) — The entire "No Concurrency Mandate" documented there is obsolete.
 - **Amends:** [ADR 0005: Rate Limiter Failure State Strategy](./0005-rate-limiter-failure-state-strategy.md) — Redis is now a core infrastructure dependency for BullMQ, though local-only rate limiting remains for the ThrottlerGuard specifically.
 
 ## Evolution Plan

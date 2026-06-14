@@ -68,7 +68,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
       if (!canActivate) {
         return false;
       }
-      user = request.user;
+      user = request.user as User | null;
     }
 
     if (user && !user.emailVerified) {
@@ -94,7 +94,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     return true;
   }
 
-  handleRequest(err: unknown, user: User | null): User {
+  handleRequest(err: unknown, user: User | null): any {
     if (err || !user) {
       throw err instanceof Error
         ? err

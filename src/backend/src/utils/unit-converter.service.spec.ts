@@ -288,17 +288,16 @@ describe('UnitConverterService', () => {
     });
 
     describe('cross discrete/volume conversions', () => {
-      it('should not convert count to ml (both factor 1, treated as same-category)', () => {
-        // Both 'count' and 'ml' have factor 1, so they convert 1:1
-        // This is by design in the current implementation.
-        const result = service.convert(3, 'count', 'ml');
-        expect(result.toNumber()).toBe(3);
+      it('should reject count to ml (incompatible categories)', () => {
+        expect(() => service.convert(3, 'count', 'ml')).toThrow(
+          BadRequestException,
+        );
       });
 
-      it('should not convert parts to oz (both non-mass/non-volume)', () => {
-        const result = service.convert(2, 'parts', 'oz');
-        // parts factor=1, oz factor=29.57 → 2*1 / 29.57 ≈ 0.0676
-        expect(result.toNumber()).toBeCloseTo(0.0676, 2);
+      it('should reject parts to oz (incompatible categories)', () => {
+        expect(() => service.convert(2, 'parts', 'oz')).toThrow(
+          BadRequestException,
+        );
       });
     });
   });

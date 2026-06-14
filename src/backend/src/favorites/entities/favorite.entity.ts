@@ -7,6 +7,7 @@ import {
   JoinColumn,
   Column,
   Check,
+  Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Cocktail } from '../../cocktails/entities/cocktail.entity';
@@ -15,6 +16,14 @@ import { Cocktail } from '../../cocktails/entities/cocktail.entity';
 @Check(
   '"cocktail_id" IS NOT NULL AND "external_cocktail_id" IS NULL OR "cocktail_id" IS NULL AND "external_cocktail_id" IS NOT NULL',
 )
+@Index('idx_fav_local', ['user', 'cocktail'], {
+  unique: true,
+  where: 'cocktail_id IS NOT NULL',
+})
+@Index('idx_fav_external', ['user', 'external_cocktail_id'], {
+  unique: true,
+  where: 'external_cocktail_id IS NOT NULL',
+})
 export class Favorite {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -27,9 +36,17 @@ export class Favorite {
   @JoinColumn({ name: 'cocktail_id' })
   cocktail: Cocktail | null;
 
-  @Column({ type: 'varchar', nullable: true })
-  external_cocktail_id: string | null;
+  @Column({ name: 'external_cocktail_id', type: 'varchar', nullable: true })
+  externalCocktailId: string | null;
 
-  @CreateDateColumn()
-  created_at: Date;
+  @Column({
+    name: 'external_name',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  externalName: string | null;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
 }

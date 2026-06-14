@@ -223,6 +223,48 @@ import { environment } from '../../../environments/environment';
                   </app-button>
                 </form>
               </div>
+
+              <h3 class="section-title">Privacy &amp; GDPR Controls</h3>
+              <div
+                class="card theme-controls"
+                style="padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4);"
+              >
+                <div>
+                  <p
+                    style="font-size: var(--font-size-body-small); color: var(--color-text-secondary); margin-bottom: var(--space-3); line-height: var(--line-height-normal);"
+                  >
+                    Download a complete backup of your profile details, favorite lists, custom
+                    cocktails, and preparation logs.
+                  </p>
+                  <app-button
+                    variant="outline"
+                    (action)="onExportData()"
+                    [loading]="exportingData()"
+                  >
+                    <app-icon name="download" [size]="18" />
+                    Export My Data (JSON)
+                  </app-button>
+                </div>
+
+                <div
+                  style="border-top: 1px solid var(--color-border); padding-top: var(--space-4);"
+                >
+                  <p
+                    style="font-size: var(--font-size-body-small); color: var(--color-error); margin-bottom: var(--space-3); line-height: var(--line-height-normal);"
+                  >
+                    Permanently erase your account, custom ingredients, non-public cocktails, and
+                    favorite associations. This action is irreversible.
+                  </p>
+                  <app-button
+                    (action)="onDeleteAccount()"
+                    [loading]="deletingAccount()"
+                    style="--color-primary: var(--color-error); --color-primary-dark: #d32f2f;"
+                  >
+                    <app-icon name="trash" [size]="18" />
+                    Permanently Delete Account
+                  </app-button>
+                </div>
+              </div>
             </div>
           }
         }
@@ -470,6 +512,9 @@ export class ProfilePage implements OnInit {
   newEmail = '';
   emailChangeSubmitting = signal(false);
 
+  exportingData = signal(false);
+  deletingAccount = signal(false);
+
   ngOnInit(): void {
     if (this.authStore.isAuthenticated()) {
       this.loadPreferences();
@@ -589,6 +634,76 @@ export class ProfilePage implements OnInit {
           });
         },
       });
+  }
+
+  onExportData(): void {
+    if (this.exportingData()) return;
+    this.exportingData.set(true);
+
+    this.http.get<any>(`${environment.apiUrl}/gdpr/export-data`).subscribe({
+      next: (res) => {
+        this.exportingData.set(false);
+        const dataStr =
+          'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(res.data, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute('href', dataStr);
+        downloadAnchor.setAttribute(
+          'download',
+          `mixologyhub-data-${this.authStore.user()?.id}.json`,
+        );
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: 'Your personal data export is ready and downloading.',
+          type: 'success',
+        });
+      },
+      error: (err) => {
+        this.exportingData.set(false);
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: err.error?.message || 'Failed to export your data.',
+          type: 'error',
+        });
+      },
+    });
+  }
+
+  onDeleteAccount(): void {
+    if (this.deletingAccount()) return;
+
+    const confirmed = confirm(
+      'WARNING: Are you absolutely sure you want to delete your account? This will permanently erase your profile, favorites, non-public cocktails, custom ingredients, and all associated session tokens. This action is irreversible.',
+    );
+
+    if (!confirmed) return;
+
+    this.deletingAccount.set(true);
+
+    this.http.post<any>(`${environment.apiUrl}/gdpr/request-deletion`, {}).subscribe({
+      next: (res) => {
+        this.deletingAccount.set(false);
+        this.authStore.clearState();
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message: res.message || 'Account successfully deleted.',
+          type: 'info',
+        });
+        this.router.navigate(['/auth/login']);
+      },
+      error: (err) => {
+        this.deletingAccount.set(false);
+        this.uiStore.addToast({
+          id: crypto.randomUUID(),
+          message:
+            err.error?.message || 'Failed to delete account. Please try again or contact support.',
+          type: 'error',
+        });
+      },
+    });
   }
 
   onLogout(): void {

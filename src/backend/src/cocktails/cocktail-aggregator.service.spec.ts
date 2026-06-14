@@ -17,14 +17,12 @@ jest.mock('../users/entities/user.entity', () => ({
   User: class User {},
 }));
 
-import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
 import { CocktailAggregatorService } from './cocktail-aggregator.service';
 
 describe('CocktailAggregatorService', () => {
   let service: CocktailAggregatorService;
   let localService: any;
-  let externalService: any;
+  let cocktailDbService: any;
   let inventoryService: any;
   let cacheManager: any;
 
@@ -33,10 +31,10 @@ describe('CocktailAggregatorService', () => {
     name: 'Test Cocktail',
     description: 'A test drink',
     instructions: 'Mix everything.',
-    is_public: true,
+    isPublic: true,
     source: 'local',
-    image_full: null,
-    image_thumb: null,
+    imageFull: null,
+    imageThumb: null,
     ingredients: [
       {
         measure: '50 ml',
@@ -75,12 +73,12 @@ describe('CocktailAggregatorService', () => {
     strIngredient15: null,
   };
 
-  beforeEach(async () => {
+  beforeEach(() => {
     localService = {
       findAll: jest.fn(),
     };
 
-    externalService = {
+    cocktailDbService = {
       searchByName: jest.fn(),
       getRandomCocktail: jest.fn(),
     };
@@ -102,18 +100,39 @@ describe('CocktailAggregatorService', () => {
       parse: jest.fn().mockReturnValue({ amount: 1, unit: 'oz' }),
     };
 
+    const makeabilityService = {
+      scoreCocktail: jest.fn().mockResolvedValue({
+        matchScore: 1.0,
+        makeability: 'makeable',
+        missingIngredients: [],
+      }),
+    };
+
     cacheManager = {
       get: jest.fn(),
       set: jest.fn(),
     };
 
+    const zeroResultSearchRepo = {
+      create: jest.fn(),
+      save: jest.fn(),
+    };
+
+    const hiddenRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
     service = new CocktailAggregatorService(
       localService,
-      externalService,
+      cocktailDbService,
       inventoryService,
       hierarchicalService as any,
       measureParser,
+      makeabilityService as any,
       cacheManager,
+      zeroResultSearchRepo as any,
+      hiddenRepo as any,
     );
   });
 
@@ -136,7 +155,7 @@ describe('CocktailAggregatorService', () => {
     it('should fetch fresh results on cache miss', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('test', {
@@ -178,7 +197,7 @@ describe('CocktailAggregatorService', () => {
     it('should handle empty search query', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('', { page: 1, limit: 10 });
@@ -189,7 +208,7 @@ describe('CocktailAggregatorService', () => {
     it('should include local and external sources in metadata', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('test', {
@@ -238,7 +257,7 @@ describe('CocktailAggregatorService', () => {
     it('should correctly map external drink to local format', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.searchByName.mockResolvedValue([mockExternalDrink]);
+      cocktailDbService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('mojito', {
@@ -256,12 +275,8 @@ describe('CocktailAggregatorService', () => {
   describe('sorting', () => {
     it('should sort by name ascending by default on cache miss', async () => {
       cacheManager.get.mockResolvedValue(null);
-      const mockResults = [
-        { id: 'b', name: 'Zombie', source: 'local', ingredients: [] },
-        { id: 'a', name: 'Apple Martini', source: 'local', ingredients: [] },
-      ];
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('', { page: 1, limit: 10 });
@@ -295,7 +310,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -327,7 +342,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -361,7 +376,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -393,7 +408,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -429,7 +444,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -453,7 +468,7 @@ describe('CocktailAggregatorService', () => {
         },
       ];
       localService.findAll.mockResolvedValue({ data: localCocktails });
-      externalService.getRandomCocktail.mockResolvedValue(null);
+      cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified(
@@ -470,7 +485,7 @@ describe('CocktailAggregatorService', () => {
     it('should return null images for external cocktails', async () => {
       cacheManager.get.mockResolvedValue(null);
       localService.findAll.mockResolvedValue({ data: [] });
-      externalService.searchByName.mockResolvedValue([mockExternalDrink]);
+      cocktailDbService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       const result = await service.searchUnified('mojito', {
@@ -480,8 +495,25 @@ describe('CocktailAggregatorService', () => {
       const ext = result.data.find((d: any) => d.source === 'api');
 
       expect(ext).toBeDefined();
-      expect(ext.image_full).toBeNull();
-      expect(ext.image_thumb).toBeNull();
+      expect(ext.imageFull).toBeNull();
+      expect(ext.imageThumb).toBeNull();
+    });
+  });
+
+  describe('makeability sort optimization', () => {
+    it('should skip external API calls when sorting by makeability', async () => {
+      cacheManager.get.mockResolvedValue(null);
+      localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
+      inventoryService.getInventory.mockResolvedValue({ data: [] });
+
+      await service.searchUnified(
+        'test',
+        { page: 1, limit: 10 },
+        { sortBy: 'makeability' },
+      );
+
+      expect(cocktailDbService.searchByName).not.toHaveBeenCalled();
+      expect(cocktailDbService.getRandomCocktail).not.toHaveBeenCalled();
     });
   });
 });

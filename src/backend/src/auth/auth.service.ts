@@ -15,7 +15,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { User } from '../users/entities/user.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
-import { SystemSettings } from '../users/entities/system-settings.entity';
+import { SystemSetting } from '../users/entities/system-setting.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
@@ -25,15 +25,20 @@ import { TokenBlacklist } from './entities/token-blacklist.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { EmailService } from '../email/email.service';
 import { v4 as uuidv4 } from 'uuid';
+import { validatePasswordStrength } from './validators/is-strong-password.validator';
 
 const MAX_SESSIONS = 5;
+const BLACKLIST_CACHE_PREFIX = 'blacklist:token:';
+const BLACKLIST_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+const DUMMY_BCRYPT_HASH =
+  '$2b$10$rQnM1.FZ2FVKGqC0I0bhPO1G.8hlv5Frk3kOWh3yqZDZH3M/GxcHq';
 
 interface JwtPayload {
   sub: string;
   email?: string;
   jti?: string;
   type?: string;
-  token_version?: number;
+  tokenVersion?: number;
   family?: string;
   saltVersion?: number;
 }
@@ -49,8 +54,8 @@ export class AuthService {
     private readonly tokenBlacklistRepository: Repository<TokenBlacklist>,
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepository: Repository<RefreshToken>,
-    @InjectRepository(SystemSettings)
-    private readonly systemSettingsRepository: Repository<SystemSettings>,
+    @InjectRepository(SystemSetting)
+    private readonly systemSettingsRepository: Repository<SystemSetting>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
@@ -122,11 +127,16 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
-    // Find user
     const user = await this.userRepository.findOne({
       where: { email: loginDto.email },
     });
-    if (!user) {
+
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user ? user.passwordHash : DUMMY_BCRYPT_HASH,
+    );
+
+    if (!user || !isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -137,11 +147,7 @@ export class AuthService {
       );
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(
-      loginDto.password,
-      user.passwordHash,
-    );
+    // Track failed attempts if password was wrong
     if (!isPasswordValid) {
       user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
       if (user.failedLoginAttempts >= 5) {
@@ -280,24 +286,33 @@ export class AuthService {
       return null;
     }
 
-    // Check if token is blacklisted by actual token value
+    // Check if token is blacklisted — Redis cache first, DB as fallback
+    const tokenHash = this.hashToken(token);
+    const blacklistCacheKey = `${BLACKLIST_CACHE_PREFIX}${tokenHash}`;
+    const cachedBlacklist =
+      await this.cacheManager.get<string>(blacklistCacheKey);
+    if (cachedBlacklist) {
+      return null;
+    }
+
     const isBlacklisted = await this.tokenBlacklistRepository.findOne({
       where: { token },
     });
     if (isBlacklisted) {
+      await this.cacheManager.set(blacklistCacheKey, '1', BLACKLIST_CACHE_TTL);
       return null;
     }
 
     // Check token version (invalidates sessions on password reset/change)
     if (
-      payload.token_version !== undefined &&
-      payload.token_version !== user.token_version
+      payload.tokenVersion !== undefined &&
+      payload.tokenVersion !== user.tokenVersion
     ) {
       return null;
     }
 
     // Check global token salt version (invalidates sessions on emergency admin revocation)
-    // Retrieve from Redis cache (60s TTL) to prevent DB bottleneck on every request
+    // Retrieve from Redis cache (5min TTL) to prevent DB bottleneck on every request
     const cacheKey = 'setting:global_token_salt_version';
     let saltVersionString = await this.cacheManager.get<string>(cacheKey);
 
@@ -306,7 +321,7 @@ export class AuthService {
         where: { settingKey: 'global_token_salt_version' },
       });
       saltVersionString = saltSetting ? saltSetting.settingValue : '0';
-      await this.cacheManager.set(cacheKey, saltVersionString, 60000);
+      await this.cacheManager.set(cacheKey, saltVersionString, 300000);
     }
 
     const currentSaltVersion = parseInt(saltVersionString, 10) || 0;
@@ -336,7 +351,7 @@ export class AuthService {
       email: user.email,
       jti: accessTokenId,
       type: 'access',
-      token_version: user.token_version,
+      tokenVersion: user.tokenVersion,
       saltVersion: currentSaltVersion,
     };
 
@@ -348,20 +363,20 @@ export class AuthService {
     };
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(accessTokenPayload, {
-        secret: this.configService.get<string>('JWT_SECRET'),
-        expiresIn: this.configService.get<string>(
-          'JWT_ACCESS_EXPIRES_IN',
-          '15m',
-        ),
+      this.jwtService.signAsync(accessTokenPayload as Record<string, unknown>, {
+        secret: this.configService.get<string>('JWT_SECRET')!,
+        expiresIn: (this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ??
+          '15m') as any,
       }),
-      this.jwtService.signAsync(refreshTokenPayload, {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: this.configService.get<string>(
-          'JWT_REFRESH_EXPIRES_IN',
-          '7d',
-        ),
-      }),
+      this.jwtService.signAsync(
+        refreshTokenPayload as Record<string, unknown>,
+        {
+          secret: this.configService.get<string>('JWT_REFRESH_SECRET')!,
+          expiresIn: (this.configService.get<string>(
+            'JWT_REFRESH_EXPIRES_IN',
+          ) ?? '7d') as any,
+        },
+      ),
     ]);
 
     // Store HASHED refresh token in refresh_tokens table for multi-session support
@@ -432,6 +447,13 @@ export class AuthService {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
     });
     await this.tokenBlacklistRepository.save(tokenBlacklist);
+
+    const tokenHash = this.hashToken(token);
+    await this.cacheManager.set(
+      `${BLACKLIST_CACHE_PREFIX}${tokenHash}`,
+      '1',
+      BLACKLIST_CACHE_TTL,
+    );
   }
 
   private async blacklistAllUserTokens(userId: string) {
@@ -490,51 +512,17 @@ export class AuthService {
     }
 
     // Validate password strength
-    if (newPassword.length < 8) {
-      throw new BadRequestException('Password must be at least 8 characters');
-    }
-    const passwordRegex =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passwordRegex.test(newPassword)) {
-      throw new BadRequestException(
-        'Password must contain uppercase, lowercase, number, and special character',
-      );
-    }
-    // Check common passwords
-    const COMMON_PASSWORDS = new Set([
-      'password',
-      'password1',
-      'password123',
-      'admin',
-      'admin123',
-      '123456',
-      '12345678',
-      'qwerty',
-      'qwerty123',
-      'abc123',
-      'letmein',
-      'welcome',
-      'monkey',
-      'dragon',
-      'master',
-      'login',
-      'princess',
-      'football',
-      'shadow',
-      'sunshine',
-      'trustno1',
-      'iloveyou',
-    ]);
-    if (COMMON_PASSWORDS.has(newPassword.toLowerCase())) {
-      throw new BadRequestException('Password is too common');
+    const passwordError = validatePasswordStrength(newPassword);
+    if (passwordError) {
+      throw new BadRequestException(passwordError);
     }
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update password, increment token_version, clear reset token AND clear brute-force lockout states
+    // Update password, increment tokenVersion, clear reset token AND clear brute-force lockout states
     user.passwordHash = hashedPassword;
-    user.token_version = (user.token_version ?? 0) + 1;
+    user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     user.resetPasswordToken = null;
     user.resetPasswordExpires = null;
     user.failedLoginAttempts = 0;
@@ -711,14 +699,29 @@ export class AuthService {
     }
 
     const oldEmail = user.email;
-    user.email = user.tempNewEmail!;
-    user.tempNewEmail = null;
-    user.emailChangeToken = null;
-    user.emailVerified = true;
-    user.token_version += 1;
 
-    await this.userRepository.save(user);
-    await this.blacklistAllUserTokens(user.id);
+    if (!user.tempNewEmail) {
+      throw new BadRequestException('No pending email change');
+    }
+
+    await this.userRepository.manager.transaction(
+      async (transactionalEntityManager) => {
+        user.email = user.tempNewEmail!;
+        user.tempNewEmail = null;
+        user.emailChangeToken = null;
+        user.emailVerified = true;
+        user.tokenVersion += 1;
+
+        await transactionalEntityManager.save(user);
+
+        await transactionalEntityManager
+          .createQueryBuilder()
+          .update(RefreshToken)
+          .set({ isRevoked: true })
+          .where('user_id = :userId', { userId: user.id })
+          .execute();
+      },
+    );
 
     return {
       success: true,

@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Expose } from 'class-transformer';
 import { User } from '../../users/entities/user.entity';
+import { ColumnFloatTransformer } from '../../utils/column-float.transformer';
 
 @Entity('external_cocktail_ratings')
 @Unique(['user', 'external_cocktail_id'])
@@ -27,10 +28,15 @@ export class ExternalCocktailRating {
   userId: string;
 
   @Column({ name: 'external_cocktail_id' })
-  @Expose({ name: 'externalCocktailId' })
-  external_cocktail_id: string;
+  @Expose()
+  externalCocktailId: string;
 
-  @Column({ type: 'decimal', precision: 3, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 3,
+    scale: 2,
+    transformer: new ColumnFloatTransformer(),
+  })
   @Expose()
   score: number;
 

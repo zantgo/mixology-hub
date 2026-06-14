@@ -15,7 +15,7 @@ import { ButtonComponent } from '../../shared/components/button/button.component
 import { ModalComponent } from '../../shared/components/modal/modal.component';
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { IconComponent } from '../../shared/components/icon/icon.component';
-import { UnitConvertPipe } from '../../shared/pipes/unit-convert.pipe';
+import { UnitConversionPipe } from '../../shared/pipes/unit-convert.pipe';
 import { environment } from '../../../environments/environment';
 
 @Component({
@@ -31,7 +31,7 @@ import { environment } from '../../../environments/environment';
     ModalComponent,
     SkeletonComponent,
     IconComponent,
-    UnitConvertPipe,
+    UnitConversionPipe,
   ],
   template: `
     @if (cocktailStore.loading() || !cocktail()) {
@@ -405,6 +405,7 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.orderStore.stopPolling();
+    this.orderStore.reset();
   }
 
   loadUserRating(id: string): void {

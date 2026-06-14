@@ -94,7 +94,11 @@ export class OrderStore {
             this.status.set(res.status);
             this.cocktailName.set(res.cocktailName);
 
-            if (res.status === 'completed' || res.status.startsWith('failed')) {
+            if (
+              res.status === 'completed' ||
+              res.status === 'cancelled' ||
+              res.status.startsWith('failed')
+            ) {
               this.stopPolling();
             }
           },

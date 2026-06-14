@@ -5,6 +5,7 @@ import {
   CreateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Cocktail } from './cocktail.entity';
@@ -22,6 +23,7 @@ export class ReportedContent {
   @JoinColumn({ name: 'cocktail_id' })
   cocktail: Cocktail | null;
 
+  @Index()
   @Column({ name: 'external_cocktail_id', nullable: true })
   externalCocktailId: string;
 

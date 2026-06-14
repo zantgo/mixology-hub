@@ -83,6 +83,24 @@ npm run test:ci     # Single run with coverage
 npm run test:e2e    # Run Playwright E2E tests (requires backend running)
 ```
 
+### BarInventoryService Coverage
+The `BarInventoryService` is tested for ACID transaction integrity inside the BullMQ Worker context. Concurrency tests verify queue serialization guarantees.
+
+```typescript
+describe('BarInventory - Concurrency & Serialization', () => {
+  it('should serialize concurrent prepare requests to prevent double-deductions', async () => {
+    const job1 = queue.add('prepare-cocktail', { cocktailId, bartenderId: '1' });
+    const job2 = queue.add('prepare-cocktail', { cocktailId, bartenderId: '2' });
+
+    await Promise.all([job1, job2]);
+
+    const logs = await preparationLogRepository.find({ order: { createdAt: 'ASC' } });
+    expect(logs[0].status).toBe('completed');
+    expect(logs[1].status).toBe('failed_insufficient_stock');
+  });
+});
+```
+
 ## 📊 Coverage Expectations
 
 | Area                     | Target Coverage | Critical Paths |

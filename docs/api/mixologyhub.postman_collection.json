@@ -223,7 +223,7 @@
                 "{{base_url}}"
               ],
               "path": [
-                "user-inventory",
+                "bar-inventory",
                 "makeable"
               ],
               "query": [
@@ -248,7 +248,7 @@
                     "{{base_url}}"
                   ],
                   "path": [
-                    "user-inventory",
+                    "bar-inventory",
                     "makeable"
                   ],
                   "query": [
@@ -298,7 +298,7 @@
                 "{{base_url}}"
               ],
               "path": [
-                "user-inventory"
+                "bar-inventory"
               ]
             },
             "description": "Add or update ingredient in user inventory"
@@ -324,7 +324,7 @@
                     "{{base_url}}"
                   ],
                   "path": [
-                    "user-inventory"
+                    "bar-inventory"
                   ]
                 }
               },

@@ -5,12 +5,14 @@ import {
   BadRequestException,
   Inject,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
+import { Decimal } from 'decimal.js';
 import { CreateCocktailDto } from './dto/create-cocktail.dto';
 import { UpdateCocktailDto } from './dto/update-cocktail.dto';
 import { Cocktail } from './entities/cocktail.entity';
@@ -19,15 +21,18 @@ import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { User } from '../users/entities/user.entity';
 import { PreparationLog } from './entities/preparation-log.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { EnhancedTheCocktailDbService } from '../external/the-cocktail-db/enhanced-cocktail-db.service';
+import { CocktailDbService } from '../external/the-cocktail-db/cocktail-db.service';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { MeasureParserService } from '../utils/measure-parser.service';
 import { FavoritesService } from '../favorites/favorites.service';
 import { ImageService } from '../images/image.service';
+import { CacheInvalidationService } from '../redis-cache/cache-invalidation.service';
+import { isValidUUID } from '../utils/uuid-validator';
 import type { CocktailDbDrink } from './cocktail-aggregator.service';
 
 @Injectable()
 export class CocktailsService {
+  private readonly logger = new Logger(CocktailsService.name);
   constructor(
     @InjectRepository(Cocktail)
     private readonly cocktailRepository: Repository<Cocktail>,
@@ -41,12 +46,13 @@ export class CocktailsService {
     private readonly preparationLogRepository: Repository<PreparationLog>,
     @InjectQueue('bar-orders')
     private readonly barOrdersQueue: Queue,
-    private readonly externalCocktailService: EnhancedTheCocktailDbService,
+    private readonly cocktailDbService: CocktailDbService,
     private readonly hierarchicalIngredientService: HierarchicalIngredientService,
     private readonly measureParser: MeasureParserService,
     @Inject(forwardRef(() => FavoritesService))
     private readonly favoritesService: FavoritesService,
     private readonly imageService: ImageService,
+    private readonly cacheInvalidation: CacheInvalidationService,
   ) {}
 
   async create(
@@ -65,16 +71,22 @@ export class CocktailsService {
       throw new NotFoundException('User not found');
     }
 
+    const parentExternalId = createCocktailDto.parentExternalId?.startsWith(
+      'ext-',
+    )
+      ? createCocktailDto.parentExternalId.slice(4)
+      : createCocktailDto.parentExternalId;
+
     const cocktail = await this.cocktailRepository.manager.transaction(
       async (transactionalEntityManager) => {
         const newCocktail = this.cocktailRepository.create({
           name: createCocktailDto.name,
           description: createCocktailDto.description,
           instructions: createCocktailDto.instructions,
-          image_full: createCocktailDto.imageFull,
-          image_thumb: createCocktailDto.imageThumb,
-          is_public: createCocktailDto.isPublic ?? true,
-          parent_external_id: createCocktailDto.parentExternalId,
+          imageFull: createCocktailDto.imageFull,
+          imageThumb: createCocktailDto.imageThumb,
+          isPublic: createCocktailDto.isPublic ?? true,
+          parentExternalId: parentExternalId,
           user: user,
         });
 
@@ -124,6 +136,12 @@ export class CocktailsService {
       );
     }
 
+    if (parentExternalId) {
+      await this.favoritesService
+        .migrateFavoritePointer(userId, parentExternalId, completeCocktail.id)
+        .catch(() => {});
+    }
+
     return completeCocktail;
   }
 
@@ -131,13 +149,28 @@ export class CocktailsService {
     cocktailId: string,
     bartenderId: string,
     servings: number = 1,
-    totalVolumeMl?: number,
+    totalVolumeMl?: string,
     force: boolean = false,
   ) {
-    let cocktail = await this.cocktailRepository.findOne({
-      where: { id: cocktailId },
-      relations: ['ingredients'],
-    });
+    let totalVolumeMlDecimal: Decimal | undefined;
+    if (totalVolumeMl !== undefined && totalVolumeMl.trim() !== '') {
+      totalVolumeMlDecimal = new Decimal(totalVolumeMl);
+      if (totalVolumeMlDecimal.isNaN() || totalVolumeMlDecimal.lte(0)) {
+        throw new BadRequestException('Total volume must be a positive number');
+      }
+      if (totalVolumeMlDecimal.gt(10000)) {
+        throw new BadRequestException(
+          'Total volume exceeds maximum allowed (10000 ml)',
+        );
+      }
+    }
+
+    let cocktail = isValidUUID(cocktailId)
+      ? await this.cocktailRepository.findOne({
+          where: { id: cocktailId },
+          relations: ['ingredients'],
+        })
+      : null;
 
     let forkedFromExternal = false;
 
@@ -145,90 +178,106 @@ export class CocktailsService {
       const cleanExternalId = cocktailId.startsWith('ext-')
         ? cocktailId.slice(4)
         : cocktailId;
-      const externalDrink: CocktailDbDrink | null =
-        await this.externalCocktailService.getCocktailById(cleanExternalId);
-      if (!externalDrink || !externalDrink.strDrink) {
-        throw new NotFoundException(`Cocktail #${cocktailId} not found`);
+
+      cocktail = await this.cocktailRepository.findOne({
+        where: { parentExternalId: cleanExternalId, isDeleted: false },
+        relations: ['ingredients'],
+      });
+
+      if (cocktail) {
+        forkedFromExternal = true;
       }
 
-      const unresolved: string[] = [];
-      const resolvedIngredients: {
-        ingredientId: string;
-        measure: string;
-        amount: number;
-        unit: string;
-      }[] = [];
-
-      for (let i = 1; i <= 15; i++) {
-        const ingredientKey = `strIngredient${i}` as const;
-        const measureKey = `strMeasure${i}` as const;
-        const ingredientName: string | null = externalDrink[ingredientKey];
-        const measure: string | null = externalDrink[measureKey];
-
-        if (!ingredientName || ingredientName.trim() === '') continue;
-
-        const match = await this.hierarchicalIngredientService.findBestMatch(
-          ingredientName.trim(),
-          {
-            minConfidence: 0.7,
-          },
-        );
-
-        if (!match) {
-          unresolved.push(ingredientName.trim().toLowerCase());
-          continue;
+      if (!cocktail) {
+        const externalDrink: CocktailDbDrink | null =
+          await this.cocktailDbService.getCocktailById(cleanExternalId);
+        if (!externalDrink || !externalDrink.strDrink) {
+          throw new NotFoundException(`Cocktail #${cocktailId} not found`);
         }
 
-        const parsed = this.measureParser.parse(measure ?? '');
+        const unresolved: string[] = [];
+        const resolvedIngredients: {
+          ingredientId: string;
+          measure: string;
+          amount: number;
+          unit: string;
+        }[] = [];
 
-        resolvedIngredients.push({
-          ingredientId: match.ingredient.id,
-          measure: measure ? measure.trim() : 'to taste',
-          amount: parsed.amount,
-          unit: parsed.unit,
-        });
-      }
+        for (let i = 1; i <= 15; i++) {
+          const ingredientKey = `strIngredient${i}` as const;
+          const measureKey = `strMeasure${i}` as const;
+          const ingredientName: string | null = externalDrink[ingredientKey];
+          const measure: string | null = externalDrink[measureKey];
 
-      if (unresolved.length > 0) {
-        throw new BadRequestException(
-          `Cannot prepare external cocktail: the following ingredients are not recognized in the bar inventory: ${unresolved.join(', ')}`,
+          if (!ingredientName || ingredientName.trim() === '') continue;
+
+          const match = await this.hierarchicalIngredientService.findBestMatch(
+            ingredientName.trim(),
+            {
+              minConfidence: 0.7,
+            },
+          );
+
+          if (!match) {
+            unresolved.push(ingredientName.trim().toLowerCase());
+            continue;
+          }
+
+          const parsed = this.measureParser.parse(measure ?? '');
+
+          resolvedIngredients.push({
+            ingredientId: match.ingredient.id,
+            measure: measure ? measure.trim() : 'to taste',
+            amount: parsed.amount,
+            unit: parsed.unit,
+          });
+        }
+
+        if (unresolved.length > 0) {
+          throw new BadRequestException(
+            `Cannot prepare external cocktail: the following ingredients are not recognized in the bar inventory: ${unresolved.join(', ')}`,
+          );
+        }
+
+        if (resolvedIngredients.length === 0) {
+          throw new BadRequestException(
+            'External cocktail has no resolvable ingredients',
+          );
+        }
+
+        cocktail = await this.create(
+          {
+            name: externalDrink.strDrink,
+            description: externalDrink.strInstructions
+              ? `Imported from TheCocktailDB: ${externalDrink.strInstructions.length > 100 ? externalDrink.strInstructions.substring(0, 100) + '...' : externalDrink.strInstructions}`
+              : 'Imported from TheCocktailDB',
+            instructions:
+              externalDrink.strInstructions || 'No instructions provided',
+            ingredients: resolvedIngredients,
+            isPublic: true,
+            parentExternalId: cleanExternalId,
+          },
+          bartenderId,
         );
+
+        if (externalDrink.strDrinkThumb?.startsWith('https://')) {
+          const newCocktailId = cocktail.id;
+          this.ingestAndUpdateCocktailImage(
+            newCocktailId,
+            externalDrink.strDrinkThumb,
+          ).catch((err: Error) =>
+            this.logger.warn(
+              `Background image ingestion failed for cocktail ${newCocktailId}: ${err.message}`,
+            ),
+          );
+        }
+
+        forkedFromExternal = true;
+
+        await this.favoritesService
+          .migrateFavoritePointer(bartenderId, cleanExternalId, cocktail.id)
+          .catch(() => {});
       }
-
-      if (resolvedIngredients.length === 0) {
-        throw new BadRequestException(
-          'External cocktail has no resolvable ingredients',
-        );
-      }
-
-      const imagePaths = await this.ingestExternalImage(
-        externalDrink.strDrinkThumb || '',
-      );
-
-      cocktail = await this.create(
-        {
-          name: externalDrink.strDrink,
-          description: externalDrink.strInstructions
-            ? `Imported from TheCocktailDB: ${externalDrink.strInstructions.length > 100 ? externalDrink.strInstructions.substring(0, 100) + '...' : externalDrink.strInstructions}`
-            : 'Imported from TheCocktailDB',
-          instructions:
-            externalDrink.strInstructions || 'No instructions provided',
-          ingredients: resolvedIngredients,
-          isPublic: true,
-          parentExternalId: cocktailId,
-          imageFull: imagePaths.full || undefined,
-          imageThumb: imagePaths.thumb || undefined,
-        },
-        bartenderId,
-      );
-
-      forkedFromExternal = true;
-
-      await this.favoritesService.migrateFavoritePointer(
-        bartenderId,
-        cleanExternalId,
-        cocktail.id,
-      );
     }
 
     const preparationLog = this.preparationLogRepository.create({
@@ -246,7 +295,7 @@ export class CocktailsService {
       bartenderId,
       preparationLogId: savedLog.id,
       servings,
-      totalVolumeMl,
+      totalVolumeMl: totalVolumeMlDecimal?.toString(),
       force,
     });
 
@@ -291,13 +340,10 @@ export class CocktailsService {
     };
   }
 
-  private async ingestExternalImage(
+  private async ingestAndUpdateCocktailImage(
+    cocktailId: string,
     url: string,
-  ): Promise<{ full: string | null; thumb: string | null }> {
-    if (!url || !url.startsWith('https://')) {
-      return { full: null, thumb: null };
-    }
-
+  ): Promise<void> {
     const MAX_CONTENT_LENGTH = 5 * 1024 * 1024;
     const TIMEOUT_MS = 3000;
 
@@ -315,17 +361,51 @@ export class CocktailsService {
         : (response.headers['content-type'] as string | undefined);
       const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
       if (!contentType || !allowedTypes.includes(contentType)) {
-        return { full: null, thumb: null };
+        return;
       }
 
       const buffer = Buffer.from(response.data as ArrayBuffer);
-      return await this.imageService.processAndSaveBuffer(buffer, contentType);
+      const paths = await this.imageService.processAndSaveBuffer(
+        buffer,
+        contentType,
+      );
+
+      await this.cocktailRepository.update(cocktailId, {
+        imageFull: paths.full,
+        imageThumb: paths.thumb,
+      });
     } catch {
-      return { full: null, thumb: null };
+      // Best-effort: cocktail is already saved without image
     }
   }
 
   async undo(logId: string) {
+    const log = await this.preparationLogRepository.findOne({
+      where: { id: logId },
+    });
+
+    if (!log) {
+      throw new NotFoundException(`Preparation log ${logId} not found`);
+    }
+
+    if (log.status !== 'completed') {
+      throw new BadRequestException(
+        `Cannot undo preparation: status is ${log.status}, expected "completed"`,
+      );
+    }
+
+    if (log.undone) {
+      throw new BadRequestException('Preparation has already been undone');
+    }
+
+    const MAX_UNDO_WINDOW_MS = 16 * 60 * 1000;
+    const elapsed = Date.now() - new Date(log.createdAt).getTime();
+    if (elapsed > MAX_UNDO_WINDOW_MS) {
+      throw new BadRequestException(
+        'Transaction Rollback Refused: The 15-minute secure undo window has expired.',
+      );
+    }
+
     interface UndoQueryRow {
       id: string;
       bartender_id: string | null;
@@ -335,52 +415,36 @@ export class CocktailsService {
     }
 
     const result: UndoQueryRow[] =
-      await this.preparationLogRepository.manager.query<UndoQueryRow>(
-        `UPDATE preparation_logs
-       SET undone = true
-       WHERE id = $1
-         AND status = 'completed'
-         AND undone = false
-       RETURNING *`,
+      await this.preparationLogRepository.manager.query<UndoQueryRow[]>(
+        `SELECT * FROM preparation_logs
+        WHERE id = $1
+          AND status = 'completed'
+          AND undone = false`,
         [logId],
       );
 
     if (!result || result.length === 0) {
-      const log = await this.preparationLogRepository.findOne({
-        where: { id: logId },
-      });
-
-      if (!log) {
-        throw new NotFoundException(`Preparation log ${logId} not found`);
-      }
-
-      if (log.status !== 'completed') {
-        throw new NotFoundException(
-          `Cannot undo preparation: status is ${log.status}, expected "completed"`,
-        );
-      }
-
-      if (log.undone) {
-        throw new NotFoundException('Preparation has already been undone');
-      }
+      throw new BadRequestException(
+        'Failed to queue undo. The preparation may have been modified.',
+      );
     }
 
-    const log = result[0];
+    const updatedLog = result[0];
 
-    const jobType = log.cocktail_id ? 'undo' : 'batch-undo';
+    const jobType = updatedLog.cocktail_id ? 'undo' : 'batch-undo';
 
     const job = await this.barOrdersQueue.add('undo-preparation', {
       type: jobType,
-      bartenderId: log.bartender_id || undefined,
-      preparationLogId: log.id,
+      bartenderId: updatedLog.bartender_id || undefined,
+      preparationLogId: updatedLog.id,
     });
 
     return {
       message: 'Undo queued for processing',
-      preparationLogId: log.id,
+      preparationLogId: updatedLog.id,
       jobId: job.id,
       status: 'queued',
-      statusUrl: `/cocktails/preparations/${log.id}/status`,
+      statusUrl: `/cocktails/preparations/${updatedLog.id}/status`,
     };
   }
 
@@ -443,7 +507,7 @@ export class CocktailsService {
     const { limit = 10, page = 1 } = paginationQuery;
     const offset = (page - 1) * limit;
     const [data, total] = await this.cocktailRepository.findAndCount({
-      where: { is_deleted: false },
+      where: { isDeleted: false },
       relations: ['ingredients'],
       skip: offset,
       take: limit,
@@ -476,7 +540,7 @@ export class CocktailsService {
     const qb = this.cocktailRepository
       .createQueryBuilder('cocktail')
       .leftJoinAndSelect('cocktail.ingredients', 'ingredients')
-      .where('cocktail.is_deleted = :isDeleted', { isDeleted: false });
+      .where('cocktail.isDeleted = :isDeleted', { isDeleted: false });
 
     if (options?.fuzzy) {
       qb.andWhere(
@@ -511,9 +575,12 @@ export class CocktailsService {
   }
 
   async findOne(id: string) {
+    if (!isValidUUID(id)) {
+      throw new NotFoundException(`Cocktail #${id} not found`);
+    }
     const cocktail = await this.cocktailRepository.findOne({
-      where: { id, is_deleted: false },
-      relations: ['ingredients'],
+      where: { id, isDeleted: false },
+      relations: ['ingredients', 'ingredients.ingredient', 'user'],
     });
     if (!cocktail) throw new NotFoundException(`Cocktail #${id} not found`);
     return cocktail;
@@ -535,13 +602,44 @@ export class CocktailsService {
       );
     }
 
+    const favoritesCount = await this.favoritesService.countFavorites(id);
+    if (cocktail.isPublic && favoritesCount > 0) {
+      const newForkDto = {
+        name: updateCocktailDto.name ?? cocktail.name,
+        description: updateCocktailDto.description ?? cocktail.description,
+        instructions: updateCocktailDto.instructions ?? cocktail.instructions,
+        isPublic: true,
+        ingredients:
+          updateCocktailDto.ingredients ??
+          cocktail.ingredients.map((ci) => ({
+            ingredientId: ci.ingredient.id,
+            amount:
+              ci.amount instanceof Decimal
+                ? ci.amount.toNumber()
+                : Number(ci.amount),
+            unit: ci.unit,
+            measure: ci.measure,
+          })),
+        parentExternalId: cocktail.id,
+      };
+
+      const newFork = await this.create(newForkDto, userId!);
+      await this.cacheInvalidation.clearByPatterns([
+        'search:*',
+        'makeability:*',
+      ]);
+      return newFork;
+    }
+
     Object.assign(cocktail, {
       ...updateCocktailDto,
-      image_full: updateCocktailDto.imageFull,
-      image_thumb: updateCocktailDto.imageThumb,
+      imageFull: updateCocktailDto.imageFull,
+      imageThumb: updateCocktailDto.imageThumb,
     });
 
-    return await this.cocktailRepository.save(cocktail);
+    const saved = await this.cocktailRepository.save(cocktail);
+    await this.cacheInvalidation.clearByPatterns(['search:*', 'makeability:*']);
+    return saved;
   }
 
   async remove(id: string, userId?: string) {
@@ -551,7 +649,9 @@ export class CocktailsService {
         `Cocktail #${id} not found or you don't have permission to delete it`,
       );
     }
-    cocktail.is_deleted = true;
-    return await this.cocktailRepository.save(cocktail);
+    cocktail.isDeleted = true;
+    const saved = await this.cocktailRepository.save(cocktail);
+    await this.cacheInvalidation.clearByPatterns(['search:*', 'makeability:*']);
+    return saved;
   }
 }

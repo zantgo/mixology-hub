@@ -41,29 +41,75 @@ describe('BarInventoryService', () => {
   let repo: any;
   let ingRepo: any;
   let ds: any;
-  let cacheManager: any;
+  let cacheInvalidation: any;
 
   beforeEach(() => {
     repo = {
       findOne: jest.fn(),
       findAndCount: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
       create: jest.fn(),
       save: jest.fn(),
       remove: jest.fn(),
       delete: jest.fn(),
     };
     ingRepo = { findOne: jest.fn() };
-    ds = { transaction: jest.fn() };
-    cacheManager = {
-      del: jest.fn(),
-      clear: jest.fn(),
+    ds = {
+      transaction: jest
+        .fn()
+        .mockImplementation(
+          async <T>(
+            runInTransaction: (manager: any) => Promise<T>,
+          ): Promise<T> => {
+            const manager = {
+              findOne: jest
+                .fn()
+                .mockImplementation((entityClass: any, options?: any) => {
+                  if (entityClass === Ingredient) {
+                    if (typeof options === 'string')
+                      return ingRepo.findOne({ where: { id: options } });
+                    return ingRepo.findOne(options);
+                  }
+                  if (typeof options === 'string')
+                    return repo.findOne({ where: { id: options } });
+                  return repo.findOne(options);
+                }),
+              find: jest.fn(),
+              count: jest.fn().mockImplementation(() => {
+                return repo.count();
+              }),
+              create: jest
+                .fn()
+                .mockImplementation((_entityClass: any, plain: any) => {
+                  return repo.create(plain);
+                }),
+              save: jest.fn().mockImplementation((entity: any) => {
+                return repo.save(entity);
+              }),
+              remove: jest.fn().mockImplementation((entity: any) => {
+                return repo.remove(entity);
+              }),
+              delete: jest
+                .fn()
+                .mockImplementation((_entityClass: any, ids: any) => {
+                  return repo.delete(ids);
+                }),
+              createQueryBuilder: jest.fn(),
+            };
+            return runInTransaction(manager);
+          },
+        ),
+    };
+    cacheInvalidation = {
+      clearByPatterns: jest.fn().mockResolvedValue(undefined),
+      clearAll: jest.fn().mockResolvedValue(undefined),
     };
     service = new BarInventoryService(
       repo,
       ingRepo,
       new UnitConverterService(),
       ds,
-      cacheManager,
+      cacheInvalidation,
     );
   });
 
@@ -219,15 +265,47 @@ describe('BarInventoryService', () => {
     );
   });
 
+  it('should throw UnprocessableEntityException when inventory limit reached', async () => {
+    const ing = makeIngredient();
+    ingRepo.findOne.mockResolvedValue(ing);
+    repo.findOne.mockResolvedValue(null);
+    repo.count.mockResolvedValue(10000);
+
+    await expect(
+      service.addToInventory({
+        ingredientId: 'ing-1',
+        quantity: 100,
+        unit: 'ml',
+      }),
+    ).rejects.toThrow('Maximum inventory limit reached');
+  });
+
+  it('should not check limit when updating existing inventory item', async () => {
+    const ing = makeIngredient();
+    const existing = makeItem({ quantity: new Decimal(500) });
+    ingRepo.findOne.mockResolvedValue(ing);
+    repo.findOne.mockResolvedValue(existing);
+    repo.save.mockResolvedValue(existing);
+
+    await service.addToInventory({
+      ingredientId: 'ing-1',
+      quantity: 100,
+      unit: 'ml',
+    });
+
+    expect(repo.count).not.toHaveBeenCalled();
+  });
+
   it('should bulk add items in transaction', async () => {
     const ing = makeIngredient();
-    ds.transaction.mockImplementation(async (cb: Function) => {
+    ds.transaction.mockImplementation((cb) => {
       let callCount = 0;
       const mgr = {
         findOne: jest.fn().mockImplementation(() => {
           callCount++;
           return callCount === 1 ? Promise.resolve(ing) : Promise.resolve(null);
         }),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockReturnValue(makeItem()),
         save: jest.fn().mockResolvedValue(makeItem()),
       };
@@ -240,7 +318,7 @@ describe('BarInventoryService', () => {
   });
 
   it('should throw on missing ingredient in bulk add', async () => {
-    ds.transaction.mockImplementation(async (cb: Function) => {
+    ds.transaction.mockImplementation((cb) => {
       const mgr = { findOne: jest.fn().mockResolvedValue(null) };
       return cb(mgr);
     });
@@ -254,7 +332,7 @@ describe('BarInventoryService', () => {
   it('should increment existing in bulk add', async () => {
     const ing = makeIngredient();
     const existing = makeItem({ quantity: new Decimal(100) });
-    ds.transaction.mockImplementation(async (cb: Function) => {
+    ds.transaction.mockImplementation((cb) => {
       let callCount = 0;
       const mgr = {
         findOne: jest.fn().mockImplementation(() => {
@@ -263,6 +341,7 @@ describe('BarInventoryService', () => {
             ? Promise.resolve(ing)
             : Promise.resolve(existing);
         }),
+        count: jest.fn().mockResolvedValue(0),
         save: jest.fn().mockResolvedValue(existing),
       };
       return cb(mgr);
@@ -271,6 +350,26 @@ describe('BarInventoryService', () => {
       { ingredientId: 'ing-1', quantity: 50, unit: 'ml' },
     ]);
     expect(result).toHaveLength(1);
+  });
+
+  it('should throw inventory limit error in bulk add', async () => {
+    const ing = makeIngredient();
+    ds.transaction.mockImplementation((cb) => {
+      let callCount = 0;
+      const mgr = {
+        findOne: jest.fn().mockImplementation(() => {
+          callCount++;
+          return callCount === 1 ? Promise.resolve(ing) : Promise.resolve(null);
+        }),
+        count: jest.fn().mockResolvedValue(10000),
+        create: jest.fn().mockReturnValue(makeItem()),
+        save: jest.fn().mockResolvedValue(makeItem()),
+      };
+      return cb(mgr);
+    });
+    await expect(
+      service.bulkAdd([{ ingredientId: 'ing-1', quantity: 100, unit: 'ml' }]),
+    ).rejects.toThrow('Maximum inventory limit reached');
   });
 
   it('should bulk delete items', async () => {

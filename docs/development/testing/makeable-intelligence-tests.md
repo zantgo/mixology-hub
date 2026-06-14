@@ -1,6 +1,6 @@
 # Makeable Intelligence Tests
 
-> **PENDING B2B MIGRATION:** These test specifications reference `getUserInventory`. When the codebase is migrated, update all references to `getBarInventory`. Test context shifts from per-user makeability to shared bar-wide makeability calculations.
+> **B2B MIGRATED:** The codebase has been migrated to shared `bar_inventory`. These test specifications serve as reference. Actual test code uses `getBarInventory`. Test context is shared bar-wide makeability calculations.
 
 **Example TDD for Incompatible Units (UC 3.4):**
 ```typescript

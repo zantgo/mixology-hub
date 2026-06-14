@@ -2,6 +2,7 @@ import { Module, Global } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { redisStore } from 'cache-manager-redis-yet';
+import { CacheInvalidationService } from './cache-invalidation.service';
 
 @Global()
 @Module({
@@ -20,6 +21,7 @@ import { redisStore } from 'cache-manager-redis-yet';
       }),
     }),
   ],
-  exports: [CacheModule],
+  providers: [CacheInvalidationService],
+  exports: [CacheModule, CacheInvalidationService],
 })
 export class RedisCacheModule {}

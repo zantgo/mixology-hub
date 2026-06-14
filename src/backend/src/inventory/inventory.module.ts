@@ -20,6 +20,6 @@ import { CocktailsModule } from '../cocktails/cocktails.module';
   ],
   controllers: [BarInventoryController],
   providers: [BarInventoryService, MakeabilityService],
-  exports: [BarInventoryService, TypeOrmModule],
+  exports: [BarInventoryService, MakeabilityService, TypeOrmModule],
 })
 export class InventoryModule {}

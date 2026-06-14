@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+/* eslint-disable @typescript-eslint/unbound-method */
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -7,7 +8,6 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { User } from '../users/entities/user.entity';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 describe('AuthController', () => {
   let controller: AuthController;

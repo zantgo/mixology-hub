@@ -26,7 +26,7 @@ export interface AiRecipe {
   };
 }
 
-export interface IAiProvider {
+export interface AiProvider {
   generateRecipe(
     ingredients: string[],
     options?: AiGenerationOptions,

@@ -92,6 +92,7 @@ function createMocks() {
     getMany: jest.fn(),
     execute: jest.fn(),
     set: jest.fn().mockReturnThis(),
+    setParameter: jest.fn().mockReturnThis(),
     update: jest.fn().mockReturnThis(),
   };
   const tm = {
@@ -250,7 +251,7 @@ describe('BarOrdersProcessor - prepare', () => {
   });
 
   it('should fail when update returns 0 rows', async () => {
-    const { qb, tm, processor } = createMocks();
+    const { qb, tm, prepRepo, processor } = createMocks();
     tm.findOne
       .mockResolvedValueOnce(makeLog())
       .mockResolvedValueOnce(makeCocktail())
@@ -266,6 +267,50 @@ describe('BarOrdersProcessor - prepare', () => {
 
     const result = await processor.process(makeJob());
     expect(result.status).toBe('failed_insufficient_stock');
+    expect(prepRepo.update).toHaveBeenCalledWith('log-1', {
+      status: 'failed_insufficient_stock',
+    });
+  });
+
+  it('should rollback prior deductions when later ingredient fails', async () => {
+    const { qb, tm, prepRepo, processor } = createMocks();
+    const ing1 = makeIngredient({ id: 'ing-1', name: 'Vodka' });
+    const ing2 = makeIngredient({ id: 'ing-2', name: 'Lime Juice' });
+    const cocktail = makeCocktail({
+      ingredients: [
+        makeCocktailIngredient({ amount: 50, unit: 'ml', ingredient: ing1 }),
+        makeCocktailIngredient({ amount: 30, unit: 'ml', ingredient: ing2 }),
+      ],
+    });
+    tm.findOne
+      .mockResolvedValueOnce(makeLog())
+      .mockResolvedValueOnce(cocktail)
+      .mockResolvedValueOnce(makeLog());
+    qb.getMany.mockResolvedValue([
+      {
+        id: 'stock-1',
+        quantity: new Decimal(100),
+        ingredient: { id: 'ing-1', name: 'Vodka' },
+      },
+      {
+        id: 'stock-2',
+        quantity: new Decimal(100),
+        ingredient: { id: 'ing-2', name: 'Lime Juice' },
+      },
+    ]);
+    // First ingredient deduction succeeds, second fails at execute stage
+    qb.execute
+      .mockResolvedValueOnce({ affected: 1 })
+      .mockResolvedValueOnce({ affected: 0 });
+
+    const result = await processor.process(makeJob());
+    expect(result.status).toBe('failed_insufficient_stock');
+    // Verify log was updated to insufficient_stock externally (rollback occurred)
+    expect(prepRepo.update).toHaveBeenCalledWith('log-1', {
+      status: 'failed_insufficient_stock',
+    });
+    // Both ingredients were attempted (execute called twice)
+    expect(qb.execute).toHaveBeenCalledTimes(2);
   });
 
   it('should convert units during preparation', async () => {

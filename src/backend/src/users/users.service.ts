@@ -125,10 +125,10 @@ export class UsersService {
     const offset = (page - 1) * limit;
 
     const [data, total] = await this.cocktailRepository.findAndCount({
-      where: { user: { id: userId }, is_deleted: false },
+      where: { user: { id: userId }, isDeleted: false },
       skip: offset,
       take: limit,
-      order: { created_at: 'DESC' },
+      order: { createdAt: 'DESC' },
     });
 
     const totalPages = Math.ceil(total / limit);

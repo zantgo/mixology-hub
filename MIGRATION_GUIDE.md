@@ -10,8 +10,7 @@ The migration includes the following changes:
 2. **Add `is_deleted` to cocktails table** - Soft delete support
 3. **Update `cocktail_ingredients.amount` precision** - From `decimal(10,2)` to `decimal(10,4)` for fractional accuracy
 4. **Create partial unique indexes for ingredients** - Prevent naming conflicts between users
- 5. **Create `unified_idempotency` table** - For unified idempotency system
-6. **Make `favorites.cocktail_id` nullable** - For polymorphic favorites
+5. **Make `favorites.cocktail_id` nullable** - For polymorphic favorites
 
 ## 🚀 Migration Methods
 
@@ -24,16 +23,9 @@ cd src/backend
 npx typeorm migration:run -d typeorm.config.ts
 ```
 
-### Method 2: Manual SQL Execution
+### Method 2: Automatic (TypeORM synchronize)
 
-If TypeORM migration fails, run the SQL script manually:
-
-```bash
-# When PostgreSQL is running on port 5433 (Docker default)
-psql -h localhost -p 5433 -U admin -d mixology_hub -f src/backend/migration-script.sql
-
-# You'll be prompted for the password: secretpassword
-```
+TypeORM will synchronize schema changes automatically when the application starts (`synchronize: true` is enabled). However, partial unique indexes and column precision changes are handled by compiled TypeScript migrations.
 
 ### Method 3: Docker Compose Automatic
 
@@ -41,7 +33,6 @@ When starting the application with Docker Compose, TypeORM will synchronize most
 
 1. Partial unique indexes
 2. Column precision changes
-3. Table creation for unified_idempotency
 
 ## 🔧 Database Connection Details
 
@@ -99,14 +90,6 @@ WHERE tablename = 'ingredients'
 AND indexname LIKE 'idx_ingredients_%';
 ```
 
-### 4. Check New Table
-```sql
--- Check unified_idempotency table exists
-SELECT table_name 
-FROM information_schema.tables 
-WHERE table_name = 'unified_idempotency';
-```
-
 ## 🐛 Troubleshooting
 
 ### Issue: "Password authentication failed"
@@ -133,13 +116,17 @@ docker compose logs --tail=10 postgres
 ```
 
 ### Issue: TypeORM migration fails
-**Solution:** Use the manual SQL script:
-```bash
-# Copy the SQL script to a location psql can access
-cp src/backend/migration-script.sql .
+**Solution:** Verify the database is running and accessible:
 
-# Run it manually
-psql -h localhost -p 5433 -U admin -d mixology_hub -f migration-script.sql
+```bash
+# Check if Docker container is running
+docker compose ps
+
+# If not running, start it
+docker compose up -d postgres
+
+# Wait for it to be healthy
+docker compose logs --tail=10 postgres
 ```
 
 ## 🔄 Rollback Procedure
@@ -179,9 +166,8 @@ ALTER COLUMN cocktail_id SET NOT NULL;
 ## 📝 Migration Files
 
 1. **TypeORM Migration:** `src/backend/src/migrations/1733702400000-fix-architectural-inconsistencies.ts`
-2. **SQL Script:** `src/backend/migration-script.sql`
-3. **TypeORM Config:** `src/backend/typeorm.config.ts`
-4. **Migration Runner:** `src/backend/run-migration.js`
+2. **TypeORM Config:** `src/backend/typeorm.config.ts`
+3. **Migration Runner:** `src/backend/run-migration.js`
 
 ## ⏰ Timing Considerations
 
@@ -196,10 +182,9 @@ The migration is successful when:
 
 1. All new columns exist with correct data types
 2. Partial unique indexes are created
-3. `unified_idempotency` table exists with correct constraints
-4. `cocktail_ingredients.amount` has precision 10,4
-5. Application starts without database errors
-6. New features (soft delete, multi-tenant ingredients) work correctly
+3. `cocktail_ingredients.amount` has precision 10,4
+4. Application starts without database errors
+5. New features (soft delete, multi-tenant ingredients) work correctly
 
 ## 🆘 Getting Help
 

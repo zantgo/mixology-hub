@@ -1,13 +1,19 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateFavoriteDto } from './dto/create-favorite.dto';
-import { UpdateFavoriteDto } from './dto/update-favorite.dto';
 import { Favorite } from './entities/favorite.entity';
 import { User } from '../users/entities/user.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
+import { HiddenExternalCocktail } from '../cocktails/entities/hidden-external-cocktail.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
+import { isValidUUID } from '../utils/uuid-validator';
 
 @Injectable()
 export class FavoritesService {
@@ -19,25 +25,62 @@ export class FavoritesService {
     @InjectRepository(User) private readonly userRepository: Repository<User>,
     @InjectRepository(Cocktail)
     private readonly cocktailRepository: Repository<Cocktail>,
+    @InjectRepository(HiddenExternalCocktail)
+    private readonly hiddenRepository: Repository<HiddenExternalCocktail>,
     private readonly aggregatorService: CocktailAggregatorService,
   ) {}
+
+  async countFavorites(cocktailId: string): Promise<number> {
+    return await this.favoriteRepository.count({
+      where: { cocktail: { id: cocktailId } },
+    });
+  }
 
   async create(userId: string, dto: CreateFavoriteDto) {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    if (dto.cocktailId) {
+    const hasLocal = !!dto.cocktailId;
+    const hasExternal = !!dto.externalCocktailId;
+
+    if (hasLocal && hasExternal) {
+      throw new BadRequestException(
+        'Cannot favorite both a local and external cocktail simultaneously. Provide either cocktailId or externalCocktailId.',
+      );
+    }
+    if (!hasLocal && !hasExternal) {
+      throw new BadRequestException(
+        'Either cocktailId or externalCocktailId must be provided.',
+      );
+    }
+    if (hasLocal) {
+      if (!isValidUUID(dto.cocktailId!)) {
+        throw new NotFoundException(`Cocktail ${dto.cocktailId} not found`);
+      }
       const cocktail = await this.cocktailRepository.findOne({
-        where: { id: dto.cocktailId, is_deleted: false },
+        where: { id: dto.cocktailId, isDeleted: false },
       });
       if (!cocktail)
         throw new NotFoundException(`Cocktail ${dto.cocktailId} not found`);
     }
 
+    let externalName: string | null = null;
+    if (dto.externalCocktailId) {
+      try {
+        const external = await this.aggregatorService.getExternalCocktailById(
+          dto.externalCocktailId,
+        );
+        externalName = external?.name || null;
+      } catch {
+        // Best-effort: hydrate name later during find operations
+      }
+    }
+
     const favorite = this.favoriteRepository.create({
       user: user,
       cocktail: dto.cocktailId ? { id: dto.cocktailId } : undefined,
-      external_cocktail_id: dto.externalCocktailId || undefined,
+      externalCocktailId: dto.externalCocktailId || undefined,
+      externalName: externalName,
     });
 
     return await this.favoriteRepository.save(favorite);
@@ -58,7 +101,10 @@ export class FavoritesService {
     // Soft-deleted cocktails are included to allow frontend tombstone rendering (UC 6.6)
 
     if (search) {
-      qb.andWhere('cocktail.name ILIKE :search', { search: `%${search}%` });
+      qb.andWhere(
+        '(cocktail.name ILIKE :search OR favorite.externalName ILIKE :search)',
+        { search: `%${search}%` },
+      );
     }
 
     qb.skip(offset).take(limit);
@@ -83,41 +129,76 @@ export class FavoritesService {
   }
 
   private async hydrateExternalFavorites(favorites: Favorite[]): Promise<void> {
+    const hiddenRecords = await this.hiddenRepository.find({
+      select: ['externalId'],
+    });
+    const hiddenIds = new Set(hiddenRecords.map((r) => r.externalId));
+
     const externalIds = [
       ...new Set(
         favorites
-          .filter((f) => f.external_cocktail_id && !f.cocktail)
-          .map((f) => f.external_cocktail_id!),
+          .filter(
+            (f) =>
+              f.externalCocktailId &&
+              !f.cocktail &&
+              !hiddenIds.has(f.externalCocktailId),
+          )
+          .map((f) => f.externalCocktailId!),
       ),
     ];
 
-    if (externalIds.length === 0) return;
-
-    const results = await Promise.all(
-      externalIds.map(async (id) => {
-        try {
-          const cocktail =
-            await this.aggregatorService.getExternalCocktailById(id);
-          return { id, cocktail };
-        } catch {
-          return { id, cocktail: null };
-        }
-      }),
-    );
+    const results: { id: string; cocktail: unknown }[] = [];
+    if (externalIds.length > 0) {
+      const hydrations = await Promise.all(
+        externalIds.map(async (id) => {
+          try {
+            const cocktail =
+              await this.aggregatorService.getExternalCocktailById(id);
+            return { id, cocktail };
+          } catch {
+            return { id, cocktail: null };
+          }
+        }),
+      );
+      results.push(...hydrations);
+    }
 
     const cocktailMap = new Map(
       results.filter((r) => r.cocktail).map((r) => [r.id, r.cocktail]),
     );
 
     for (const fav of favorites) {
-      if (
-        fav.external_cocktail_id &&
-        !fav.cocktail &&
-        cocktailMap.has(fav.external_cocktail_id)
-      ) {
-        (fav as any).external_cocktail_data = cocktailMap.get(
-          fav.external_cocktail_id,
-        );
+      if (fav.externalCocktailId && !fav.cocktail) {
+        if (hiddenIds.has(fav.externalCocktailId)) {
+          (fav as any).externalCocktailData = {
+            id: `ext-${fav.externalCocktailId}`,
+            name: 'Recipe hidden by administrator',
+            isDeleted: true,
+            description:
+              'This recipe was removed by the bar manager for violating community guidelines.',
+            ingredients: [],
+          };
+        } else if (cocktailMap.has(fav.externalCocktailId)) {
+          const externalData = cocktailMap.get(fav.externalCocktailId);
+          (fav as any).externalCocktailData = externalData;
+          if (!fav.externalName && externalData) {
+            fav.externalName =
+              (externalData as any)?.strDrink ||
+              (externalData as any)?.name ||
+              null;
+          }
+        }
+      }
+    }
+    // Persist any backfilled externalName values
+    const toUpdate = favorites.filter(
+      (f) => f.externalCocktailId && f.externalName && f.id,
+    );
+    if (toUpdate.length > 0) {
+      try {
+        await this.favoriteRepository.save(toUpdate);
+      } catch {
+        // Non-critical: backfill may race, ignore
       }
     }
   }
@@ -137,27 +218,6 @@ export class FavoritesService {
     return favorite;
   }
 
-  async update(
-    userId: string,
-    id: string,
-    updateFavoriteDto: UpdateFavoriteDto,
-  ) {
-    const favorite = await this.findOne(userId, id);
-
-    if (updateFavoriteDto.cocktailId !== undefined) {
-      favorite.cocktail = updateFavoriteDto.cocktailId
-        ? ({ id: updateFavoriteDto.cocktailId } as any)
-        : null;
-    }
-
-    if (updateFavoriteDto.externalCocktailId !== undefined) {
-      favorite.external_cocktail_id =
-        updateFavoriteDto.externalCocktailId || null;
-    }
-
-    return await this.favoriteRepository.save(favorite);
-  }
-
   async remove(userId: string, id: string) {
     const favorite = await this.findOne(userId, id);
     return await this.favoriteRepository.remove(favorite);
@@ -169,11 +229,11 @@ export class FavoritesService {
     localId: string,
   ): Promise<void> {
     const favorite = await this.favoriteRepository.findOne({
-      where: { user: { id: userId }, external_cocktail_id: externalId },
+      where: { user: { id: userId }, externalCocktailId: externalId },
     });
     if (favorite) {
       try {
-        favorite.external_cocktail_id = null;
+        favorite.externalCocktailId = null;
         favorite.cocktail = { id: localId } as Cocktail;
         await this.favoriteRepository.save(favorite);
       } catch (error: any) {

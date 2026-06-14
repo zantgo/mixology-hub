@@ -75,11 +75,11 @@ export class User {
 
   @Expose()
   @Column({ name: 'is_anonymized', default: false })
-  is_anonymized: boolean;
+  isAnonymized: boolean;
 
   @Expose()
   @Column({ name: 'anonymized_at', nullable: true, type: 'timestamp' })
-  anonymized_at: Date | null;
+  anonymizedAt: Date | null;
 
   @Expose()
   @Column({ name: 'username', nullable: true })
@@ -87,19 +87,20 @@ export class User {
 
   @Expose()
   @Column({ name: 'first_name', nullable: true })
-  first_name: string | null;
+  firstName: string | null;
 
   @Expose()
   @Column({ name: 'last_name', nullable: true })
-  last_name: string | null;
+  lastName: string | null;
 
   @Expose()
+  @Index()
   @Column({ name: 'role', default: 'bartender' })
   role: string;
 
   @Expose()
   @Column({ name: 'profile_picture_url', nullable: true, type: 'text' })
-  profile_picture_url: string | null;
+  profilePictureUrl: string | null;
 
   @Expose()
   @Column({ name: 'bio', nullable: true, type: 'text' })
@@ -107,7 +108,7 @@ export class User {
 
   @Expose()
   @Column({ name: 'date_of_birth', nullable: true, type: 'date' })
-  date_of_birth: Date | null;
+  dateOfBirth: Date | null;
 
   @Expose()
   @CreateDateColumn({ name: 'created_at' })
@@ -123,7 +124,7 @@ export class User {
   updatedAt: Date;
 
   @Column({ name: 'token_version', default: 1 })
-  token_version: number;
+  tokenVersion: number;
 
   @Expose()
   @Column({ name: 'temp_new_email', nullable: true })

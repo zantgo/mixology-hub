@@ -1,4 +1,16 @@
-import { Request } from 'express';
+import {
+  Controller,
+  UseGuards,
+  Get,
+  Patch,
+  Post,
+  Delete,
+  Param,
+  Body,
+  Query,
+  Request,
+} from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -7,7 +19,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
-interface AuthenticatedRequest extends Request {
+interface AuthenticatedRequest extends ExpressRequest {
   user: { id: string; [key: string]: unknown };
 }
 

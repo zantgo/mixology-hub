@@ -7,13 +7,12 @@ import { AuthService } from './auth.service';
 import { User } from '../users/entities/user.entity';
 import { TokenBlacklist } from './entities/token-blacklist.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
-import { SystemSettings } from '../users/entities/system-settings.entity';
+import { SystemSetting } from '../users/entities/system-setting.entity';
 import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import {
   UnauthorizedException,
-  BadRequestException,
   ConflictException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -147,7 +146,7 @@ describe('AuthService', () => {
           useValue: refreshTokenRepository,
         },
         {
-          provide: getRepositoryToken(SystemSettings),
+          provide: getRepositoryToken(SystemSetting),
           useValue: systemSettingsRepo,
         },
         { provide: JwtService, useValue: jwtService },
@@ -181,7 +180,7 @@ describe('AuthService', () => {
       };
 
       userRepository.create.mockReturnValue(savedUser);
-      userRepository.manager.transaction.mockImplementation(async (cb: any) => {
+      userRepository.manager.transaction.mockImplementation((cb: any) => {
         const mockEntityManager = {
           save: jest
             .fn()

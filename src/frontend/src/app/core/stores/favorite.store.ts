@@ -6,7 +6,7 @@ import { environment } from '../../../environments/environment';
 export interface Favorite {
   id: string;
   cocktailId?: string;
-  external_cocktail_id?: string;
+  externalCocktailId?: string;
   cocktail?: {
     id: string;
     name: string;
@@ -15,7 +15,7 @@ export interface Favorite {
     isDeleted?: boolean;
     description?: string;
   } | null;
-  external_cocktail_data?: any;
+  externalCocktailData?: any;
   createdAt: string;
 }
 
@@ -51,7 +51,7 @@ export class FavoriteStore {
     const existing = this.items().find(
       (f) =>
         (!isExternal && f.cocktailId === cocktailId) ||
-        (isExternal && f.external_cocktail_id === cleanId),
+        (isExternal && f.externalCocktailId === cleanId),
     );
 
     if (existing) {
@@ -68,7 +68,7 @@ export class FavoriteStore {
     return this.items().some(
       (f) =>
         (!isExternal && f.cocktailId === cocktailId) ||
-        (isExternal && f.external_cocktail_id === cleanId),
+        (isExternal && f.externalCocktailId === cleanId),
     );
   }
 
@@ -80,7 +80,7 @@ export class FavoriteStore {
     const optimistic: Favorite = {
       id: 'temp-' + Date.now(),
       cocktailId: isExternal ? undefined : cocktailId,
-      external_cocktail_id: isExternal ? cleanId : undefined,
+      externalCocktailId: isExternal ? cleanId : undefined,
       createdAt: new Date().toISOString(),
     };
 

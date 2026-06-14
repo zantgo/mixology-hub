@@ -12,7 +12,7 @@ const FACTORS: Record<string, number> = {
 };
 
 @Pipe({ standalone: true, name: 'unitConvert' })
-export class UnitConvertPipe implements PipeTransform {
+export class UnitConversionPipe implements PipeTransform {
   transform(value: number, fromUnit: string, toUnit: string = 'ml'): string {
     const from = FACTORS[fromUnit?.toLowerCase()] || 1;
     const to = FACTORS[toUnit?.toLowerCase()] || 1;

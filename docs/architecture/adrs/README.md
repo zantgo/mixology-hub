@@ -54,10 +54,6 @@ Each ADR follows this structure:
 **Status**: Accepted  
 **Summary**: Decision to implement strict pagination caps (max page=100 globally, with 200-iteration computation limit for makeability sorting) to prevent DoS attacks from deep pagination.
 
-### [ADR 0009: Idempotency "Fail-Open" Double Deduction Risk](./0009-idempotency-fail-open-double-deduction-risk.md)
-**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
-**Summary**: This ADR described idempotency failure modes during Redis outages. All idempotency systems have been removed for MVP simplification.
-
 ### [ADR 0010: Offline Logout Impeding JWT Revocation Gap](./0010-offline-logout-jwt-revocation-gap.md)
 **Status**: Deprecated  
 **Summary**: **DEPRECATED** - Offline functionality removed as part of Online-Only Mandate. This ADR documented security gap where offline logout didn't revoke server-side tokens.
@@ -66,21 +62,9 @@ Each ADR follows this structure:
 **Status**: Deprecated (Replaced by Native Uploads - ADR 0016)  
 **Summary**: Decision to implement secure image proxy for all external cocktail images to prevent client IP leakage while maintaining SSRF protection. **DEPRECATED** by ADR 0016 (Local Image Processing via Sharp).
 
-### [ADR 0012: Unified Idempotency System to Prevent Redis-PostgreSQL Clash](./0012-unified-idempotency-system.md)
-**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
-**Summary**: This ADR described a complex unified idempotency system. All concurrency protection has been removed for MVP simplification.
-
-### [ADR 0013: Optimistic Concurrency for Rating Updates to Prevent GDPR Contention](./0013-optimistic-rating-concurrency.md)
-**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
-**Summary**: This ADR described complex optimistic concurrency control for rating updates. All concurrency protection has been removed for MVP simplification.
-
 ### [ADR 0014: Composite Cursor Pagination Cache Jitter](./0014-composite-cursor-pagination-cache-jitter.md)
 **Status**: Deprecated  
 **Summary**: Deprecated in favor of standardized offset-based page limits across all endpoints.
-
-### [ADR 0015: Accept Precision Drift in Atomic Ratings](./0015-accept-precision-drift-in-atomic-ratings.md)
-**Status**: **DEPRECATED** - Concurrency features removed for MVP simplification  
-**Summary**: This ADR described accepting precision drift in ratings for performance. All complex rating systems have been simplified for MVP.
 
 ### [ADR 0016: Local Image Processing via Sharp](./0016-local-image-processing-via-sharp.md)
 **Status**: Accepted  

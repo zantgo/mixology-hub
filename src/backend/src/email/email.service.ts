@@ -169,6 +169,30 @@ export class EmailService {
     });
   }
 
+  async sendModerationNotification(
+    to: string,
+    subject: string,
+    message: string,
+  ): Promise<void> {
+    const from = this.getFrom();
+
+    const html = `
+      <h2>Moderation Update</h2>
+      <p>${message}</p>
+      <p>For any questions or appeals regarding this decision, please contact the bar manager or reply to this message.</p>
+      <br>
+      <p>Thank you,</p>
+      <p>The MixologyHub Moderation Team</p>
+    `;
+
+    await this.sendMail({
+      from,
+      to,
+      subject,
+      html,
+    });
+  }
+
   private async sendMail(options: {
     from: string;
     to: string;

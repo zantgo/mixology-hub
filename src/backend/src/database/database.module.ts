@@ -17,7 +17,7 @@ import { FixArchitecturalInconsistencies1733702400000 } from '../migrations/1733
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
         autoLoadEntities: true,
-        synchronize: true,
+        synchronize: configService.get<string>('NODE_ENV') !== 'production',
         migrationsRun: true,
         migrations: [
           FixArchitecturalInconsistencies1733702400000,

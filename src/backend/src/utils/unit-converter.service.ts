@@ -38,6 +38,66 @@ export class UnitConverterService {
     unit: new Decimal(1),
   };
 
+  private readonly unitCategories: Record<string, 'volume' | 'mass' | 'count'> =
+    {
+      ml: 'volume',
+      oz: 'volume',
+      l: 'volume',
+      cl: 'volume',
+      tbsp: 'volume',
+      tsp: 'volume',
+      dash: 'volume',
+      dashes: 'volume',
+      g: 'mass',
+      kg: 'mass',
+      count: 'count',
+      piece: 'count',
+      whole: 'count',
+      item: 'count',
+      unit: 'count',
+      parts: 'count',
+      part: 'count',
+      drops: 'count',
+      drop: 'count',
+      splashes: 'count',
+      splash: 'count',
+      slices: 'count',
+      slice: 'count',
+      wedges: 'count',
+      wedge: 'count',
+      twists: 'count',
+      twist: 'count',
+      sprigs: 'count',
+      sprig: 'count',
+      leaves: 'count',
+      leaf: 'count',
+    };
+
+  areUnitsCompatible(fromUnit: string, toUnit: string): boolean {
+    const fromCat = this.unitCategories[fromUnit.toLowerCase()];
+    const toCat = this.unitCategories[toUnit.toLowerCase()];
+    if (!fromCat || !toCat) return false;
+    return fromCat === toCat;
+  }
+
+  canConvertBetween(
+    fromUnit: string,
+    toUnit: string,
+    ingredient?: Ingredient,
+  ): boolean {
+    if (this.areUnitsCompatible(fromUnit, toUnit)) return true;
+    const fromCat = this.unitCategories[fromUnit.toLowerCase()];
+    const toCat = this.unitCategories[toUnit.toLowerCase()];
+    if (
+      ((fromCat === 'mass' && toCat === 'volume') ||
+        (fromCat === 'volume' && toCat === 'mass')) &&
+      ingredient?.allowMassVolumeConversion
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   convert(
     quantity: Decimal | number,
     fromUnit: string,
@@ -51,6 +111,12 @@ export class UnitConverterService {
     if (!this.conversionFactors[from] || !this.conversionFactors[to]) {
       throw new BadRequestException(
         `Conversion from ${from} to ${to} is not supported.`,
+      );
+    }
+
+    if (!this.canConvertBetween(from, to, ingredient)) {
+      throw new BadRequestException(
+        `Incompatible unit type: Conversion between ${from} and ${to} is logically impossible.`,
       );
     }
 
@@ -106,6 +172,12 @@ export class UnitConverterService {
       );
     }
 
+    if (!ingredient.density || ingredient.density.lte(0)) {
+      throw new BadRequestException(
+        `Ingredient ${ingredient.name} has invalid density (must be > 0)`,
+      );
+    }
+
     const massInGrams = this.convertWithinCategory(mass, fromUnit, 'g');
     const volumeInMl = massInGrams.div(ingredient.density);
     return this.convertWithinCategory(volumeInMl, 'ml', toUnit);
@@ -126,6 +198,12 @@ export class UnitConverterService {
     if (!ingredient.allowMassVolumeConversion) {
       throw new BadRequestException(
         `Ingredient ${ingredient.name} does not allow mass-volume conversions`,
+      );
+    }
+
+    if (!ingredient.density || ingredient.density.lte(0)) {
+      throw new BadRequestException(
+        `Ingredient ${ingredient.name} has invalid density (must be > 0)`,
       );
     }
 

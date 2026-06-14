@@ -8,7 +8,9 @@ import {
   IsOptional,
   Validate,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { IsStrongPasswordConstraint } from '../validators/is-strong-password.validator';
+import { sanitizeHtml } from '../../common/utils/xss-sanitizer.util';
 
 export class RegisterDto {
   @ApiProperty({
@@ -41,5 +43,8 @@ export class RegisterDto {
   @IsString()
   @MinLength(2)
   @MaxLength(50)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? sanitizeHtml(value) : value,
+  )
   displayName?: string;
 }

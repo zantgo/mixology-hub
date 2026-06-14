@@ -1,9 +1,10 @@
 import { Injectable, signal, inject, Injector, runInInjectionContext } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, catchError, throwError, of, fromEvent, merge } from 'rxjs';
+import { Observable, tap, catchError, throwError, of, fromEvent, merge, throttleTime } from 'rxjs';
 import { Router } from '@angular/router';
 import { environment } from '../../../environments/environment';
 import { UiStore } from './ui.store';
+import { OrderStore } from './order.store';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -19,6 +20,7 @@ export class AuthStore {
   private http = inject(HttpClient);
   private router = inject(Router);
   private injector = inject(Injector);
+  private orderStore = inject(OrderStore);
   private apiUrl = `${environment.apiUrl}/auth`;
 
   readonly user = signal<UserProfile | null>(null);
@@ -28,6 +30,7 @@ export class AuthStore {
   readonly error = signal<string | null>(null);
 
   private accessToken: string | null = null;
+  private csrfToken: string | null = null;
   private refreshInProgress: Promise<boolean> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimeoutWarning: ReturnType<typeof setTimeout> | null = null;
@@ -41,7 +44,7 @@ export class AuthStore {
       fromEvent(document, 'mousedown'),
       fromEvent(document, 'keydown'),
       fromEvent(document, 'touchstart'),
-      fromEvent(document, 'scroll'),
+      fromEvent(document, 'scroll').pipe(throttleTime(1000)),
     ).subscribe(() => this.resetIdleTimer());
   }
 
@@ -67,6 +70,19 @@ export class AuthStore {
     );
 
     this.idleTimer = setTimeout(() => {
+      if (this.orderStore.polling()) {
+        runInInjectionContext(this.injector, () => {
+          const uiStore = this.injector.get(UiStore);
+          uiStore.addToast({
+            id: crypto.randomUUID(),
+            message: 'Auto-logout deferred: a preparation order is in progress.',
+            type: 'warning',
+            dismissAfter: 10000,
+          });
+        });
+        this.resetIdleTimer();
+        return;
+      }
       this.logout();
     }, SESSION_TIMEOUT_MS);
   }
@@ -115,6 +131,10 @@ export class AuthStore {
     return this.accessToken;
   }
 
+  getCsrfToken(): string | null {
+    return this.csrfToken;
+  }
+
   login(email: string, password: string): Observable<any> {
     this.loading.set(true);
     this.error.set(null);
@@ -122,10 +142,12 @@ export class AuthStore {
       .post<{
         user: UserProfile;
         accessToken: string;
+        csrfToken?: string;
       }>(`${this.apiUrl}/login`, { email, password }, { withCredentials: true })
       .pipe(
         tap((res) => {
           this.accessToken = res.accessToken;
+          if (res.csrfToken) this.csrfToken = res.csrfToken;
           this.user.set(res.user);
           this.isAuthenticated.set(true);
           this.isAdmin.set(res.user.role === 'admin');
@@ -147,10 +169,12 @@ export class AuthStore {
       .post<{
         user: UserProfile;
         accessToken: string;
+        csrfToken?: string;
       }>(`${this.apiUrl}/register`, { email, password, displayName }, { withCredentials: true })
       .pipe(
         tap((res) => {
           this.accessToken = res.accessToken;
+          if (res.csrfToken) this.csrfToken = res.csrfToken;
           this.user.set(res.user);
           this.isAuthenticated.set(true);
           this.isAdmin.set(res.user.role === 'admin');
@@ -177,10 +201,14 @@ export class AuthStore {
 
     this.refreshInProgress = new Promise<boolean>((resolve) => {
       this.http
-        .post<{ accessToken: string }>(`${this.apiUrl}/refresh`, {}, { withCredentials: true })
+        .post<{
+          accessToken: string;
+          csrfToken?: string;
+        }>(`${this.apiUrl}/refresh`, {}, { withCredentials: true })
         .subscribe({
           next: (res) => {
             this.accessToken = res.accessToken;
+            if (res.csrfToken) this.csrfToken = res.csrfToken;
             this.isAuthenticated.set(true);
 
             this.loadProfile().subscribe({
@@ -209,6 +237,27 @@ export class AuthStore {
     });
   }
 
+  bootstrapCsrfToken(): Observable<boolean> {
+    return new Observable<boolean>((subscriber) => {
+      this.http
+        .get<{
+          success: boolean;
+          csrfToken?: string;
+        }>(`${this.apiUrl}/csrf`, { withCredentials: true })
+        .subscribe({
+          next: (res) => {
+            if (res.csrfToken) this.csrfToken = res.csrfToken;
+            subscriber.next(true);
+            subscriber.complete();
+          },
+          error: () => {
+            subscriber.next(false);
+            subscriber.complete();
+          },
+        });
+    });
+  }
+
   loadProfile(): Observable<UserProfile> {
     this.loading.set(true);
     return this.http.get<UserProfile>(`${this.apiUrl}/profile`).pipe(
@@ -234,6 +283,7 @@ export class AuthStore {
   clearState(): void {
     this.stopIdleTimer();
     this.accessToken = null;
+    this.csrfToken = null;
     this.user.set(null);
     this.isAuthenticated.set(false);
     this.isAdmin.set(false);

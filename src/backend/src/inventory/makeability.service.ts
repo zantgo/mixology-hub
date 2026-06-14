@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   Inject,
+  forwardRef,
   BadRequestException,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -35,6 +36,7 @@ export class MakeabilityService {
 
   constructor(
     private readonly inventoryService: BarInventoryService,
+    @Inject(forwardRef(() => CocktailsService))
     private readonly cocktailsService: CocktailsService,
     private readonly hierarchicalService: HierarchicalIngredientService,
     private readonly unitConverter: UnitConverterService,
@@ -122,13 +124,15 @@ export class MakeabilityService {
     return result;
   }
 
-  private async scoreCocktail(
+  async scoreCocktail(
     cocktail: any,
     inventoryItems: any[],
   ): Promise<MakeableCocktail> {
     const ingredients = cocktail.ingredients || [];
     const missingIngredients: string[] = [];
-    let matchedCount = 0;
+    let matchedCount = new Decimal(0);
+
+    const partSize = new Decimal(30);
 
     for (const ci of ingredients) {
       if (!ci.ingredient) {
@@ -147,14 +151,25 @@ export class MakeabilityService {
       );
 
       if (directMatch) {
-        const requiredAmount = this.normalizeAmount(
-          ci.amount,
-          ci.unit,
-          ci.ingredient.baseUnit,
-          ci.ingredient,
-        );
+        let requiredAmount: Decimal;
+        if (ci.unit === 'part' || ci.unit === 'parts') {
+          const calculatedMl = partSize.times(new Decimal(ci.amount || 0));
+          requiredAmount = this.unitConverter.convert(
+            calculatedMl,
+            'ml',
+            ci.ingredient.baseUnit,
+            ci.ingredient,
+          );
+        } else {
+          requiredAmount = this.normalizeAmount(
+            ci.amount,
+            ci.unit,
+            ci.ingredient.baseUnit,
+            ci.ingredient,
+          );
+        }
         if (directMatch.quantity && directMatch.quantity.gte(requiredAmount)) {
-          matchedCount++;
+          matchedCount = matchedCount.plus(1);
           found = true;
         }
       }
@@ -176,14 +191,27 @@ export class MakeabilityService {
             );
 
             if (substituteInInventory) {
-              const requiredAmount = this.normalizeAmount(
-                ci.amount,
-                ci.unit,
-                match.ingredient.baseUnit,
-                match.ingredient,
-              );
+              let requiredAmount: Decimal;
+              if (ci.unit === 'part' || ci.unit === 'parts') {
+                const calculatedMl = partSize.times(
+                  new Decimal(ci.amount || 0),
+                );
+                requiredAmount = this.unitConverter.convert(
+                  calculatedMl,
+                  'ml',
+                  match.ingredient.baseUnit,
+                  match.ingredient,
+                );
+              } else {
+                requiredAmount = this.normalizeAmount(
+                  ci.amount,
+                  ci.unit,
+                  match.ingredient.baseUnit,
+                  match.ingredient,
+                );
+              }
               if (substituteInInventory.quantity?.gte(requiredAmount)) {
-                matchedCount += match.confidence;
+                matchedCount = matchedCount.plus(match.confidence);
                 found = true;
               }
             }
@@ -201,7 +229,7 @@ export class MakeabilityService {
     }
 
     const total = ingredients.length || 1;
-    const score = matchedCount / total;
+    const score = matchedCount.div(total).toNumber();
 
     let makeability: MakeabilityVerdict;
     if (score >= 1.0) makeability = 'makeable';
@@ -212,8 +240,8 @@ export class MakeabilityService {
       id: cocktail.id,
       name: cocktail.name,
       description: cocktail.description,
-      imageFull: cocktail.image_full,
-      imageThumb: cocktail.image_thumb,
+      imageFull: cocktail.imageFull,
+      imageThumb: cocktail.imageThumb,
       source: cocktail.source || 'local',
       ingredients: cocktail.ingredients,
       makeability,
@@ -233,7 +261,7 @@ export class MakeabilityService {
       try {
         return this.unitConverter.convert(qty, unit, baseUnit, ingredient);
       } catch {
-        return qty;
+        return new Decimal(Infinity);
       }
     }
     return qty;

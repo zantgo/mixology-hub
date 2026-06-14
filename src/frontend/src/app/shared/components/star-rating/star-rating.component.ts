@@ -105,12 +105,12 @@ export class StarRatingComponent {
   @Input() count?: number;
   @Input() cocktailId?: string;
   @Input() interactive = false;
+  @Input() userRating?: number;
 
   @Output() rated = new EventEmitter<{ score: number; average: number; count: number }>();
 
   stars = [1, 2, 3, 4, 5];
   hoverValue = 0;
-  userRating?: number;
   submitting = false;
   Math = Math;
 

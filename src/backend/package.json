@@ -49,6 +49,7 @@
     "cookie-parser": "^1.4.7",
     "decimal.js": "^10.6.0",
     "helmet": "^8.1.0",
+    "isomorphic-dompurify": "^3.17.0",
     "multer": "^2.1.1",
     "nodemailer": "^6.9.16",
     "passport": "^0.7.0",
@@ -69,6 +70,7 @@
     "@nestjs/testing": "^11.0.1",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
+    "@types/dompurify": "^3.0.5",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
@@ -112,7 +114,8 @@
       "node_modules/(?!(uuid)/)"
     ],
     "moduleNameMapper": {
-      "^bcrypt$": "<rootDir>/../test/__mocks__/bcrypt.js"
+      "^bcrypt$": "<rootDir>/../test/__mocks__/bcrypt.js",
+      "^isomorphic-dompurify$": "<rootDir>/../test/__mocks__/isomorphic-dompurify.js"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

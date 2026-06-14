@@ -1,6 +1,6 @@
 # Density Conversion Tests
 
-> **PENDING B2B MIGRATION:** These test specifications reference `getUserInventory`. When the codebase is migrated, update to `getBarInventory` for the shared bar inventory context.
+> **B2B MIGRATED:** The codebase has been migrated to shared `bar_inventory`. These test specifications serve as reference. Actual test code uses `getBarInventory`.
 
 **Example TDD for Density Math (UC 3.24):**
 ```typescript

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from '../users/entities/user.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
 
 @Injectable()
 export class AuthCleanupService {
@@ -11,6 +12,8 @@ export class AuthCleanupService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(RefreshToken)
+    private readonly refreshTokenRepository: Repository<RefreshToken>,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
@@ -48,6 +51,23 @@ export class AuthCleanupService {
     if (result.affected) {
       this.logger.log(
         `Cleared ${result.affected} stale email verification tokens`,
+      );
+    }
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
+  async cleanupExpiredRefreshTokens(): Promise<void> {
+    const result = await this.refreshTokenRepository
+      .createQueryBuilder()
+      .delete()
+      .from(RefreshToken)
+      .where('expires_at < :now', { now: new Date() })
+      .orWhere('is_revoked = :revoked', { revoked: true })
+      .execute();
+
+    if (result.affected) {
+      this.logger.log(
+        `Cleaned up ${result.affected} expired or revoked refresh tokens`,
       );
     }
   }

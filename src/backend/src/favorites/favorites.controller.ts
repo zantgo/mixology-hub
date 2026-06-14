@@ -3,7 +3,6 @@ import {
   Get,
   Post,
   Body,
-  Patch,
   Param,
   Delete,
   Query,
@@ -13,7 +12,6 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { FavoritesService } from './favorites.service';
 import { CreateFavoriteDto } from './dto/create-favorite.dto';
-import { UpdateFavoriteDto } from './dto/update-favorite.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -44,16 +42,6 @@ export class FavoritesController {
   @ApiOperation({ summary: 'Get a specific favorite by ID' })
   findOne(@Request() req, @Param('id') id: string) {
     return this.favoritesService.findOne(req.user.id, id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Update a favorite record' })
-  update(
-    @Request() req,
-    @Param('id') id: string,
-    @Body() updateFavoriteDto: UpdateFavoriteDto,
-  ) {
-    return this.favoritesService.update(req.user.id, id, updateFavoriteDto);
   }
 
   @Delete(':id')

@@ -4,6 +4,7 @@ import {
   Column,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Decimal } from 'decimal.js';
 import { Expose, Transform } from 'class-transformer';
@@ -21,6 +22,7 @@ export class CocktailIngredient {
   @Expose()
   id: string;
 
+  @Index()
   @ManyToOne(() => Cocktail, (cocktail) => cocktail.ingredients, {
     onDelete: 'CASCADE',
   })
@@ -35,6 +37,7 @@ export class CocktailIngredient {
     type: () => Ingredient,
     description: 'The linked ingredient from the catalog',
   })
+  @Index()
   @ManyToOne(() => Ingredient, { eager: true })
   @JoinColumn({ name: 'ingredient_id' })
   @Expose()
@@ -88,5 +91,5 @@ export class CocktailIngredient {
   })
   @Column({ name: 'is_optional', default: false })
   @Expose()
-  is_optional: boolean;
+  isOptional: boolean;
 }

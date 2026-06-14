@@ -9,27 +9,27 @@ import {
 import { User } from '../../users/entities/user.entity';
 
 @Entity('ai_generated_recipes')
-export class Ai {
+export class AiGeneratedRecipe {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column('text')
   prompt: string;
 
-  @Column('jsonb', { name: 'generated_recipe' })
-  generated_recipe: any;
+  @Column('jsonb', { name: 'generated_recipe', nullable: true })
+  generatedRecipe: any;
 
   @Column('jsonb', { name: 'recipe_data', nullable: true })
-  recipe_data: any;
+  recipeData: any;
 
   @Column('float', { name: 'validation_score', nullable: true })
-  validation_score: number;
+  validationScore: number;
 
   @Column('boolean', { name: 'is_valid', default: false })
-  is_valid: boolean;
+  isValid: boolean;
 
   @Column('uuid', { name: 'saved_as_cocktail_id', nullable: true })
-  saved_as_cocktail_id: string;
+  savedAsCocktailId: string;
 
   @Column('int', { name: 'attempts', default: 0 })
   attempts: number;
@@ -39,5 +39,5 @@ export class Ai {
   user: User;
 
   @CreateDateColumn({ name: 'created_at' })
-  created_at: Date;
+  createdAt: Date;
 }

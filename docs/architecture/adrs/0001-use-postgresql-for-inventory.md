@@ -25,8 +25,7 @@ Use PostgreSQL with TypeORM as the primary database.
 ### Positive
 - **ACID Compliance**: PostgreSQL provides full ACID guarantees out of the box, essential for inventory management
 - **Relational Integrity**: Foreign key constraints ensure data consistency between cocktails, ingredients, and users
-- **Architectural Decision: Acceptance of Race Conditions via READ COMMITTED**
-  - **Explicit Trade-off:** We explicitly retract the use of SELECT FOR UPDATE row-level database locking for inventory deductions. To adhere to the "No Concurrency" mandate, the database will rely strictly on default READ COMMITTED isolation and standard CHECK (quantity >= 0) constraints. We trade absolute concurrent transaction safety for maximum database throughput and the total elimination of transaction deadlocks. We accept that rapid double-clicks may result in standard 500 Server Errors when hitting the CHECK boundary.
+- **Concurrency Management (Updated):** While the database utilizes standard `READ COMMITTED` isolation, concurrent inventory write operations (cocktail preparations) are not processed raw. All stock mutations are serialized at the application layer using a single-threaded BullMQ queue (`concurrency: 1`) before database transactions execute. This eliminates race conditions and double-deductions without requiring high-contention database-level locks.
 - **Complex Queries**: Support for `HAVING` clauses and window functions for inventory analytics
 - **TypeORM Integration**: Excellent TypeScript support with repository pattern and query builder
 

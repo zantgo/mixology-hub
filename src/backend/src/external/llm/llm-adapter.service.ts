@@ -1,15 +1,19 @@
+import {
+  sanitizePromptString,
+  validatePromptSafety,
+} from '../../common/utils/prompt-security.util';
 import { Injectable, Logger, BadGatewayException } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import {
-  IAiProvider,
+  AiProvider,
   AiGenerationOptions,
   AiRecipe,
 } from '../ai-provider.interface';
 
 @Injectable()
-export class LlmAdapterService implements IAiProvider {
+export class LlmAdapterService implements AiProvider {
   private readonly logger = new Logger(LlmAdapterService.name);
 
   constructor(
@@ -107,6 +111,7 @@ export class LlmAdapterService implements IAiProvider {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async validateContent(
     content: string,
   ): Promise<{ isValid: boolean; issues: string[] }> {
@@ -179,12 +184,6 @@ export class LlmAdapterService implements IAiProvider {
 
   getModelInfo(): { name: string; version: string; capabilities: string[] } {
     const model = this.configService.get<string>('AI_MODEL') || 'deepseek-chat';
-    const apiUrl = this.configService.get<string>('AI_API_URL') || '';
-
-    let provider = 'Generic LLM';
-    if (apiUrl.includes('openai')) provider = 'OpenAI';
-    else if (apiUrl.includes('anthropic')) provider = 'Anthropic';
-    else if (apiUrl.includes('deepseek')) provider = 'DeepSeek';
 
     return {
       name: model,
@@ -253,6 +252,7 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
     ];
 
     const MAX_RESPONSE_SIZE = 50 * 1024;
+    const MAX_ARGUMENT_SIZE = 16 * 1024;
     const MAX_TURNS = 5;
     let turns = 0;
 
@@ -286,7 +286,13 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
 
         for (const tc of message.tool_calls) {
           const toolName = tc.function.name;
-          const args = JSON.parse(tc.function.arguments);
+          const rawArgs = tc.function.arguments;
+          if (rawArgs.length > MAX_ARGUMENT_SIZE) {
+            throw new BadGatewayException(
+              `Tool call arguments for "${toolName}" exceed maximum size of ${MAX_ARGUMENT_SIZE} bytes`,
+            );
+          }
+          const args = JSON.parse(rawArgs);
           const toolResult = await toolExecutor(toolName, args);
 
           messages.push({
@@ -323,34 +329,25 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
     if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
       throw new BadGatewayException('LLM response does not contain valid JSON');
     }
-    return JSON.parse(rawContent.substring(startIdx, endIdx + 1));
+    const jsonString = rawContent.substring(startIdx, endIdx + 1);
+    if (jsonString.length > 32 * 1024) {
+      throw new BadGatewayException(
+        'LLM recipe response exceeds maximum allowed size',
+      );
+    }
+    return JSON.parse(jsonString);
   }
 
   private sanitizeUserInput(input: string): string {
     const MAX_LENGTH = 500;
-    const truncated = input.slice(0, MAX_LENGTH);
+    const sanitized = sanitizePromptString(input, MAX_LENGTH);
 
-    // Character whitelisting: allow alphanumeric (incl. unicode letters), spaces, and common recipe punctuation
-    const sanitized = truncated.replace(/[^\p{L}\p{N}\s,.\-'/&%()]/gu, '');
-
-    // Block known prompt injection patterns
-    const blockedPatterns = [
-      /ignore.*previous.*instructions/i,
-      /system.*prompt/i,
-      /output.*template/i,
-      /disregard.*previous/i,
-      /respond\s+in\s+plain\s+text/i,
-      /forget\s+your\s+instructions/i,
-      /you\s+are\s+now/i,
-      /new\s+system\s+prompt/i,
-    ];
-
-    for (const pattern of blockedPatterns) {
-      if (pattern.test(sanitized)) {
-        throw new BadGatewayException('Input contains blocked patterns');
-      }
+    try {
+      validatePromptSafety(sanitized);
+    } catch {
+      throw new BadGatewayException('Input contains blocked patterns');
     }
 
-    return sanitized.trim();
+    return sanitized;
   }
 }

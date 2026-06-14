@@ -32,7 +32,7 @@ describe('MakeabilityService', () => {
     cocktailsService = { findAll: jest.fn() };
     hierarchicalService = { findBestMatch: jest.fn().mockResolvedValue(null) };
     unitConverter = {
-      convert: jest.fn((amount, from, to) => new Decimal(amount).times(1)),
+      convert: jest.fn((amount) => new Decimal(amount).times(1)),
     };
     cacheManager = { get: jest.fn(), set: jest.fn() };
 
@@ -186,6 +186,43 @@ describe('MakeabilityService', () => {
       const result = await service.getMakeableCocktails({ page: 1, limit: 10 });
 
       expect(result.data[0].makeability).toBe('makeable');
+    });
+
+    it('should handle part-based measurements with 30ml part size', async () => {
+      cacheManager.get.mockResolvedValue(null);
+      inventoryService.getInventory.mockResolvedValue({
+        data: [
+          mockInventoryItem('Vodka', 100),
+          mockInventoryItem('Lime Juice', 50),
+        ],
+      });
+      cocktailsService.findAll.mockResolvedValue({
+        data: [
+          mockCocktail('Part Cocktail', [
+            {
+              ingredient: { id: 'ing-Vodka', name: 'Vodka', baseUnit: 'ml' },
+              amount: 2,
+              unit: 'parts',
+            },
+            {
+              ingredient: {
+                id: 'ing-Lime Juice',
+                name: 'Lime Juice',
+                baseUnit: 'ml',
+              },
+              amount: 1,
+              unit: 'part',
+            },
+          ]),
+        ],
+      });
+      unitConverter.convert.mockImplementation((amount: Decimal) => amount);
+
+      const result = await service.getMakeableCocktails({ page: 1, limit: 10 });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].makeability).toBe('makeable');
+      expect(result.data[0].matchScore).toBe(1);
     });
 
     it('should respect MAX_ITERATIONS cap', async () => {

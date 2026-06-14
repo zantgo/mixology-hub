@@ -18,6 +18,7 @@ import {
   ApiBearerAuth,
   ApiResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Response, Request as ExpressRequest } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
@@ -42,6 +43,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({ status: 201, description: 'User successfully registered' })
@@ -63,6 +65,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Login user' })
   @ApiResponse({ status: 200, description: 'User successfully logged in' })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
@@ -88,7 +91,7 @@ export class AuthController {
   bootstrapCsrf(@Res({ passthrough: true }) res: Response) {
     const csrfToken = crypto.randomBytes(32).toString('hex');
     this.setCsrfCookie(res, csrfToken);
-    return { success: true };
+    return { success: true, csrfToken };
   }
 
   @Public()
@@ -137,11 +140,11 @@ export class AuthController {
     });
     res.clearCookie('csrf_token', {
       path: '/',
-      httpOnly: false,
+      httpOnly: true,
       secure: true,
       sameSite: 'strict' as const,
     });
-    return this.authService.logout(accessToken, refreshToken);
+    return this.authService.logout(accessToken!, refreshToken);
   }
 
   @Post('logout-all')
@@ -251,11 +254,11 @@ export class AuthController {
 
   private setCsrfCookie(res: Response, token: string): void {
     res.cookie('csrf_token', token, {
-      httpOnly: false,
+      httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
       path: '/',
-      maxAge: 5 * 60 * 1000, // 5 minutes
+      maxAge: 15 * 60 * 1000, // 15 minutes (must match JWT access token TTL)
     });
   }
 }

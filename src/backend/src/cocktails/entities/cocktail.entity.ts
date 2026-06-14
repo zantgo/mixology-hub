@@ -6,10 +6,12 @@ import {
   ManyToOne,
   JoinColumn,
   OneToMany,
+  Index,
 } from 'typeorm';
 import { Expose } from 'class-transformer';
 import { User } from '../../users/entities/user.entity';
 import { CocktailIngredient } from './cocktail-ingredient.entity';
+import { ColumnFloatTransformer } from '../../utils/column-float.transformer';
 
 @Entity('cocktails')
 export class Cocktail {
@@ -17,6 +19,7 @@ export class Cocktail {
   @Expose()
   id: string;
 
+  @Index()
   @Column()
   @Expose()
   name: string;
@@ -29,42 +32,52 @@ export class Cocktail {
   @Expose()
   instructions: string;
 
-  @Column({ default: false })
-  @Expose({ name: 'isPublic' })
-  is_public: boolean;
+  @Index()
+  @Column({ name: 'is_public', default: false })
+  @Expose()
+  isPublic: boolean;
 
+  @Index()
   @Column({ default: 'local' })
   @Expose()
   source: string; // 'local', 'api', 'ai'
 
-  @Column({ nullable: true })
-  @Expose({ name: 'externalId' })
-  external_id: string; // ID from TheCocktailDB to prevent duplicates
+  @Column({ name: 'external_id', nullable: true })
+  @Expose()
+  externalId: string; // ID from TheCocktailDB to prevent duplicates
 
   @Column({ name: 'parent_external_id', nullable: true })
-  @Expose({ name: 'parentExternalId' })
-  parent_external_id: string; // Original external ID when forked from API (UC 2.22 lineage tracking)
+  @Expose()
+  parentExternalId: string; // Original external ID when forked from API (UC 2.22 lineage tracking)
 
   @Column({ name: 'image_full', type: 'varchar', length: 255, nullable: true })
-  @Expose({ name: 'imageFull' })
-  image_full: string; // Path to full-size image (1024x1024 WebP)
+  @Expose()
+  imageFull: string; // Path to full-size image (1024x1024 WebP)
 
   @Column({ name: 'image_thumb', type: 'varchar', length: 255, nullable: true })
-  @Expose({ name: 'imageThumb' })
-  image_thumb: string; // Path to thumbnail image (300x300 WebP)
+  @Expose()
+  imageThumb: string; // Path to thumbnail image (300x300 WebP)
 
-  @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true })
+  @Column({
+    type: 'decimal',
+    precision: 3,
+    scale: 2,
+    nullable: true,
+    transformer: new ColumnFloatTransformer(),
+  })
   @Expose()
   rating: number | null; // Cached average rating (0.00–5.00)
 
   @Column({ name: 'rating_count', default: 0 })
-  @Expose({ name: 'ratingCount' })
-  rating_count: number; // Number of ratings for average calculation
+  @Expose()
+  ratingCount: number; // Number of ratings for average calculation
 
+  @Index()
   @Column({ name: 'is_deleted', default: false })
-  @Expose({ name: 'isDeleted' })
-  is_deleted: boolean; // Soft delete flag for data integrity
+  @Expose()
+  isDeleted: boolean; // Soft delete flag for data integrity
 
+  @Index()
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'created_by' })
   @Expose()
@@ -74,7 +87,7 @@ export class Cocktail {
   @Expose()
   ingredients: CocktailIngredient[];
 
-  @CreateDateColumn()
-  @Expose({ name: 'createdAt' })
-  created_at: Date;
+  @CreateDateColumn({ name: 'created_at' })
+  @Expose()
+  createdAt: Date;
 }

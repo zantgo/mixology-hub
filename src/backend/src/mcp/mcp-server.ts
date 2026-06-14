@@ -20,9 +20,7 @@ interface JsonRpcMessage {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.createApplicationContext(AppModule, {
-    forceCloseConnections: true,
-  });
+  const app = await NestFactory.createApplicationContext(AppModule);
   const mcpServer = app.get(McpServerService);
 
   const session: McpSession = {

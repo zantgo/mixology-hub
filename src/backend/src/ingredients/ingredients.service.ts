@@ -6,17 +6,24 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, QueryFailedError } from 'typeorm';
+import { Decimal } from 'decimal.js';
 import { CreateIngredientDto } from './dto/create-ingredient.dto';
 import { UpdateIngredientDto } from './dto/update-ingredient.dto';
 import { Ingredient } from './entities/ingredient.entity';
 import { HierarchicalIngredientService } from './hierarchical-ingredient.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
+import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 
 @Injectable()
 export class IngredientsService {
   constructor(
     @InjectRepository(Ingredient)
     private readonly ingredientRepository: Repository<Ingredient>,
+    @InjectRepository(CocktailIngredient)
+    private readonly cocktailIngredientRepository: Repository<CocktailIngredient>,
+    @InjectRepository(BarInventory)
+    private readonly barInventoryRepository: Repository<BarInventory>,
     private readonly hierarchicalService: HierarchicalIngredientService,
   ) {}
 
@@ -26,6 +33,11 @@ export class IngredientsService {
         name: createIngredientDto.name.toLowerCase().trim(),
         baseUnit: createIngredientDto.baseUnit || 'ml',
         createdBy: createdBy || null,
+        isGlobal: !createdBy,
+        parentId: createIngredientDto.parentId || null,
+        ...(createIngredientDto.density !== undefined && {
+          density: new Decimal(createIngredientDto.density),
+        }),
       });
       return await this.ingredientRepository.save(ingredient);
     } catch (error: any) {
@@ -84,7 +96,7 @@ export class IngredientsService {
 
   async update(id: string, updateIngredientDto: UpdateIngredientDto) {
     const ingredient = await this.findOne(id);
-    const newParentId = (updateIngredientDto as any).parentId;
+    const newParentId = updateIngredientDto.parentId;
     if (
       newParentId !== undefined &&
       newParentId !== null &&
@@ -92,6 +104,25 @@ export class IngredientsService {
     ) {
       await this.hierarchicalService.detectCycle(id, newParentId);
     }
+
+    if (
+      updateIngredientDto.baseUnit &&
+      updateIngredientDto.baseUnit !== ingredient.baseUnit
+    ) {
+      const recipeCount = await this.cocktailIngredientRepository.count({
+        where: { ingredient: { id } },
+      });
+      const inventoryCount = await this.barInventoryRepository.count({
+        where: { ingredient: { id } },
+      });
+
+      if (recipeCount > 0 || inventoryCount > 0) {
+        throw new ConflictException(
+          `Conflict: Cannot change baseUnit because ingredient is currently used in ${recipeCount} recipes and ${inventoryCount} inventory entries.`,
+        );
+      }
+    }
+
     Object.assign(ingredient, updateIngredientDto);
     return await this.ingredientRepository.save(ingredient);
   }

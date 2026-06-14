@@ -37,14 +37,13 @@ export class ImageCleanupService {
     if (webpFiles.length === 0) return;
 
     const cocktails = await this.cocktailRepository.find({
-      select: ['image_full', 'image_thumb'],
-      where: { is_deleted: false },
+      select: ['imageFull', 'imageThumb'],
     });
 
     const referenced = new Set<string>();
     for (const c of cocktails) {
-      if (c.image_full) referenced.add(path.basename(c.image_full));
-      if (c.image_thumb) referenced.add(path.basename(c.image_thumb));
+      if (c.imageFull) referenced.add(path.basename(c.imageFull));
+      if (c.imageThumb) referenced.add(path.basename(c.imageThumb));
     }
 
     let deletedCount = 0;

@@ -3,21 +3,14 @@ import {
   Logger,
   Inject,
   BadRequestException,
+  OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Ingredient } from './entities/ingredient.entity';
-
-interface RedisLikeStore {
-  client?: {
-    scanIterator?: (options: {
-      MATCH: string;
-      COUNT?: number;
-    }) => AsyncIterable<string>;
-  };
-}
+import { CacheInvalidationService } from '../redis-cache/cache-invalidation.service';
 
 export interface IngredientMatch {
   ingredient: Ingredient;
@@ -35,16 +28,200 @@ export interface IngredientSubstitution {
 }
 
 @Injectable()
-export class HierarchicalIngredientService {
+export class HierarchicalIngredientService implements OnApplicationBootstrap {
   private readonly logger = new Logger(HierarchicalIngredientService.name);
   private readonly CACHE_TTL = 3600; // 1 hour in seconds
   private readonly CACHE_PREFIX = 'ingredient:hierarchy:';
+  private readonly ALL_INGREDIENTS_CACHE_KEY = `${this.CACHE_PREFIX}all`;
+  private readonly ALL_INGREDIENTS_CACHE_TTL = 600; // 10 minutes
+
+  private closureMap: Map<string, IngredientMatch> = new Map();
+  private ingredientsCatalog: Ingredient[] = [];
 
   constructor(
     @InjectRepository(Ingredient)
     private readonly ingredientRepository: Repository<Ingredient>,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly cacheInvalidation: CacheInvalidationService,
   ) {}
+
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      await this.warmupCache();
+      await this.buildClosureMap();
+    } catch (error) {
+      this.logger.error(
+        'Failed to warm up ingredient hierarchy cache on startup',
+        error,
+      );
+    }
+  }
+
+  /**
+   * Synchronous best-match lookup using the pre-built closure map.
+   * Falls back to async findBestMatch if the map hasn't been built yet.
+   */
+  findBestMatchSync(
+    ingredientName: string,
+    options?: {
+      includeHierarchical?: boolean;
+      includeSynonyms?: boolean;
+      minConfidence?: number;
+    },
+  ): IngredientMatch | null {
+    if (this.closureMap.size === 0) {
+      return null;
+    }
+    const normalized = this.normalizeName(ingredientName);
+    const minConfidence = options?.minConfidence ?? 0.7;
+    const match = this.closureMap.get(normalized);
+    if (match && match.confidence >= minConfidence) {
+      return match;
+    }
+    return null;
+  }
+
+  /**
+   * Synchronous query expansion using the pre-built closure map.
+   * Returns a single-element array with the normalized name if the map hasn't been built yet.
+   */
+  expandIngredientQuerySync(ingredientName: string): string[] {
+    if (this.closureMap.size === 0) {
+      return [this.normalizeName(ingredientName)];
+    }
+    const normalized = this.normalizeName(ingredientName);
+    const matches: Set<string> = new Set([normalized]);
+
+    const match = this.closureMap.get(normalized);
+    if (match) {
+      matches.add(this.normalizeName(match.ingredient.name));
+      if (match.ingredient.synonyms) {
+        match.ingredient.synonyms
+          .split(',')
+          .map((s) => this.normalizeName(s.trim()))
+          .forEach((syn) => matches.add(syn));
+      }
+    }
+
+    // Check parent/children of matched ingredient for broader matches
+    if (match) {
+      const childNames = this.ingredientsCatalog
+        .filter((i) => i.parentId === match.ingredient.id)
+        .map((i) => this.normalizeName(i.name));
+      childNames.forEach((n) => matches.add(n));
+      const parentId = match.ingredient.parentId;
+      if (parentId) {
+        const parent = this.ingredientsCatalog.find((i) => i.id === parentId);
+        if (parent) {
+          matches.add(this.normalizeName(parent.name));
+          if (parent.synonyms) {
+            parent.synonyms
+              .split(',')
+              .map((s) => this.normalizeName(s.trim()))
+              .forEach((syn) => matches.add(syn));
+          }
+        }
+      }
+    }
+
+    return Array.from(matches);
+  }
+
+  private async buildClosureMap(): Promise<void> {
+    try {
+      const allIngredients = await this.ingredientRepository.find({
+        relations: ['parent'],
+      });
+      this.ingredientsCatalog = allIngredients;
+
+      const newMap = new Map<string, IngredientMatch>();
+
+      for (const ingredient of allIngredients) {
+        const nameKey = this.normalizeName(ingredient.name);
+        if (!newMap.has(nameKey)) {
+          newMap.set(nameKey, {
+            ingredient,
+            matchType: 'exact',
+            confidence: 1.0,
+          });
+        }
+
+        if (ingredient.synonyms) {
+          for (const syn of ingredient.synonyms.split(',')) {
+            const synKey = this.normalizeName(syn.trim());
+            if (synKey && !newMap.has(synKey)) {
+              newMap.set(synKey, {
+                ingredient,
+                matchType: 'synonym',
+                confidence: 0.9,
+              });
+            }
+          }
+        }
+      }
+
+      for (const ingredient of allIngredients) {
+        if (ingredient.parentId) {
+          const parent = allIngredients.find(
+            (i) => i.id === ingredient.parentId,
+          );
+          if (parent) {
+            const parentKey = this.normalizeName(parent.name);
+            if (!newMap.has(parentKey)) {
+              newMap.set(parentKey, {
+                ingredient: parent,
+                matchType: 'hierarchical',
+                confidence: 0.9,
+              });
+            }
+            if (parent.synonyms) {
+              for (const syn of parent.synonyms.split(',')) {
+                const synKey = this.normalizeName(syn.trim());
+                if (synKey && !newMap.has(synKey)) {
+                  newMap.set(synKey, {
+                    ingredient: parent,
+                    matchType: 'hierarchical',
+                    confidence: 0.8,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        const children = allIngredients.filter(
+          (i) => i.parentId === ingredient.id,
+        );
+        for (const child of children) {
+          const childKey = this.normalizeName(child.name);
+          if (!newMap.has(childKey)) {
+            newMap.set(childKey, {
+              ingredient: child,
+              matchType: 'hierarchical',
+              confidence: 0.8,
+            });
+          }
+          if (child.synonyms) {
+            for (const syn of child.synonyms.split(',')) {
+              const synKey = this.normalizeName(syn.trim());
+              if (synKey && !newMap.has(synKey)) {
+                newMap.set(synKey, {
+                  ingredient: child,
+                  matchType: 'hierarchical',
+                  confidence: 0.7,
+                });
+              }
+            }
+          }
+        }
+      }
+
+      this.closureMap = newMap;
+      this.logger.log(`Built closure map with ${newMap.size} entries`);
+    } catch (error) {
+      this.logger.error('Failed to build ingredient closure map:', error);
+    }
+  }
 
   async findBestMatch(
     ingredientName: string,
@@ -297,6 +474,26 @@ export class HierarchicalIngredientService {
 
     return Array.from(matches);
   }
+  private async getAllIngredientsCached(): Promise<Ingredient[]> {
+    const cached = await this.cacheManager.get<Ingredient[]>(
+      this.ALL_INGREDIENTS_CACHE_KEY,
+    );
+    if (cached) {
+      return cached;
+    }
+
+    const allIngredients = await this.ingredientRepository.find({
+      take: 2000,
+    });
+
+    await this.cacheManager.set(
+      this.ALL_INGREDIENTS_CACHE_KEY,
+      allIngredients,
+      this.ALL_INGREDIENTS_CACHE_TTL * 1000,
+    );
+
+    return allIngredients;
+  }
 
   private async findExactMatch(
     normalizedName: string,
@@ -327,10 +524,7 @@ export class HierarchicalIngredientService {
   private async findHierarchicalMatch(
     normalizedName: string,
   ): Promise<IngredientMatch | null> {
-    const allIngredients = await this.ingredientRepository.find({
-      relations: ['parent'],
-      take: 2000, // Safety cap — aligned with ADR 0008 spirit
-    });
+    const allIngredients = await this.getAllIngredientsCached();
 
     // Build an in-memory parent map to avoid per-ingredient DB queries
     const parentMap = new Map<string, string | null>();
@@ -419,9 +613,7 @@ export class HierarchicalIngredientService {
   private async findSynonymMatch(
     normalizedName: string,
   ): Promise<IngredientMatch | null> {
-    const allIngredients = await this.ingredientRepository.find({
-      take: 2000, // Safety cap — aligned with ADR 0008 spirit
-    });
+    const allIngredients = await this.getAllIngredientsCached();
 
     for (const ingredient of allIngredients) {
       // Check ingredient name
@@ -454,49 +646,35 @@ export class HierarchicalIngredientService {
   private async findFuzzyMatch(
     normalizedName: string,
   ): Promise<IngredientMatch | null> {
-    const allIngredients = await this.ingredientRepository.find({
-      take: 2000, // Safety cap — aligned with ADR 0008 spirit
-    });
-    let bestMatch: Ingredient | null = null;
-    let bestScore = 0;
+    try {
+      const rawResult = await this.ingredientRepository
+        .createQueryBuilder('ingredient')
+        .select('ingredient.id', 'id')
+        .addSelect('similarity(ingredient.normalized_name, :name)', 'score')
+        .where('similarity(ingredient.normalized_name, :name) > 0.3')
+        .setParameter('name', normalizedName.toUpperCase())
+        .orderBy('score', 'DESC')
+        .limit(1)
+        .getRawOne();
 
-    for (const ingredient of allIngredients) {
-      const score = this.calculateFuzzyScore(
-        normalizedName,
-        this.normalizeName(ingredient.name),
-      );
-
-      if (score > bestScore && score > 0.7) {
-        bestScore = score;
-        bestMatch = ingredient;
-      }
-
-      // Also check synonyms
-      if (ingredient.synonyms) {
-        const synonyms = ingredient.synonyms
-          .split(',')
-          .map((s) => this.normalizeName(s.trim()));
-        for (const synonym of synonyms) {
-          const synonymScore = this.calculateFuzzyScore(
-            normalizedName,
-            synonym,
-          );
-          if (synonymScore > bestScore && synonymScore > 0.7) {
-            bestScore = synonymScore;
-            bestMatch = ingredient;
-          }
+      if (rawResult && parseFloat(rawResult.score) > 0.4) {
+        const ingredient = await this.ingredientRepository.findOne({
+          where: { id: rawResult.id },
+        });
+        if (ingredient) {
+          return {
+            ingredient,
+            matchType: 'fuzzy',
+            confidence: parseFloat(rawResult.score),
+          };
         }
       }
+    } catch (err) {
+      this.logger.error(
+        `PostgreSQL pg_trgm fuzzy matching failed for: ${normalizedName}`,
+        err,
+      );
     }
-
-    if (bestMatch) {
-      return {
-        ingredient: bestMatch,
-        matchType: 'fuzzy',
-        confidence: bestScore,
-      };
-    }
-
     return null;
   }
 
@@ -836,35 +1014,7 @@ export class HierarchicalIngredientService {
 
   // Cache management
   async clearCache(): Promise<void> {
-    try {
-      const store = (this.cacheManager as Cache & { store?: RedisLikeStore })
-        .store;
-      if (store?.client?.scanIterator) {
-        // Redis store: delete all keys matching our prefix
-        let cleared = 0;
-        for await (const key of store.client.scanIterator({
-          MATCH: `${this.CACHE_PREFIX}*`,
-          COUNT: 100,
-        })) {
-          await this.cacheManager.del(key);
-          cleared++;
-        }
-        this.logger.log(
-          `Cleared ${cleared} ingredient hierarchy cache entries`,
-        );
-      } else {
-        this.logger.log(
-          'Cache store does not support prefix scanning; keys will expire via TTL',
-        );
-      }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        'Failed to clear ingredient hierarchy cache:',
-        errorMessage,
-      );
-    }
+    await this.cacheInvalidation.clearByPatterns([`${this.CACHE_PREFIX}*`]);
   }
 
   async warmupCache(): Promise<void> {
@@ -894,6 +1044,14 @@ export class HierarchicalIngredientService {
     });
 
     await Promise.all(cachePromises);
+
+    // Cache the full ingredient catalog for hierarchical/synonym lookups
+    await this.cacheManager.set(
+      this.ALL_INGREDIENTS_CACHE_KEY,
+      allIngredients,
+      this.ALL_INGREDIENTS_CACHE_TTL * 1000,
+    );
+
     this.logger.log(`Cached ${allIngredients.length} ingredients in Redis`);
   }
 }

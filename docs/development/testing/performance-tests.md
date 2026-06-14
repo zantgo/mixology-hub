@@ -1,6 +1,6 @@
 # Performance Tests
 
-> **PENDING B2B MIGRATION:** These test specifications reference `getUserInventory`. When the codebase is migrated, update to `getBarInventory`. Caching strategy shifts from per-user to global bar-level caches.
+> **B2B MIGRATED:** The codebase has been migrated to shared `bar_inventory`. These test specifications serve as reference. Actual test code uses `getBarInventory`. Caching strategy uses global bar-level caches.
 
 *Note: Performance testing examples would include:*
 

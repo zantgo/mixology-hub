@@ -53,11 +53,11 @@
 * **Architectural Decision: Asymmetric Ingredient Catalog Visibility**
   * **Explicit Trade-off:** We explicitly accept that users can possess inventory of private "Ghost" ingredients (acquired by clicking "Add to Inventory" from another user's public recipe) that they are subsequently banned from using as primary ingredients in their own newly authored recipes. The ingredient catalog search will strictly filter by `is_global = true` OR `created_by = current_user`. We trade flawless user ingredient sharing for strict database privacy scoping.
 
-**UC 10.9: SIMPLIFIED - No Special Transaction Isolation**
-* **Given** User A is preparing a cocktail.
-* **And** User B concurrently submits an edit to that exact cocktail's ingredients.
-* **When** both transactions attempt to commit.
-* **Then** both use default `READ COMMITTED` isolation level.
-* **And** no special isolation levels or phantom read prevention is implemented.
-* **Architectural Decision: Acceptance of READ COMMITTED Race Conditions**
-  * **Explicit Trade-off:** We explicitly reject the use of advanced transaction isolation levels (REPEATABLE READ, SERIALIZABLE) and row-level locking (SELECT FOR UPDATE). We accept potential data inconsistencies from concurrent modifications in exchange for maximum database throughput and elimination of transaction deadlocks. We trade absolute data consistency for simplified database operations.
+**UC 10.9: BullMQ Serialized Concurrency for Shared Inventory**
+* **Given** the shared bar inventory has exactly "50 ml" of Vodka remaining.
+* **And** Bartender A and Bartender B simultaneously click "Prepare" for drinks requiring "30 ml" of Vodka.
+* **When** the requests are enqueued to the single-threaded BullMQ worker.
+* **Then** the worker processes Bartender A's job first, successfully deducting "30 ml" (balance: "20 ml").
+* **And** when the worker processes Bartender B's job second, it detects the balance is "20 ml".
+* **And** gracefully fails the transaction with "failed_insufficient_stock".
+* **And** no double-deductions or negative inventory balances occur.

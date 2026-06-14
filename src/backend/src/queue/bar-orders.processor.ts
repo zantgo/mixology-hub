@@ -16,12 +16,12 @@ export interface PrepareJobPayload {
   bartenderId: string;
   preparationLogId: string;
   servings?: number;
-  totalVolumeMl?: number;
+  totalVolumeMl?: string;
   force?: boolean;
   batchOrders?: Array<{
     cocktailId: string;
     servings?: number;
-    totalVolumeMl?: number;
+    totalVolumeMl?: string;
     force?: boolean;
   }>;
 }
@@ -147,7 +147,14 @@ export class BarOrdersProcessor extends WorkerHost {
           }
 
           let totalAmount: Decimal;
-          if (req.unit === 'part' || req.unit === 'parts') {
+          if (req.type === 'rinse' || req.unit === 'rinse') {
+            totalAmount = this.unitConverter.convert(
+              new Decimal(3),
+              'ml',
+              req.ingredient.baseUnit,
+              req.ingredient,
+            );
+          } else if (req.unit === 'part' || req.unit === 'parts') {
             const calculatedMl = partSize.times(new Decimal(req.amount));
             totalAmount = this.unitConverter.convert(
               calculatedMl,
@@ -229,9 +236,9 @@ export class BarOrdersProcessor extends WorkerHost {
 
           eligible.sort((a, b) => b.quantity.comparedTo(a.quantity));
 
-          const reqAny = req as Record<string, unknown>;
+          const reqAny = req as unknown as Record<string, unknown>;
           const isOptional =
-            reqAny.is_optional === true ||
+            reqAny.isOptional === true ||
             reqAny.type === 'garnish' ||
             reqAny.type === 'rinse';
 
@@ -253,12 +260,11 @@ export class BarOrdersProcessor extends WorkerHost {
               continue;
             }
 
-            preparationLog.status = 'failed_insufficient_stock';
-            await transactionalEntityManager.save(preparationLog);
-            return {
-              status: 'failed_insufficient_stock',
-              logId: preparationLogId,
-            };
+            const err = new Error(
+              'Insufficient stock for ingredient',
+            ) as Error & { code: string };
+            err.code = 'INSUFFICIENT_STOCK';
+            throw err;
           }
 
           for (const stockUnit of eligible) {
@@ -293,20 +299,20 @@ export class BarOrdersProcessor extends WorkerHost {
             const result = await transactionalEntityManager
               .createQueryBuilder()
               .update(BarInventory)
-              .set({ quantity: () => `quantity - ${alloc.amount.toString()}` })
+              .set({ quantity: () => 'GREATEST(quantity - :amount, 0)' })
               .where('id = :rowId', { rowId: alloc.rowId })
               .andWhere('quantity >= :amount', {
                 amount: alloc.amount.toString(),
               })
+              .setParameter('amount', alloc.amount.toString())
               .execute();
 
             if (!result.affected || result.affected === 0) {
-              preparationLog.status = 'failed_insufficient_stock';
-              await transactionalEntityManager.save(preparationLog);
-              return {
-                status: 'failed_insufficient_stock',
-                logId: preparationLogId,
-              };
+              const err = new Error(
+                'Stock changed during deduction',
+              ) as Error & { code: string };
+              err.code = 'INSUFFICIENT_STOCK';
+              throw err;
             }
 
             const entry = remainingStock.get(alloc.rowId)!;
@@ -327,6 +333,17 @@ export class BarOrdersProcessor extends WorkerHost {
         preparationLog.deductedIngredients = deductions;
         preparationLog.cocktailNameSnapshot = cocktail.name;
         preparationLog.servings = servings;
+
+        const finalCheck = await transactionalEntityManager.findOne(
+          PreparationLog,
+          { where: { id: preparationLogId } },
+        );
+        if (finalCheck?.status === 'cancelled') {
+          throw new Error(
+            `Preparation ${preparationLogId} cancelled mid-flight — rolling back deductions`,
+          );
+        }
+
         await transactionalEntityManager.save(preparationLog);
 
         this.logger.log(
@@ -336,16 +353,26 @@ export class BarOrdersProcessor extends WorkerHost {
       })
       .catch(async (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
+        const code = (error as Error & { code?: string }).code;
         this.logger.error(`Failed to process prepare job: ${message}`);
 
         try {
           await this.preparationLogRepository.update(preparationLogId, {
-            status: 'failed_other',
+            status:
+              code === 'INSUFFICIENT_STOCK'
+                ? 'failed_insufficient_stock'
+                : 'failed_other',
           });
         } catch {
           // Best-effort status update — ignore failures
         }
 
+        if (code === 'INSUFFICIENT_STOCK') {
+          return {
+            status: 'failed_insufficient_stock',
+            logId: preparationLogId,
+          };
+        }
         throw error;
       });
   }
@@ -375,6 +402,16 @@ export class BarOrdersProcessor extends WorkerHost {
 
         log.status = 'evaluating';
         await tx.save(log);
+
+        const allStock = await tx
+          .createQueryBuilder(BarInventory, 'bi')
+          .innerJoinAndSelect('bi.ingredient', 'ingredient')
+          .setLock('pessimistic_write')
+          .getMany();
+
+        const remainingStock = new Map(
+          allStock.map((row) => [row.id, { row, quantity: row.quantity }]),
+        );
 
         const allDeductions: Record<string, unknown>[] = [];
         let preparingSet = false;
@@ -410,10 +447,23 @@ export class BarOrdersProcessor extends WorkerHost {
           }
 
           for (const req of cocktail.ingredients) {
-            if (!req.ingredient?.id) continue;
+            if (!req.ingredient || !req.ingredient.id) {
+              log.status = 'failed_other';
+              await tx.save(log);
+              throw new Error(
+                'Cocktail recipe is corrupt: Missing ingredient data.',
+              );
+            }
 
             let totalAmount: Decimal;
-            if (req.unit === 'part' || req.unit === 'parts') {
+            if (req.type === 'rinse' || req.unit === 'rinse') {
+              totalAmount = this.unitConverter.convert(
+                new Decimal(3),
+                'ml',
+                req.ingredient.baseUnit,
+                req.ingredient,
+              );
+            } else if (req.unit === 'part' || req.unit === 'parts') {
               const calculatedMl = partSize.times(new Decimal(req.amount));
               totalAmount = this.unitConverter.convert(
                 calculatedMl,
@@ -434,24 +484,81 @@ export class BarOrdersProcessor extends WorkerHost {
               );
             }
 
-            const barStock = await tx
-              .createQueryBuilder(BarInventory, 'bi')
-              .setLock('pessimistic_write')
-              .where('bi.ingredient_id = :ingredientId', {
-                ingredientId: req.ingredient.id,
-              })
-              .getOne();
+            const descendantRows = await tx.query(
+              `
+              WITH RECURSIVE descendants AS (
+                SELECT id, name, synonyms FROM ingredients WHERE id = $1
+                UNION
+                SELECT i.id, i.name, i.synonyms FROM ingredients i
+                INNER JOIN descendants d ON i.parent_id = d.id
+              )
+              SELECT id, name, synonyms FROM descendants;
+            `,
+              [req.ingredient.id],
+            );
 
-            const currentQuantity = barStock
-              ? barStock.quantity
-              : new Decimal(0);
-            const reqAny = req as Record<string, unknown>;
+            const eligibleIngredientIds = new Set<string>(
+              descendantRows.map((r: any) => r.id),
+            );
+            const eligibleNames = new Set<string>(
+              descendantRows.map((r: any) => r.name.toLowerCase().trim()),
+            );
+            const eligibleSynonyms = new Set<string>();
+            for (const r of descendantRows) {
+              if (r.synonyms) {
+                r.synonyms
+                  .split(',')
+                  .forEach((s: string) =>
+                    eligibleSynonyms.add(s.toLowerCase().trim()),
+                  );
+              }
+            }
+
+            const eligible: Array<{ rowId: string; quantity: Decimal }> = [];
+            for (const [rowId, entry] of remainingStock) {
+              const row = entry.row;
+              if (!row.ingredient) continue;
+
+              const rowIdMatch = eligibleIngredientIds.has(row.ingredient.id);
+              const rowName = row.ingredient.name.toLowerCase().trim();
+              const nameMatch =
+                eligibleNames.has(rowName) || eligibleSynonyms.has(rowName);
+
+              const synNames = row.ingredient.synonyms
+                ? row.ingredient.synonyms
+                    .split(',')
+                    .map((s: string) => s.toLowerCase().trim())
+                : [];
+              const synonymMatch = synNames.some(
+                (s: string) => eligibleNames.has(s) || eligibleSynonyms.has(s),
+              );
+
+              if (rowIdMatch || nameMatch || synonymMatch) {
+                eligible.push({ rowId, quantity: entry.quantity });
+              }
+            }
+
+            let remainingToDeduct = new Decimal(totalAmount);
+            const allocations: Array<{
+              rowId: string;
+              amount: Decimal;
+              name: string;
+            }> = [];
+
+            eligible.sort((a, b) => b.quantity.comparedTo(a.quantity));
+
+            const reqAny = req as unknown as Record<string, unknown>;
             const isOptional =
-              reqAny.is_optional === true ||
+              reqAny.isOptional === true ||
               reqAny.type === 'garnish' ||
               reqAny.type === 'rinse';
 
-            if (currentQuantity.lessThan(totalAmount)) {
+            let totalAvailable = new Decimal(0);
+            for (const stockUnit of eligible) {
+              totalAvailable = totalAvailable.plus(stockUnit.quantity);
+            }
+
+            if (totalAvailable.lt(totalAmount)) {
               if (order.force || isOptional) {
                 allDeductions.push({
                   ingredientId: req.ingredient.id,
@@ -459,6 +566,7 @@ export class BarOrdersProcessor extends WorkerHost {
                   required: totalAmount.toString(),
                   deducted: new Decimal(0).toString(),
                   skipped: true,
+                  optional: isOptional || undefined,
                   cocktailId: order.cocktailId,
                   cocktailName: cocktail.name,
                 });
@@ -467,13 +575,29 @@ export class BarOrdersProcessor extends WorkerHost {
 
               log.status = 'failed_insufficient_stock';
               await tx.save(log);
-              return {
-                status: 'failed_insufficient_stock',
-                logId: preparationLogId,
-              };
+              const err = new Error(
+                'Insufficient stock for batch ingredient',
+              ) as Error & { code: string };
+              err.code = 'INSUFFICIENT_STOCK';
+              throw err;
             }
 
-            if (!preparingSet) {
+            for (const stockUnit of eligible) {
+              if (remainingToDeduct.isZero()) break;
+              const entry = remainingStock.get(stockUnit.rowId)!;
+              const deductAmt = Decimal.min(remainingToDeduct, entry.quantity);
+
+              if (deductAmt.gt(0)) {
+                allocations.push({
+                  rowId: stockUnit.rowId,
+                  amount: deductAmt,
+                  name: entry.row.ingredient.name,
+                });
+                remainingToDeduct = remainingToDeduct.minus(deductAmt);
+              }
+            }
+
+            if (!preparingSet && allocations.length > 0) {
               const currentLog = await tx.findOne(PreparationLog, {
                 where: { id: preparationLogId },
               });
@@ -485,26 +609,42 @@ export class BarOrdersProcessor extends WorkerHost {
               preparingSet = true;
             }
 
-            await tx
-              .createQueryBuilder()
-              .update(BarInventory)
-              .set({ quantity: () => `quantity - ${totalAmount.toString()}` })
-              .where('ingredient_id = :ingredientId', {
-                ingredientId: req.ingredient.id,
-              })
-              .andWhere('quantity >= :amount', {
-                amount: totalAmount.toString(),
-              })
-              .execute();
+            for (const alloc of allocations) {
+              const result = await tx
+                .createQueryBuilder()
+                .update(BarInventory)
+                .set({
+                  quantity: () => 'GREATEST(quantity - :amount, 0)',
+                })
+                .where('id = :rowId', { rowId: alloc.rowId })
+                .andWhere('quantity >= :amount', {
+                  amount: alloc.amount.toString(),
+                })
+                .setParameter('amount', alloc.amount.toString())
+                .execute();
 
-            allDeductions.push({
-              ingredientId: req.ingredient.id,
-              ingredientName: req.ingredient.name,
-              amount: totalAmount.toString(),
-              unit: req.ingredient.baseUnit,
-              cocktailId: order.cocktailId,
-              cocktailName: cocktail.name,
-            });
+              if (!result.affected || result.affected === 0) {
+                const err = new Error(
+                  'Stock changed during deduction',
+                ) as Error & { code: string };
+                err.code = 'INSUFFICIENT_STOCK';
+                throw err;
+              }
+
+              const entry = remainingStock.get(alloc.rowId)!;
+              entry.quantity = entry.quantity.minus(alloc.amount);
+
+              allDeductions.push({
+                ingredientId: req.ingredient.id,
+                ingredientName: req.ingredient.name,
+                amount: alloc.amount.toString(),
+                unit: req.ingredient.baseUnit,
+                actualInventoryRow: alloc.name,
+                inventoryRowId: alloc.rowId,
+                cocktailId: order.cocktailId,
+                cocktailName: cocktail.name,
+              });
+            }
           }
         }
 
@@ -518,13 +658,23 @@ export class BarOrdersProcessor extends WorkerHost {
       })
       .catch(async (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
+        const code = (error as Error & { code?: string }).code;
         this.logger.error(`Batch prepare failed: ${message}`);
         try {
           await this.preparationLogRepository.update(preparationLogId, {
-            status: 'failed_other',
+            status:
+              code === 'INSUFFICIENT_STOCK'
+                ? 'failed_insufficient_stock'
+                : 'failed_other',
           });
         } catch {
           // Best-effort status update — ignore failures
+        }
+        if (code === 'INSUFFICIENT_STOCK') {
+          return {
+            status: 'failed_insufficient_stock',
+            logId: preparationLogId,
+          };
         }
         throw error;
       });
@@ -577,7 +727,9 @@ export class BarOrdersProcessor extends WorkerHost {
           .getOne();
 
         if (!barStock) {
+          const rowId = deduction.inventoryRowId as string | undefined;
           const newStock = tx.create(BarInventory, {
+            ...(rowId ? { id: rowId } : {}),
             ingredient,
             quantity: new Decimal(amount),
             expirationDate: null,
@@ -592,8 +744,9 @@ export class BarOrdersProcessor extends WorkerHost {
         await tx
           .createQueryBuilder()
           .update(BarInventory)
-          .set({ quantity: () => `quantity + ${amount}` })
+          .set({ quantity: () => 'quantity + :amount' })
           .where('ingredient_id = :ingredientId', { ingredientId })
+          .setParameter('amount', amount)
           .execute();
       }
 
@@ -683,8 +836,9 @@ export class BarOrdersProcessor extends WorkerHost {
             await transactionalEntityManager
               .createQueryBuilder()
               .update(BarInventory)
-              .set({ quantity: () => `quantity + ${amount}` })
+              .set({ quantity: () => 'quantity + :amount' })
               .where('id = :rowId', { rowId })
+              .setParameter('amount', amount)
               .execute();
           }
 

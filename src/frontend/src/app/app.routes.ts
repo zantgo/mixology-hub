@@ -63,6 +63,11 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/auth/verify-email.page').then((m) => m.VerifyEmailPage),
   },
   {
+    path: 'auth/confirm-email-change',
+    loadComponent: () =>
+      import('./pages/auth/confirm-email-change.page').then((m) => m.ConfirmEmailChangePage),
+  },
+  {
     path: 'profile',
     loadComponent: () => import('./pages/profile/profile.page').then((m) => m.ProfilePage),
     canActivate: [authGuard],

@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { Repository, LessThan, EntityManager } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from './entities/user.entity';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
-import { UserProfile } from './entities/user-profile.entity';
-import { Ai } from '../ai/entities/ai.entity';
-import { UserAiQuotas } from '../ai/entities/user-ai-quotas.entity';
+import { AiGeneratedRecipe } from '../ai/entities/ai.entity';
+import { UserAiQuota } from '../ai/entities/user-ai-quota.entity';
 import { Favorite } from '../favorites/entities/favorite.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailRating } from '../cocktails/entities/cocktail-rating.entity';
@@ -41,12 +40,10 @@ export class GdprDataRetentionService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(BarInventory)
     private readonly inventoryRepository: Repository<BarInventory>,
-    @InjectRepository(UserProfile)
-    private readonly profileRepository: Repository<UserProfile>,
-    @InjectRepository(Ai)
-    private readonly aiRepository: Repository<Ai>,
-    @InjectRepository(UserAiQuotas)
-    private readonly quotaRepository: Repository<UserAiQuotas>,
+    @InjectRepository(AiGeneratedRecipe)
+    private readonly aiRepository: Repository<AiGeneratedRecipe>,
+    @InjectRepository(UserAiQuota)
+    private readonly quotaRepository: Repository<UserAiQuota>,
     @InjectRepository(Favorite)
     private readonly favoriteRepository: Repository<Favorite>,
     @InjectRepository(Cocktail)
@@ -128,17 +125,36 @@ export class GdprDataRetentionService {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanOldPreparationLogs(): Promise<void> {
-    const thresholdDate = new Date();
-    thresholdDate.setDate(thresholdDate.getDate() - 30);
+    const now = new Date();
 
-    const result = await this.preparationLogRepository
+    // Standard completed/failed logs: delete if older than 30 days and not undone
+    const standardThreshold = new Date(now);
+    standardThreshold.setDate(standardThreshold.getDate() - 30);
+
+    // Undone logs: retain for 90 days for administrative auditing
+    const undoneThreshold = new Date(now);
+    undoneThreshold.setDate(undoneThreshold.getDate() - 90);
+
+    // Transactional deletion for standard logs
+    const standardResult = await this.preparationLogRepository
       .createQueryBuilder()
       .delete()
-      .where('created_at < :threshold', { threshold: thresholdDate })
+      .where('created_at < :threshold', { threshold: standardThreshold })
+      .andWhere('undone = :undone', { undone: false })
       .andWhere('status != :status', { status: 'queued' })
       .execute();
 
-    this.logger.log(`Cleaned up ${result.affected || 0} old preparation logs`);
+    // Transactional deletion for undone logs (retained up to 90 days)
+    const undoneResult = await this.preparationLogRepository
+      .createQueryBuilder()
+      .delete()
+      .where('created_at < :threshold', { threshold: undoneThreshold })
+      .andWhere('undone = :undone', { undone: true })
+      .execute();
+
+    this.logger.log(
+      `Cleaned up ${standardResult.affected || 0} standard logs (>30 days) and ${undoneResult.affected || 0} undone logs (>90 days)`,
+    );
   }
 
   /**
@@ -153,27 +169,29 @@ export class GdprDataRetentionService {
     const usersToAnonymize = await this.userRepository.find({
       where: {
         lastLoginAt: LessThan(thresholdDate),
-        is_anonymized: false,
+        isAnonymized: false,
       },
-      take: 100, // Batch size for safety
+      take: 50,
     });
 
-    let anonymizedCount = 0;
+    if (usersToAnonymize.length === 0) return 0;
 
-    for (const user of usersToAnonymize) {
-      try {
-        await this.anonymizeUser(user);
-        anonymizedCount++;
-      } catch (error) {
-        this.logger.error(
-          `Failed to anonymize user ${user.id}`,
-          (error as Error).message,
-        );
+    return this.userRepository.manager.transaction(async (tx) => {
+      let anonymizedCount = 0;
+      for (const user of usersToAnonymize) {
+        try {
+          await this.anonymizeUser(user, tx);
+          anonymizedCount++;
+        } catch (error) {
+          this.logger.error(
+            `Failed to anonymize user ${user.id}`,
+            (error as Error).message,
+          );
+        }
       }
-    }
-
-    this.logger.log(`Anonymized ${anonymizedCount} inactive users`);
-    return anonymizedCount;
+      this.logger.log(`Anonymized ${anonymizedCount} inactive users`);
+      return anonymizedCount;
+    });
   }
 
   /**
@@ -188,19 +206,17 @@ export class GdprDataRetentionService {
     const usersToDelete = await this.userRepository.find({
       where: {
         lastLoginAt: LessThan(thresholdDate),
-        is_anonymized: true,
+        isAnonymized: true,
       },
-      take: 50, // Smaller batch for deletion
+      take: 10,
     });
 
-    let deletedCount = 0;
+    if (usersToDelete.length === 0) return 0;
 
+    let deletedCount = 0;
     for (const user of usersToDelete) {
       try {
-        // First, delete all associated data
         await this.deleteUserData(user.id);
-
-        // Then delete the user
         await this.userRepository.delete(user.id);
         deletedCount++;
       } catch (error) {
@@ -210,7 +226,6 @@ export class GdprDataRetentionService {
         );
       }
     }
-
     this.logger.log(`Deleted ${deletedCount} inactive users`);
     return deletedCount;
   }
@@ -273,22 +288,27 @@ export class GdprDataRetentionService {
   /**
    * Anonymize a user's personal data
    */
-  private async anonymizeUser(user: User): Promise<void> {
-    // Generate anonymous identifier
+  private async anonymizeUser(
+    user: User,
+    manager?: EntityManager,
+  ): Promise<void> {
     const anonymousId = `anon_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
 
-    // Anonymize personal data
     user.email = `${anonymousId}@anonymized.mixologyhub`;
     user.username = `user_${anonymousId}`;
-    user.first_name = 'Anonymous';
-    user.last_name = 'User';
-    user.profile_picture_url = null;
+    user.firstName = 'Anonymous';
+    user.lastName = 'User';
+    user.profilePictureUrl = null;
     user.bio = null;
-    user.date_of_birth = null;
-    user.is_anonymized = true;
-    user.anonymized_at = new Date();
+    user.dateOfBirth = null;
+    user.isAnonymized = true;
+    user.anonymizedAt = new Date();
 
-    await this.userRepository.save(user);
+    if (manager) {
+      await manager.save(user);
+    } else {
+      await this.userRepository.save(user);
+    }
 
     this.logger.log(`Anonymized user ${user.id} -> ${anonymousId}`);
   }
@@ -303,35 +323,27 @@ export class GdprDataRetentionService {
       relations: ['ingredients'],
     });
     for (const cocktail of userCocktails) {
-      if (cocktail.is_public) {
-        // Anonymize public cocktails to preserve favorites/history for other users
+      if (cocktail.isPublic) {
         cocktail.user = null;
         await this.cocktailRepository.save(cocktail);
       } else {
-        // Hard delete private cocktails not visible to others
         await this.cocktailRepository.remove(cocktail);
       }
     }
 
     // Note: BarInventory is NOT deleted — it belongs to the bar, not the individual user
 
-    // Anonymize custom ingredients created by user (GDPR Right to be Forgotten)
-    await this.ingredientRepository.update(
-      { createdBy: userId },
-      { createdBy: null },
-    );
-
-    // Delete user profile
-    await this.profileRepository.delete({ user: { id: userId } });
-
-    // Delete favorites
-    await this.favoriteRepository.delete({ user: { id: userId } });
-
-    // Delete AI generated recipes
-    await this.aiRepository.delete({ user: { id: userId } });
-
-    // Delete AI quotas
-    await this.quotaRepository.delete({ user: { id: userId } });
+    // Batch parallel: anonymize ingredients, delete favorites, AI data, quotas, sessions
+    await Promise.all([
+      this.ingredientRepository.update(
+        { createdBy: userId },
+        { createdBy: null },
+      ),
+      this.favoriteRepository.delete({ user: { id: userId } }),
+      this.aiRepository.delete({ user: { id: userId } }),
+      this.quotaRepository.delete({ user: { id: userId } }),
+      this.refreshTokenRepository.delete({ userId }),
+    ]);
 
     this.logger.log(`Deleted and anonymized data for user ${userId}`);
   }
@@ -377,12 +389,12 @@ export class GdprDataRetentionService {
         email: user.email,
         displayName: user.displayName,
         username: user.username,
-        firstName: user.first_name,
-        lastName: user.last_name,
+        firstName: user.firstName,
+        lastName: user.lastName,
         createdAt: user.createdAt,
         lastLogin: user.lastLoginAt,
         emailVerified: user.emailVerified,
-        isAnonymized: user.is_anonymized,
+        isAnonymized: user.isAnonymized,
         activeSessions,
       },
       inventory: inventory.map((item) => ({
@@ -393,8 +405,8 @@ export class GdprDataRetentionService {
       })),
       favorites: favorites.map((fav) => ({
         localCocktailId: fav.cocktail?.id || null,
-        externalCocktailId: fav.external_cocktail_id,
-        createdAt: fav.created_at,
+        externalCocktailId: fav.externalCocktailId,
+        createdAt: fav.createdAt,
       })),
       cocktailRatings: cocktailRatings.map((r) => ({
         cocktailId: r.cocktail?.id,
@@ -413,9 +425,9 @@ export class GdprDataRetentionService {
       aiGeneratedRecipes: aiRecipes.map((recipe) => ({
         id: recipe.id,
         prompt: recipe.prompt,
-        generatedAt: recipe.created_at,
-        savedAsCocktail: recipe.saved_as_cocktail_id,
-        validationScore: recipe.validation_score,
+        generatedAt: recipe.createdAt,
+        savedAsCocktail: recipe.savedAsCocktailId,
+        validationScore: recipe.validationScore,
       })),
       exportDate: new Date().toISOString(),
     };
@@ -493,13 +505,13 @@ export class GdprDataRetentionService {
       this.userRepository.count({
         where: {
           lastLoginAt: LessThan(userAnonymizeThreshold),
-          is_anonymized: false,
+          isAnonymized: false,
         },
       }),
       this.userRepository.count({
         where: {
           lastLoginAt: LessThan(userDeleteThreshold),
-          is_anonymized: true,
+          isAnonymized: true,
         },
       }),
       this.inventoryRepository

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, ValidateIf } from 'class-validator';
+import { IsString, ValidateIf } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateFavoriteDto {

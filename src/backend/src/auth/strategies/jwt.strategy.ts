@@ -7,7 +7,7 @@ import { AuthService } from '../auth.service';
 
 interface JwtValidatePayload {
   sub: string;
-  token_version?: number;
+  tokenVersion?: number;
   saltVersion?: number;
 }
 
@@ -20,9 +20,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('JWT_SECRET'),
+      secretOrKey: configService.get<string>('JWT_SECRET')!,
       passReqToCallback: true,
-    });
+    } as any);
   }
 
   async validate(request: Request, payload: JwtValidatePayload) {
@@ -30,7 +30,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
 
     // Validate user and check token blacklist using actual token string
-    const user = await this.authService.validateUser(payload, token);
+    const user = await this.authService.validateUser(payload, token!);
 
     if (!user) {
       throw new UnauthorizedException('Invalid or expired token');

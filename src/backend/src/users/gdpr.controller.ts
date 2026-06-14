@@ -1,4 +1,13 @@
-import { Request } from 'express';
+import {
+  Controller,
+  Get,
+  Post,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Request,
+} from '@nestjs/common';
+import type { Request as ExpressRequest } from 'express';
 import { GdprDataRetentionService } from './gdpr-data-retention.service';
 import {
   ApiTags,
@@ -9,7 +18,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
 
-interface AuthenticatedRequest extends Request {
+interface AuthenticatedRequest extends ExpressRequest {
   user: { id: string; [key: string]: unknown };
 }
 

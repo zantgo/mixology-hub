@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  ParseArrayPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -19,18 +20,6 @@ import { MakeabilityService } from './makeability.service';
 import { AddBarInventoryDto } from './dto/add-bar-inventory.dto';
 import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { GetUser } from '../auth/decorators/get-user.decorator';
-
-interface AuthenticatedUser {
-  id: string;
-  email: string;
-  displayName: string;
-  role: string;
-  emailVerified: boolean;
-  lastLoginAt: Date | null;
-  createdAt: Date;
-  token: string;
-}
 
 @ApiTags('Bar Inventory')
 @ApiBearerAuth()
@@ -66,10 +55,7 @@ export class BarInventoryController {
   @Post()
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Add stock to bar inventory (ADMIN ONLY)' })
-  addToInventory(
-    @Body() dto: AddBarInventoryDto,
-    @GetUser() _user: AuthenticatedUser,
-  ) {
+  addToInventory(@Body() dto: AddBarInventoryDto) {
     return this.inventoryService.addToInventory(dto);
   }
 
@@ -94,7 +80,10 @@ export class BarInventoryController {
   @Post('bulk')
   @UseGuards(AdminGuard)
   @ApiOperation({ summary: 'Bulk add stock (ADMIN ONLY)' })
-  bulkAdd(@Body() dtos: AddBarInventoryDto[]) {
+  bulkAdd(
+    @Body(new ParseArrayPipe({ items: AddBarInventoryDto }))
+    dtos: AddBarInventoryDto[],
+  ) {
     return this.inventoryService.bulkAdd(dtos);
   }
 

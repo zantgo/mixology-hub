@@ -2,12 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Inject,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import type { Cache } from 'cache-manager';
 import { Decimal } from 'decimal.js';
 import { BarInventory } from './entities/bar-inventory.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -15,15 +13,7 @@ import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AddBarInventoryDto } from './dto/add-bar-inventory.dto';
 import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
-
-interface RedisLikeStore {
-  client?: {
-    scanIterator?: (options: {
-      MATCH: string;
-      COUNT?: number;
-    }) => AsyncIterable<string>;
-  };
-}
+import { CacheInvalidationService } from '../redis-cache/cache-invalidation.service';
 
 @Injectable()
 export class BarInventoryService {
@@ -34,94 +24,79 @@ export class BarInventoryService {
     private readonly ingredientRepository: Repository<Ingredient>,
     private readonly unitConverter: UnitConverterService,
     private readonly dataSource: DataSource,
-    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    private readonly cacheInvalidation: CacheInvalidationService,
   ) {}
 
-  private isMassUnit(unit: string): boolean {
-    return ['g', 'kg'].includes(unit.toLowerCase());
-  }
-
-  private isVolumeUnit(unit: string): boolean {
-    return ['ml', 'oz', 'l', 'cl', 'tbsp', 'tsp', 'dash', 'dashes'].includes(
-      unit.toLowerCase(),
-    );
-  }
-
   private async clearMakeabilityCache() {
-    const store = (this.cacheManager as Cache & { store?: RedisLikeStore })
-      .store;
-    if (store?.client?.scanIterator) {
-      for await (const key of store.client.scanIterator({
-        MATCH: 'makeability:*',
-      })) {
-        await this.cacheManager.del(key);
-      }
-      for await (const key of store.client.scanIterator({
-        MATCH: 'search:*',
-      })) {
-        await this.cacheManager.del(key);
-      }
-    } else {
-      await this.cacheManager.clear();
-    }
+    await this.cacheInvalidation.clearByPatterns(['makeability:*', 'search:*']);
   }
 
   async addToInventory(dto: AddBarInventoryDto) {
-    const ingredient = await this.ingredientRepository.findOne({
-      where: { id: dto.ingredientId },
-    });
-    if (!ingredient) {
-      throw new NotFoundException(`Ingredient ${dto.ingredientId} not found`);
-    }
+    return this.dataSource.transaction(async (manager) => {
+      const ingredient = await manager.findOne(Ingredient, {
+        where: { id: dto.ingredientId },
+      });
+      if (!ingredient) {
+        throw new NotFoundException(`Ingredient ${dto.ingredientId} not found`);
+      }
 
-    if (dto.unit) {
-      const fromIsMass = this.isMassUnit(dto.unit);
-      const fromIsVolume = this.isVolumeUnit(dto.unit);
-      const baseIsMass = this.isMassUnit(ingredient.baseUnit);
-      const baseIsVolume = this.isVolumeUnit(ingredient.baseUnit);
+      if (dto.unit) {
+        if (
+          !this.unitConverter.canConvertBetween(
+            dto.unit,
+            ingredient.baseUnit,
+            ingredient,
+          )
+        ) {
+          throw new BadRequestException(
+            `Incompatible unit type: Ingredient "${ingredient.name}" expects unit compatible with base unit "${ingredient.baseUnit}".`,
+          );
+        }
+      }
 
-      if (
-        ((fromIsMass && baseIsVolume) || (fromIsVolume && baseIsMass)) &&
-        !ingredient.allowMassVolumeConversion
-      ) {
-        throw new BadRequestException(
-          `Ingredient ${ingredient.name} does not allow mass-volume conversions`,
+      let normalizedQuantity = new Decimal(dto.quantity);
+      if (dto.unit && dto.unit !== ingredient.baseUnit) {
+        normalizedQuantity = this.unitConverter.convert(
+          normalizedQuantity,
+          dto.unit,
+          ingredient.baseUnit,
+          ingredient,
         );
       }
-    }
 
-    let normalizedQuantity = new Decimal(dto.quantity);
-    if (dto.unit && dto.unit !== ingredient.baseUnit) {
-      normalizedQuantity = this.unitConverter.convert(
-        normalizedQuantity,
-        dto.unit,
-        ingredient.baseUnit,
-        ingredient,
-      );
-    }
+      const existing = await manager.findOne(BarInventory, {
+        where: { ingredient: { id: dto.ingredientId } },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    const existing = await this.inventoryRepository.findOne({
-      where: { ingredient: { id: dto.ingredientId } },
-    });
-
-    if (existing) {
-      existing.quantity = existing.quantity.plus(normalizedQuantity);
-      if (dto.expirationDate) {
-        existing.expirationDate = new Date(dto.expirationDate);
+      if (existing) {
+        existing.quantity = existing.quantity.plus(normalizedQuantity);
+        if (dto.expirationDate) {
+          existing.expirationDate = new Date(dto.expirationDate);
+        }
+        const result = await manager.save(existing);
+        await this.clearMakeabilityCache();
+        return result;
       }
-      const result = await this.inventoryRepository.save(existing);
+
+      const currentCount = await manager.count(BarInventory);
+      if (currentCount >= 10000) {
+        throw new UnprocessableEntityException(
+          'Maximum inventory limit reached (10,000 distinct ingredients). Please consider removing unused items.',
+        );
+      }
+
+      const newItem = manager.create(BarInventory, {
+        ingredient,
+        quantity: normalizedQuantity,
+        expirationDate: dto.expirationDate
+          ? new Date(dto.expirationDate)
+          : null,
+      });
+      const result = await manager.save(newItem);
       await this.clearMakeabilityCache();
       return result;
-    }
-
-    const newItem = this.inventoryRepository.create({
-      ingredient,
-      quantity: normalizedQuantity,
-      expirationDate: dto.expirationDate ? new Date(dto.expirationDate) : null,
     });
-    const result = await this.inventoryRepository.save(newItem);
-    await this.clearMakeabilityCache();
-    return result;
   }
 
   async getInventory(paginationQuery?: PaginationQueryDto) {
@@ -150,59 +125,62 @@ export class BarInventoryService {
   }
 
   async updateInventoryItem(id: string, dto: UpdateBarInventoryDto) {
-    const item = await this.inventoryRepository.findOne({
-      where: { id },
-      relations: ['ingredient'],
-    });
-    if (!item) {
-      throw new NotFoundException(`Inventory item ${id} not found`);
-    }
+    return this.dataSource.transaction(async (manager) => {
+      const item = await manager.findOne(BarInventory, {
+        where: { id },
+        relations: ['ingredient'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!item) {
+        throw new NotFoundException(`Inventory item ${id} not found`);
+      }
 
-    if (dto.unit) {
-      const fromIsMass = this.isMassUnit(dto.unit);
-      const fromIsVolume = this.isVolumeUnit(dto.unit);
-      const baseIsMass = this.isMassUnit(item.ingredient.baseUnit);
-      const baseIsVolume = this.isVolumeUnit(item.ingredient.baseUnit);
+      if (dto.unit) {
+        if (
+          !this.unitConverter.canConvertBetween(
+            dto.unit,
+            item.ingredient.baseUnit,
+            item.ingredient,
+          )
+        ) {
+          throw new BadRequestException(
+            `Incompatible unit type: Ingredient "${item.ingredient.name}" expects unit compatible with base unit "${item.ingredient.baseUnit}".`,
+          );
+        }
+      }
 
-      if (
-        ((fromIsMass && baseIsVolume) || (fromIsVolume && baseIsMass)) &&
-        !item.ingredient.allowMassVolumeConversion
-      ) {
-        throw new BadRequestException(
-          `Ingredient ${item.ingredient.name} does not allow mass-volume conversions`,
+      let normalizedQuantity = new Decimal(dto.quantity);
+      if (dto.unit && dto.unit !== item.ingredient.baseUnit) {
+        normalizedQuantity = this.unitConverter.convert(
+          normalizedQuantity,
+          dto.unit,
+          item.ingredient.baseUnit,
+          item.ingredient,
         );
       }
-    }
 
-    let normalizedQuantity = new Decimal(dto.quantity);
-    if (dto.unit && dto.unit !== item.ingredient.baseUnit) {
-      normalizedQuantity = this.unitConverter.convert(
-        normalizedQuantity,
-        dto.unit,
-        item.ingredient.baseUnit,
-        item.ingredient,
-      );
-    }
-
-    item.quantity = normalizedQuantity;
-    if (dto.expirationDate !== undefined) {
-      item.expirationDate = dto.expirationDate
-        ? new Date(dto.expirationDate)
-        : null;
-    }
-    const result = await this.inventoryRepository.save(item);
-    await this.clearMakeabilityCache();
-    return result;
+      item.quantity = normalizedQuantity;
+      if (dto.expirationDate !== undefined) {
+        item.expirationDate = dto.expirationDate
+          ? new Date(dto.expirationDate)
+          : null;
+      }
+      const result = await manager.save(item);
+      await this.clearMakeabilityCache();
+      return result;
+    });
   }
 
   async removeFromInventory(id: string) {
-    const item = await this.inventoryRepository.findOne({ where: { id } });
-    if (!item) {
-      throw new NotFoundException(`Inventory item ${id} not found`);
-    }
-    await this.inventoryRepository.remove(item);
-    await this.clearMakeabilityCache();
-    return { message: 'Inventory item removed successfully' };
+    return this.dataSource.transaction(async (manager) => {
+      const item = await manager.findOne(BarInventory, { where: { id } });
+      if (!item) {
+        throw new NotFoundException(`Inventory item ${id} not found`);
+      }
+      await manager.remove(item);
+      await this.clearMakeabilityCache();
+      return { message: 'Inventory item removed successfully' };
+    });
   }
 
   async bulkAdd(dtos: AddBarInventoryDto[]) {
@@ -218,6 +196,20 @@ export class BarInventoryService {
           );
         }
 
+        if (dto.unit) {
+          if (
+            !this.unitConverter.canConvertBetween(
+              dto.unit,
+              ingredient.baseUnit,
+              ingredient,
+            )
+          ) {
+            throw new BadRequestException(
+              `Incompatible unit type: Ingredient "${ingredient.name}" expects unit compatible with base unit "${ingredient.baseUnit}".`,
+            );
+          }
+        }
+
         let normalizedQuantity = new Decimal(dto.quantity);
         if (dto.unit && dto.unit !== ingredient.baseUnit) {
           normalizedQuantity = this.unitConverter.convert(
@@ -230,12 +222,20 @@ export class BarInventoryService {
 
         const existing = await manager.findOne(BarInventory, {
           where: { ingredient: { id: dto.ingredientId } },
+          lock: { mode: 'pessimistic_write' },
         });
 
         if (existing) {
           existing.quantity = existing.quantity.plus(normalizedQuantity);
           results.push(await manager.save(existing));
         } else {
+          const currentCount = await manager.count(BarInventory);
+          if (currentCount >= 10000) {
+            throw new UnprocessableEntityException(
+              'Maximum inventory limit reached (10,000 distinct ingredients). Please consider removing unused items.',
+            );
+          }
+
           const newItem = manager.create(BarInventory, {
             ingredient,
             quantity: normalizedQuantity,
@@ -252,8 +252,10 @@ export class BarInventoryService {
   }
 
   async bulkDelete(ids: string[]) {
-    await this.inventoryRepository.delete(ids);
-    await this.clearMakeabilityCache();
-    return { message: `${ids.length} inventory items deleted` };
+    return this.dataSource.transaction(async (manager) => {
+      await manager.delete(BarInventory, ids);
+      await this.clearMakeabilityCache();
+      return { message: `${ids.length} inventory items deleted` };
+    });
   }
 }

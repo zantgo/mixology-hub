@@ -11,6 +11,7 @@ import {
 import { Expose } from 'class-transformer';
 import { User } from '../../users/entities/user.entity';
 import { Cocktail } from './cocktail.entity';
+import { ColumnFloatTransformer } from '../../utils/column-float.transformer';
 
 @Entity('cocktail_ratings')
 @Unique(['user', 'cocktail'])
@@ -35,7 +36,12 @@ export class CocktailRating {
   @Column({ name: 'cocktail_id', insert: false, update: false })
   cocktailId: string;
 
-  @Column({ type: 'decimal', precision: 3, scale: 2 })
+  @Column({
+    type: 'decimal',
+    precision: 3,
+    scale: 2,
+    transformer: new ColumnFloatTransformer(),
+  })
   @Expose()
   score: number;
 
