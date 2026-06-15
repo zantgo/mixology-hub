@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { Module, OnModuleInit, Logger } from '@nestjs/common';
+import { TypeOrmModule, InjectDataSource } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import { AddPgTrgm1746496000000 } from '../migrations/1746496000000-add-pg-trgm';
 import { FixArchitecturalInconsistencies1733702400000 } from '../migrations/1733702400000-fix-architectural-inconsistencies';
 import { AddMissingFkIndexes1781479542825 } from '../migrations/1781479542825-add-missing-fk-indexes';
@@ -19,9 +20,9 @@ import { AddMissingFkIndexes1781479542825 } from '../migrations/1781479542825-ad
         database: configService.get<string>('DB_NAME'),
         autoLoadEntities: true,
         synchronize:
-          configService.get<string>('DB_SYNCHRONIZE', 'false') === 'true',
+          configService.get<string>('DB_SYNCHRONIZE', 'true') === 'true',
         migrationsRun:
-          configService.get<string>('DB_MIGRATIONS_RUN', 'true') === 'true',
+          configService.get<string>('DB_MIGRATIONS_RUN', 'false') === 'true',
         migrations: [
           FixArchitecturalInconsistencies1733702400000,
           AddPgTrgm1746496000000,
@@ -29,8 +30,28 @@ import { AddMissingFkIndexes1781479542825 } from '../migrations/1781479542825-ad
         ],
         retryAttempts: 3,
         retryDelay: 3000,
+        extra: {
+          max: configService.get<number>('DB_POOL_SIZE', 20),
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 5000,
+        },
       }),
     }),
   ],
 })
-export class DatabaseModule {}
+export class DatabaseModule implements OnModuleInit {
+  private readonly logger = new Logger(DatabaseModule.name);
+
+  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+
+  async onModuleInit() {
+    try {
+      await this.dataSource.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+      this.logger.log('pg_trgm extension ensured');
+    } catch (err) {
+      this.logger.warn(
+        `pg_trgm not available: ${(err as Error).message} — fuzzy search will fall back`,
+      );
+    }
+  }
+}

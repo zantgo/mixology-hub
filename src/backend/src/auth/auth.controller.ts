@@ -12,6 +12,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { SkipCsrf } from './decorators/skip-csrf.decorator';
 import {
   ApiTags,
   ApiOperation,
@@ -96,6 +97,7 @@ export class AuthController {
     return { success: true, csrfToken };
   }
 
+  @SkipCsrf()
   @Public()
   @Post('refresh')
   @ApiOperation({ summary: 'Refresh access token' })

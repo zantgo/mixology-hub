@@ -2,20 +2,20 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
+# Match packageManager version from package.json
+RUN npm install -g npm@11.17.0 --loglevel=error
+
 # Copy configuration files and dependencies
 COPY package*.json ./
 
-# Install dependencies using legacy-peer-deps configuration
-RUN npm install
+# Install dependencies (suppress audit, fund, and deprecation warnings)
+RUN npm install --loglevel=error --no-audit --no-fund --legacy-peer-deps
 
 # Copy the rest of the code
 COPY . .
 
 # Compile NestJS
 RUN npm run build
-
-# Prune devDependencies before copying to production stage
-RUN npm prune --production
 
 # Stage 2: Production
 FROM node:22-alpine AS production

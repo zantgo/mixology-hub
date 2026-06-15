@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, Logger } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -7,6 +7,8 @@ import { BarInventory } from '../inventory/entities/bar-inventory.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { UtilsModule } from '../utils/utils.module';
+
+const logger = new Logger('BullMQ');
 
 const BarOrdersQueueModule = BullModule.registerQueue({
   name: 'bar-orders',
@@ -27,6 +29,14 @@ const BarOrdersQueueModule = BullModule.registerQueue({
         connection: {
           host: configService.get<string>('REDIS_HOST', 'redis'),
           port: configService.get<number>('REDIS_PORT', 6379),
+          maxRetriesPerRequest: null,
+          enableOfflineQueue: true,
+          retryStrategy: (times: number) => {
+            // eslint-disable-next-line no-restricted-syntax
+            const delay = Math.min(times * 200, 3000);
+            logger.warn(`Redis retry attempt ${times}, waiting ${delay}ms`);
+            return delay;
+          },
         },
       }),
     }),

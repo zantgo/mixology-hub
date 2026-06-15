@@ -1,4 +1,4 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, Logger } from '@nestjs/common';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { redisStore } from 'cache-manager-redis-yet';
@@ -13,8 +13,16 @@ import { CacheInvalidationService } from './cache-invalidation.service';
       useFactory: async (configService: ConfigService) => ({
         store: await redisStore({
           socket: {
-            host: configService.get<string>('REDIS_HOST'),
-            port: configService.get<number>('REDIS_PORT'),
+            host: configService.get<string>('REDIS_HOST', 'redis'),
+            port: configService.get<number>('REDIS_PORT', 6379),
+            reconnectStrategy: (retries: number) => {
+              const delay = Math.min(retries * 200, 3000);
+              Logger.warn(
+                `Redis reconnecting in ${delay}ms (attempt ${retries})`,
+                'RedisCache',
+              );
+              return delay;
+            },
           },
           ttl: 600000,
         }),

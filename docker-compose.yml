@@ -19,6 +19,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: mixology_redis
+    command: redis-server --save "" --appendonly no --loglevel nothing
     ports:
       - "6379:6379"
     healthcheck:
