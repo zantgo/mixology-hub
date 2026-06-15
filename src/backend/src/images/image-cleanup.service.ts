@@ -36,14 +36,20 @@ export class ImageCleanupService {
     const webpFiles = filesOnDisk.filter((f) => f.endsWith('.webp'));
     if (webpFiles.length === 0) return;
 
-    const cocktails = await this.cocktailRepository.find({
-      select: ['imageFull', 'imageThumb'],
-    });
+    const cocktails = await this.cocktailRepository
+      .createQueryBuilder('cocktail')
+      .select(['cocktail.image_full', 'cocktail.image_thumb'])
+      .getRawMany<{
+        cocktail_image_full: string | null;
+        cocktail_image_thumb: string | null;
+      }>();
 
     const referenced = new Set<string>();
     for (const c of cocktails) {
-      if (c.imageFull) referenced.add(path.basename(c.imageFull));
-      if (c.imageThumb) referenced.add(path.basename(c.imageThumb));
+      if (c.cocktail_image_full)
+        referenced.add(path.basename(c.cocktail_image_full));
+      if (c.cocktail_image_thumb)
+        referenced.add(path.basename(c.cocktail_image_thumb));
     }
 
     let deletedCount = 0;

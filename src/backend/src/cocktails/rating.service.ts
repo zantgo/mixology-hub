@@ -239,4 +239,50 @@ export class RatingService {
       ratingCount: count,
     };
   }
+
+  async migrateExternalRating(
+    userId: string,
+    externalId: string,
+    localCocktailId: string,
+  ): Promise<void> {
+    const externalRating = await this.externalRatingRepository.findOne({
+      where: { user: { id: userId }, externalCocktailId: externalId },
+    });
+    if (!externalRating) return;
+
+    try {
+      const existing = await this.ratingRepository.findOne({
+        where: { user: { id: userId }, cocktail: { id: localCocktailId } },
+      });
+      if (existing) {
+        existing.score = externalRating.score;
+        await this.ratingRepository.save(existing);
+      } else {
+        const newRating = this.ratingRepository.create({
+          user: { id: userId } as User,
+          cocktail: { id: localCocktailId } as Cocktail,
+          score: externalRating.score,
+        });
+        await this.ratingRepository.save(newRating);
+      }
+      await this.externalRatingRepository.remove(externalRating);
+      this.logger.log(
+        `Migrated external rating for user ${userId} from external ${externalId} to local cocktail ${localCocktailId}`,
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        (error as any)?.code === '23505' ||
+        message.includes('unique') ||
+        message.includes('duplicate')
+      ) {
+        await this.externalRatingRepository.remove(externalRating);
+        this.logger.log(
+          `Silently resolved rating migration collision for user ${userId} and cocktail ${localCocktailId}`,
+        );
+      } else {
+        throw error;
+      }
+    }
+  }
 }

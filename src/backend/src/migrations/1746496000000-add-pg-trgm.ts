@@ -6,15 +6,19 @@ export class AddPgTrgm1746496000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
 
-    await queryRunner.query(
-      `CREATE INDEX IF NOT EXISTS idx_ingredients_name_trgm
-       ON ingredients USING gin (normalized_name gin_trgm_ops)`,
-    );
+    if (await queryRunner.hasTable('ingredients')) {
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS idx_ingredients_name_trgm
+         ON ingredients USING gin (normalized_name gin_trgm_ops)`,
+      );
+    }
 
-    await queryRunner.query(
-      `CREATE INDEX IF NOT EXISTS idx_cocktails_name_trgm
-       ON cocktails USING gin (name gin_trgm_ops)`,
-    );
+    if (await queryRunner.hasTable('cocktails')) {
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS idx_cocktails_name_trgm
+         ON cocktails USING gin (name gin_trgm_ops)`,
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

@@ -1,10 +1,47 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/stores/auth.store';
 import { UiStore } from '../../core/stores/ui.store';
 import { ButtonComponent } from '../../shared/components/button/button.component';
 import { IconComponent } from '../../shared/components/icon/icon.component';
+
+function validatePassword(value: string): string[] {
+  const errors: string[] = [];
+  if (!value) return errors;
+
+  if (value.length < 8) {
+    errors.push('At least 8 characters');
+  }
+  if (value.length > 128) {
+    errors.push('At most 128 characters');
+  }
+  if (new Set(value).size < 5) {
+    errors.push('At least 5 unique characters');
+  }
+
+  const hasUpper = /[A-Z]/.test(value);
+  const hasLower = /[a-z]/.test(value);
+  const hasDigit = /\d/.test(value);
+  const hasSpecial = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(value);
+  const classCount = [hasUpper, hasLower, hasDigit, hasSpecial].filter(Boolean).length;
+  if (classCount < 3) {
+    errors.push('Include at least 3 of: uppercase, lowercase, digit, special character');
+  }
+
+  if (/(.)\1{3,}/.test(value)) {
+    errors.push('No 4 repeating characters in a row');
+  }
+  if (
+    /(?:abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz|012|123|234|345|456|567|678|789)/i.test(
+      value,
+    )
+  ) {
+    errors.push('No sequential characters (e.g., abc, 123)');
+  }
+
+  return errors;
+}
 
 @Component({
   selector: 'app-register-page',
@@ -55,11 +92,18 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
               class="form-input"
               [(ngModel)]="password"
               name="password"
-              placeholder="Choose a strong password"
+              placeholder="At least 8 characters, mixed types"
               [disabled]="authStore.loading()"
               required
-              minlength="6"
+              minlength="8"
             />
+            @if (passwordErrors().length > 0) {
+              <ul class="password-errors">
+                @for (err of passwordErrors(); track err) {
+                  <li>{{ err }}</li>
+                }
+              </ul>
+            }
           </div>
 
           @if (authStore.error()) {
@@ -69,9 +113,7 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
           <app-button
             type="submit"
             [loading]="authStore.loading()"
-            [disabled]="
-              !email.trim() || !password.trim() || password.length < 6 || authStore.loading()
-            "
+            [disabled]="!email.trim() || passwordErrors().length > 0 || authStore.loading()"
             style="width: 100%;"
           >
             Create Account
@@ -162,6 +204,18 @@ import { IconComponent } from '../../shared/components/icon/icon.component';
         margin: 0;
       }
 
+      .password-errors {
+        margin: var(--space-1) 0 0 0;
+        padding-left: var(--space-4);
+        color: var(--color-warning);
+        font-size: var(--font-size-caption);
+        list-style: disc;
+
+        li {
+          margin-bottom: var(--space-1);
+        }
+      }
+
       .auth-footer {
         text-align: center;
         margin-top: var(--space-6);
@@ -189,6 +243,8 @@ export class RegisterPage {
   displayName = '';
   email = '';
   password = '';
+
+  readonly passwordErrors = computed(() => validatePassword(this.password));
 
   onSubmit(): void {
     if (!this.email.trim() || !this.password.trim()) return;

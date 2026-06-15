@@ -76,6 +76,7 @@ describe('CocktailAggregatorService', () => {
   beforeEach(() => {
     localService = {
       findAll: jest.fn(),
+      searchByName: jest.fn().mockResolvedValue({ data: [] }),
     };
 
     cocktailDbService = {
@@ -154,7 +155,9 @@ describe('CocktailAggregatorService', () => {
 
     it('should fetch fresh results on cache miss', async () => {
       cacheManager.get.mockResolvedValue(null);
-      localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
+      localService.searchByName.mockResolvedValue({
+        data: [mockLocalCocktail],
+      });
       cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
@@ -207,7 +210,9 @@ describe('CocktailAggregatorService', () => {
 
     it('should include local and external sources in metadata', async () => {
       cacheManager.get.mockResolvedValue(null);
-      localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
+      localService.searchByName.mockResolvedValue({
+        data: [mockLocalCocktail],
+      });
       cocktailDbService.getRandomCocktail.mockResolvedValue(null);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
@@ -256,7 +261,7 @@ describe('CocktailAggregatorService', () => {
   describe('mapExternalToLocal (via search)', () => {
     it('should correctly map external drink to local format', async () => {
       cacheManager.get.mockResolvedValue(null);
-      localService.findAll.mockResolvedValue({ data: [] });
+      localService.searchByName.mockResolvedValue({ data: [] });
       cocktailDbService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
@@ -484,7 +489,7 @@ describe('CocktailAggregatorService', () => {
   describe('external images', () => {
     it('should return null images for external cocktails', async () => {
       cacheManager.get.mockResolvedValue(null);
-      localService.findAll.mockResolvedValue({ data: [] });
+      localService.searchByName.mockResolvedValue({ data: [] });
       cocktailDbService.searchByName.mockResolvedValue([mockExternalDrink]);
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
@@ -503,7 +508,9 @@ describe('CocktailAggregatorService', () => {
   describe('makeability sort optimization', () => {
     it('should skip external API calls when sorting by makeability', async () => {
       cacheManager.get.mockResolvedValue(null);
-      localService.findAll.mockResolvedValue({ data: [mockLocalCocktail] });
+      localService.searchByName.mockResolvedValue({
+        data: [mockLocalCocktail],
+      });
       inventoryService.getInventory.mockResolvedValue({ data: [] });
 
       await service.searchUnified(

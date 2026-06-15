@@ -210,8 +210,11 @@ export class BarInventoryService {
 
   async bulkAdd(dtos: AddBarInventoryDto[]) {
     return this.dataSource.transaction(async (manager) => {
+      const sortedDtos = [...dtos].sort((a, b) =>
+        a.ingredientId.localeCompare(b.ingredientId),
+      );
       const results: BarInventory[] = [];
-      for (const dto of dtos) {
+      for (const dto of sortedDtos) {
         const ingredient = await manager.findOne(Ingredient, {
           where: { id: dto.ingredientId },
         });
@@ -288,7 +291,7 @@ export class BarInventoryService {
         .andWhere('log.createdAt > :cutoff', { cutoff: fifteenMinutesAgo })
         .andWhere(
           `EXISTS (
-             SELECT 1 FROM jsonb_array_elements(log.deductedIngredients) AS e
+             SELECT 1 FROM jsonb_array_elements(COALESCE(log.deductedIngredients, '[]'::jsonb)) AS e
              WHERE e->>'ingredientId' IN (
                SELECT bi.ingredient_id FROM bar_inventory bi WHERE bi.id = ANY(:ids)
              )

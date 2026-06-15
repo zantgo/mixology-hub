@@ -131,30 +131,26 @@ export class AuthService {
       where: { email: loginDto.email },
     });
 
+    if (user?.accountLockedUntil && user.accountLockedUntil > new Date()) {
+      throw new ForbiddenException(
+        'Account is temporarily locked due to too many failed attempts',
+      );
+    }
+
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
       user ? user.passwordHash : DUMMY_BCRYPT_HASH,
     );
 
     if (!user || !isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    // Check if account is locked
-    if (user.accountLockedUntil && user.accountLockedUntil > new Date()) {
-      throw new ForbiddenException(
-        'Account is temporarily locked due to too many failed attempts',
-      );
-    }
-
-    // Track failed attempts if password was wrong
-    if (!isPasswordValid) {
-      user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
-      if (user.failedLoginAttempts >= 5) {
-        user.accountLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
-        user.failedLoginAttempts = 0;
+      if (user) {
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        if (user.failedLoginAttempts >= 5) {
+          user.accountLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+          user.failedLoginAttempts = 0;
+        }
+        await this.userRepository.save(user);
       }
-      await this.userRepository.save(user);
       throw new UnauthorizedException('Invalid credentials');
     }
 

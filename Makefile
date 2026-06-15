@@ -3,7 +3,7 @@ YELLOW=\033[1;33m
 RED=\033[0;31m
 NC=\033[0m 
 
-.PHONY: help start stop clean rebuild logs test-backend test-frontend test-e2e setup
+.PHONY: help start stop clean rebuild logs test-backend test-frontend test-e2e setup check-deps
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -33,9 +33,22 @@ rebuild:
 logs:
 	docker compose logs -f
 
-test-backend:
+# -------------------------------------------------------------------
+# Dependency integrity check: compare mounted package.json against
+# the container's node_modules. Fails with a clear message if drift
+# is detected (e.g. a dependency was added to package.json but the
+# Docker image has not been rebuilt).
+# -------------------------------------------------------------------
+check-deps:
+	@echo "$(YELLOW)Checking dependency integrity...$(NC)"
+	@docker compose run --rm \
+		-v $$(pwd)/src/backend/package.json:/app/package.json \
+		-v $$(pwd)/scripts/check-deps.mjs:/app/check-deps.mjs \
+		backend node /app/check-deps.mjs
+
+test-backend: check-deps
 	@echo "$(GREEN)Running Backend Tests in Docker...$(NC)"
-	docker compose run --rm \
+	@docker compose run --rm \
 		-v $$(pwd)/src/backend/src:/app/src \
 		-v $$(pwd)/src/backend/package.json:/app/package.json \
 		-v $$(pwd)/src/backend/tsconfig.json:/app/tsconfig.json \
@@ -44,11 +57,11 @@ test-backend:
 
 test-frontend:
 	@echo "$(GREEN)Running Frontend Tests...$(NC)"
-	cd src/frontend && npm run test:ci
+	cd src/frontend && timeout 120 npm run test:ci || (echo "$(RED)Frontend tests timed out after 120s$(NC)" && exit 1)
 
 test-e2e:
 	@echo "$(GREEN)Running Backend E2E Tests...$(NC)"
-	cd src/backend && npm run test:e2e
+	cd src/backend && timeout 120 npm run test:e2e || (echo "$(RED)E2E tests timed out after 120s$(NC)" && exit 1)
 
-test: test-backend test-frontend
+test: test-backend test-frontend test-e2e
 	@echo "$(GREEN)All tests completed successfully.$(NC)"

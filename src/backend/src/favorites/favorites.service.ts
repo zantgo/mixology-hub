@@ -3,9 +3,11 @@ import {
   NotFoundException,
   Logger,
   BadRequestException,
-  forwardRef,
   Inject,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateFavoriteDto } from './dto/create-favorite.dto';
@@ -14,7 +16,7 @@ import { User } from '../users/entities/user.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { HiddenExternalCocktail } from '../cocktails/entities/hidden-external-cocktail.entity';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
+import { COCKTAIL_EVENTS } from '../common/events/cocktail-events';
 import { isValidUUID } from '../utils/uuid-validator';
 
 @Injectable()
@@ -29,8 +31,8 @@ export class FavoritesService {
     private readonly cocktailRepository: Repository<Cocktail>,
     @InjectRepository(HiddenExternalCocktail)
     private readonly hiddenRepository: Repository<HiddenExternalCocktail>,
-    @Inject(forwardRef(() => CocktailAggregatorService))
-    private readonly aggregatorService: CocktailAggregatorService,
+    private readonly eventEmitter: EventEmitter2,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async countFavorites(cocktailId: string): Promise<number> {
@@ -70,12 +72,25 @@ export class FavoritesService {
     let externalName: string | null = null;
     if (dto.externalCocktailId) {
       try {
-        const external = await this.aggregatorService.getExternalCocktailById(
+        const results = await this.eventEmitter.emitAsync(
+          COCKTAIL_EVENTS.GET_EXTERNAL_BY_ID,
           dto.externalCocktailId,
         );
+        const external = results?.[0];
+        if (!external) {
+          throw new NotFoundException(
+            `External cocktail with ID ${dto.externalCocktailId} not found`,
+          );
+        }
         externalName = external?.name || null;
-      } catch {
-        // Best-effort: hydrate name later during find operations
+      } catch (error: unknown) {
+        if (error instanceof NotFoundException) throw error;
+        this.logger.warn(
+          `Failed to resolve external cocktail ${dto.externalCocktailId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        throw new NotFoundException(
+          `External cocktail with ID ${dto.externalCocktailId} not found`,
+        );
       }
     }
 
@@ -152,18 +167,33 @@ export class FavoritesService {
 
     const results: { id: string; cocktail: unknown }[] = [];
     if (externalIds.length > 0) {
-      const hydrations = await Promise.all(
-        externalIds.map(async (id) => {
-          try {
-            const cocktail =
-              await this.aggregatorService.getExternalCocktailById(id);
-            return { id, cocktail };
-          } catch {
-            return { id, cocktail: null };
-          }
-        }),
-      );
-      results.push(...hydrations);
+      for (let i = 0; i < externalIds.length; i += 3) {
+        const batch = externalIds.slice(i, i + 3);
+        const hydrations = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              const cacheKey = `external-cocktail:${id}`;
+              const cached = await this.cacheManager.get<unknown>(cacheKey);
+              if (cached) {
+                return { id, cocktail: cached };
+              }
+              const eventResults = await this.eventEmitter.emitAsync(
+                COCKTAIL_EVENTS.GET_EXTERNAL_BY_ID,
+                id,
+                hiddenIds,
+              );
+              const cocktail = eventResults?.[0];
+              if (cocktail) {
+                await this.cacheManager.set(cacheKey, cocktail, 600_000);
+              }
+              return { id, cocktail };
+            } catch {
+              return { id, cocktail: null };
+            }
+          }),
+        );
+        results.push(...hydrations);
+      }
     }
 
     const cocktailMap = new Map(

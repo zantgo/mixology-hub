@@ -2,17 +2,17 @@ import {
   Injectable,
   Logger,
   Inject,
-  forwardRef,
   BadRequestException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Decimal } from 'decimal.js';
 import { BarInventoryService } from './bar-inventory.service';
-import { CocktailsService } from '../cocktails/cocktails.service';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { UnitConverterService } from '../utils/unit-converter.service';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { COCKTAIL_EVENTS } from '../common/events/cocktail-events';
 
 export type MakeabilityVerdict = 'makeable' | 'almost' | 'unmakeable';
 
@@ -26,6 +26,7 @@ export interface MakeableCocktail {
   ingredients: any[];
   makeability: MakeabilityVerdict;
   missingIngredients: string[];
+  insufficientIngredients: string[];
   matchScore: number;
 }
 
@@ -36,8 +37,7 @@ export class MakeabilityService {
 
   constructor(
     private readonly inventoryService: BarInventoryService,
-    @Inject(forwardRef(() => CocktailsService))
-    private readonly cocktailsService: CocktailsService,
+    private readonly eventEmitter: EventEmitter2,
     private readonly hierarchicalService: HierarchicalIngredientService,
     private readonly unitConverter: UnitConverterService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
@@ -50,13 +50,21 @@ export class MakeabilityService {
     const cached = await this.cacheManager.get<any>(cacheKey);
     if (cached) return cached;
 
-    const [inventoryResult, cocktailsResult] = await Promise.all([
+    const [inventoryResult, cocktailsResults] = await Promise.all([
       this.inventoryService.getInventory({ limit: 9999, page: 1 }),
-      this.cocktailsService.findAll({ limit: this.MAX_ITERATIONS, page: 1 }),
+      this.eventEmitter.emitAsync(COCKTAIL_EVENTS.FIND_ALL, {
+        limit: this.MAX_ITERATIONS,
+        page: 1,
+      }),
     ]);
 
+    const cocktailsResult =
+      cocktailsResults && cocktailsResults.length > 0
+        ? cocktailsResults[0]
+        : { data: [] };
+
     const inventoryItems = (inventoryResult as any).data || [];
-    const allCocktails = (cocktailsResult as any).data || [];
+    const allCocktails = cocktailsResult.data || [];
 
     // eslint-disable-next-line no-restricted-syntax
     const offset = (page - 1) * limit;
@@ -140,6 +148,7 @@ export class MakeabilityService {
   ): Promise<MakeableCocktail> {
     const ingredients: any[] = cocktail.ingredients || [];
     const missingIngredients: string[] = [];
+    const insufficientIngredients: string[] = [];
     let matchedCount = new Decimal(0);
 
     const partSize = new Decimal(30);
@@ -182,6 +191,9 @@ export class MakeabilityService {
         }
         if (directMatch.quantity && directMatch.quantity.gte(requiredAmount)) {
           matchedCount = matchedCount.plus(1);
+          found = true;
+        } else if (directMatch.quantity) {
+          insufficientIngredients.push(ci.ingredient.name);
           found = true;
         }
       }
@@ -227,6 +239,9 @@ export class MakeabilityService {
               if (substituteInInventory.quantity?.gte(requiredAmount)) {
                 matchedCount = matchedCount.plus(match.confidence);
                 found = true;
+              } else if (substituteInInventory.quantity) {
+                insufficientIngredients.push(ci.ingredient.name);
+                found = true;
               }
             }
           }
@@ -261,6 +276,7 @@ export class MakeabilityService {
       ingredients: cocktail.ingredients,
       makeability,
       missingIngredients,
+      insufficientIngredients,
       matchScore: (() => {
         // eslint-disable-next-line no-restricted-syntax
         return Math.round(score * 100) / 100;

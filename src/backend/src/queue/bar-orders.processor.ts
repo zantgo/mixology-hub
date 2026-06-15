@@ -149,13 +149,15 @@ export class BarOrdersProcessor extends WorkerHost {
           for (const id of info.ids) allDescendantIds.add(id);
         }
 
+        const sortedDescendantIds = [...allDescendantIds].sort();
+
         let allStock: BarInventory[];
-        if (allDescendantIds.size > 0) {
+        if (sortedDescendantIds.length > 0) {
           allStock = await transactionalEntityManager
             .createQueryBuilder(BarInventory, 'bi')
             .innerJoinAndSelect('bi.ingredient', 'ingredient')
             .where('bi.ingredient_id IN (:...ids)', {
-              ids: [...allDescendantIds],
+              ids: sortedDescendantIds,
             })
             .setLock('pessimistic_write')
             .getMany();
@@ -213,6 +215,13 @@ export class BarOrdersProcessor extends WorkerHost {
               req.ingredient.baseUnit,
               req.ingredient,
             );
+          } else if (
+            !this.unitConverter.areUnitsCompatible(
+              req.unit,
+              req.ingredient.baseUnit,
+            )
+          ) {
+            totalAmount = new Decimal(0);
           } else {
             const safeAmount = req.amount ? req.amount : new Decimal(0);
             const amountPerServing = this.unitConverter.convert(
@@ -428,11 +437,37 @@ export class BarOrdersProcessor extends WorkerHost {
         log.status = 'evaluating';
         await tx.save(log);
 
-        const allStock = await tx
-          .createQueryBuilder(BarInventory, 'bi')
-          .innerJoinAndSelect('bi.ingredient', 'ingredient')
-          .setLock('pessimistic_write')
-          .getMany();
+        const targetIngredientIds = new Set<string>();
+        for (const order of batchOrders) {
+          const cocktail = await tx.findOne(Cocktail, {
+            where: { id: order.cocktailId },
+            relations: ['ingredients'],
+          });
+          if (!cocktail) {
+            log.status = 'failed_other';
+            await tx.save(log);
+            throw new Error(`Cocktail ${order.cocktailId} not found in batch`);
+          }
+          for (const ing of cocktail.ingredients) {
+            if (ing.ingredient?.id) {
+              targetIngredientIds.add(ing.ingredient.id);
+            }
+          }
+        }
+
+        const sortedTargetIds = [...targetIngredientIds].sort();
+
+        const allStock =
+          sortedTargetIds.length > 0
+            ? await tx
+                .createQueryBuilder(BarInventory, 'bi')
+                .innerJoinAndSelect('bi.ingredient', 'ingredient')
+                .where('bi.ingredient_id IN (:...ids)', {
+                  ids: sortedTargetIds,
+                })
+                .setLock('pessimistic_write')
+                .getMany()
+            : [];
 
         const remainingStock = new Map(
           allStock.map((row) => [row.id, { row, quantity: row.quantity }]),
@@ -496,6 +531,13 @@ export class BarOrdersProcessor extends WorkerHost {
                 req.ingredient.baseUnit,
                 req.ingredient,
               );
+            } else if (
+              !this.unitConverter.areUnitsCompatible(
+                req.unit,
+                req.ingredient.baseUnit,
+              )
+            ) {
+              totalAmount = new Decimal(0);
             } else {
               const safeAmount = req.amount ? req.amount : new Decimal(0);
               const amountPerServing = this.unitConverter.convert(
@@ -876,13 +918,26 @@ export class BarOrdersProcessor extends WorkerHost {
           );
 
           if (!barStock) {
-            barStock = transactionalEntityManager.create(BarInventory, {
-              id: rowId,
-              ingredient,
-              quantity: new Decimal(amount),
-              expirationDate: null,
+            barStock = await transactionalEntityManager.findOne(BarInventory, {
+              where: { ingredient: { id: ingredientId } },
             });
-            await transactionalEntityManager.save(barStock);
+
+            if (barStock) {
+              await transactionalEntityManager
+                .createQueryBuilder()
+                .update(BarInventory)
+                .set({ quantity: () => 'quantity + :amount' })
+                .where('id = :id', { id: barStock.id })
+                .setParameter('amount', amount)
+                .execute();
+            } else {
+              barStock = transactionalEntityManager.create(BarInventory, {
+                ingredient,
+                quantity: new Decimal(amount),
+                expirationDate: null,
+              });
+              await transactionalEntityManager.save(barStock);
+            }
           } else {
             await transactionalEntityManager
               .createQueryBuilder()

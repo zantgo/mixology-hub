@@ -14,7 +14,6 @@ npm-debug.log
 npm-debug.log.*
 yarn-error.log
 yarn-debug.log*
-package-lock.json
 
 # ========================
 # Compilación (NestJS / Angular)

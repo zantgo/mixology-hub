@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BarInventory } from './entities/bar-inventory.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
@@ -8,7 +8,6 @@ import { BarInventoryController } from './bar-inventory.controller';
 import { UtilsModule } from '../utils/utils.module';
 import { AuthModule } from '../auth/auth.module';
 import { IngredientsModule } from '../ingredients/ingredients.module';
-import { CocktailsModule } from '../cocktails/cocktails.module';
 
 @Module({
   imports: [
@@ -16,7 +15,6 @@ import { CocktailsModule } from '../cocktails/cocktails.module';
     UtilsModule,
     AuthModule,
     IngredientsModule,
-    forwardRef(() => CocktailsModule),
   ],
   controllers: [BarInventoryController],
   providers: [BarInventoryService, MakeabilityService],

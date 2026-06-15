@@ -4,6 +4,16 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 
+const getCsrfHeaders = async (appServer: any) => {
+  const res = await request(appServer).get('/auth/csrf');
+  const csrfToken = res.body.csrfToken;
+  const cookies = res.headers['set-cookie'];
+  return {
+    headers: { 'X-CSRF-Token': csrfToken },
+    cookies,
+  };
+};
+
 describe('App (e2e)', () => {
   let app: INestApplication<App>;
 
@@ -39,16 +49,22 @@ describe('App (e2e)', () => {
       });
   });
 
-  it('POST /auth/register should reject weak password', () => {
+  it('POST /auth/register should reject weak password', async () => {
+    const { headers, cookies } = await getCsrfHeaders(app.getHttpServer());
     return request(app.getHttpServer())
       .post('/auth/register')
+      .set(headers)
+      .set('Cookie', cookies)
       .send({ email: 'test@example.com', password: 'weak' })
       .expect(400);
   });
 
-  it('POST /auth/login should return 401 for unknown user', () => {
+  it('POST /auth/login should return 401 for unknown user', async () => {
+    const { headers, cookies } = await getCsrfHeaders(app.getHttpServer());
     return request(app.getHttpServer())
       .post('/auth/login')
+      .set(headers)
+      .set('Cookie', cookies)
       .send({ email: 'nonexistent@example.com', password: 'Password123!' })
       .expect(401);
   });

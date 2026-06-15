@@ -1,6 +1,10 @@
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe, ClassSerializerInterceptor } from '@nestjs/common';
+import {
+  ValidationPipe,
+  ClassSerializerInterceptor,
+  BadRequestException,
+} from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
@@ -52,6 +56,24 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
+      },
+      exceptionFactory: (errors) => {
+        const mapped = errors.map((error) => ({
+          field: error.property,
+          constraints: error.constraints ?? null,
+          children:
+            error.children && error.children.length > 0
+              ? error.children.map((child) => ({
+                  field: child.property,
+                  constraints: child.constraints ?? null,
+                }))
+              : undefined,
+        }));
+        return new BadRequestException({
+          message: 'Validation failed',
+          statusCode: 400,
+          errors: mapped,
+        });
       },
     }),
   );

@@ -345,8 +345,12 @@ export class GdprDataRetentionService {
         { createdBy: null },
       ),
       this.favoriteRepository.delete({ user: { id: userId } }),
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      this.aiRepository.update({ user: { id: userId } }, { user: null } as any),
+      this.aiRepository
+        .createQueryBuilder()
+        .update()
+        .set({ user: null as unknown as undefined })
+        .where('created_by = :userId', { userId })
+        .execute(),
       this.quotaRepository.delete({ user: { id: userId } }),
       this.refreshTokenRepository.delete({ userId }),
     ]);

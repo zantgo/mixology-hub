@@ -1,12 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FavoritesService } from './favorites.service';
 import { Favorite } from './entities/favorite.entity';
 import { User } from '../users/entities/user.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { HiddenExternalCocktail } from '../cocktails/entities/hidden-external-cocktail.entity';
-import { CocktailAggregatorService } from '../cocktails/cocktail-aggregator.service';
 
 describe('FavoritesService', () => {
   let service: FavoritesService;
@@ -14,7 +15,8 @@ describe('FavoritesService', () => {
   let userRepo: any;
   let cocktailRepo: any;
   let hiddenRepo: any;
-  let aggregatorService: any;
+  let eventEmitter: any;
+  let cacheManager: any;
 
   const mockUser = { id: 'user-1', email: 'test@example.com' };
   const mockCocktail = {
@@ -37,7 +39,14 @@ describe('FavoritesService', () => {
     userRepo = { findOne: jest.fn() };
     cocktailRepo = { findOne: jest.fn() };
     hiddenRepo = { find: jest.fn().mockResolvedValue([]) };
-    aggregatorService = { getExternalCocktailById: jest.fn() };
+    eventEmitter = {
+      emitAsync: jest.fn().mockResolvedValue([]),
+    };
+    cacheManager = {
+      get: jest.fn().mockResolvedValue(undefined),
+      set: jest.fn().mockResolvedValue(undefined),
+      del: jest.fn().mockResolvedValue(undefined),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -49,7 +58,8 @@ describe('FavoritesService', () => {
           provide: getRepositoryToken(HiddenExternalCocktail),
           useValue: hiddenRepo,
         },
-        { provide: CocktailAggregatorService, useValue: aggregatorService },
+        { provide: EventEmitter2, useValue: eventEmitter },
+        { provide: CACHE_MANAGER, useValue: cacheManager },
       ],
     }).compile();
 
@@ -100,6 +110,7 @@ describe('FavoritesService', () => {
 
     it('should create external cocktail favorite', async () => {
       userRepo.findOne.mockResolvedValue(mockUser);
+      eventEmitter.emitAsync.mockResolvedValue([{ name: 'Margarita' }]);
       favoriteRepo.create.mockReturnValue({ externalCocktailId: '123' });
       favoriteRepo.save.mockResolvedValue({
         id: 'fav-2',
@@ -141,10 +152,12 @@ describe('FavoritesService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([mockFavorites, 2]),
       };
       favoriteRepo.createQueryBuilder.mockReturnValue(mockQb);
-      aggregatorService.getExternalCocktailById.mockResolvedValue({
-        name: 'External Drink',
-        ingredients: [],
-      });
+      eventEmitter.emitAsync.mockResolvedValue([
+        {
+          name: 'External Drink',
+          ingredients: [],
+        },
+      ]);
 
       const result = await service.findAll('user-1', { page: 1, limit: 10 });
 

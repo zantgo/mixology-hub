@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HttpModule } from '@nestjs/axios';
 import { CocktailsService } from './cocktails.service';
@@ -41,8 +41,8 @@ import { FavoritesModule } from '../favorites/favorites.module';
     HttpModule,
     ExternalModule,
     IngredientsModule,
-    forwardRef(() => InventoryModule),
-    forwardRef(() => FavoritesModule),
+    InventoryModule,
+    FavoritesModule,
   ],
   controllers: [CocktailsController],
   providers: [

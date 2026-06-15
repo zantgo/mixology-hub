@@ -100,11 +100,10 @@ export class SeederService implements OnModuleInit {
       return;
     }
 
-    const seedPath = path.join(__dirname, 'seeds', 'ingredients-seed.json');
     let ingredients: SeedIngredient[];
 
     try {
-      const raw = await fs.readFile(seedPath, 'utf-8');
+      const raw = await this.readSeedFile();
       ingredients = JSON.parse(raw);
     } catch (err: any) {
       this.logger.error(`Failed to load ingredients seed file: ${err.message}`);
@@ -131,6 +130,25 @@ export class SeederService implements OnModuleInit {
     this.logger.log(
       `Seeded ${entities.length} global ingredients successfully.`,
     );
+  }
+
+  private async readSeedFile(): Promise<string> {
+    const seedFileName = 'ingredients-seed.json';
+
+    const paths = [
+      path.resolve(__dirname, '..', '..', 'database', 'seeds', seedFileName),
+      path.resolve(__dirname, 'seeds', seedFileName),
+    ];
+
+    for (const p of paths) {
+      try {
+        return await fs.readFile(p, 'utf-8');
+      } catch {
+        // try next path
+      }
+    }
+
+    throw new Error(`Seed file not found at any of: ${paths.join(', ')}`);
   }
 
   private async seedSystemSettings(): Promise<void> {

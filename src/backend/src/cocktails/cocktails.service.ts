@@ -3,10 +3,9 @@ import {
   NotFoundException,
   InternalServerErrorException,
   BadRequestException,
-  Inject,
-  forwardRef,
   Logger,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -25,9 +24,11 @@ import { CocktailDbService } from '../external/the-cocktail-db/cocktail-db.servi
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { MeasureParserService } from '../utils/measure-parser.service';
 import { FavoritesService } from '../favorites/favorites.service';
+import { RatingService } from './rating.service';
 import { ImageService } from '../images/image.service';
 import { CacheInvalidationService } from '../redis-cache/cache-invalidation.service';
 import { isValidUUID } from '../utils/uuid-validator';
+import { COCKTAIL_EVENTS } from '../common/events/cocktail-events';
 import type { CocktailDbDrink } from './cocktail-aggregator.service';
 
 @Injectable()
@@ -49,8 +50,8 @@ export class CocktailsService {
     private readonly cocktailDbService: CocktailDbService,
     private readonly hierarchicalIngredientService: HierarchicalIngredientService,
     private readonly measureParser: MeasureParserService,
-    @Inject(forwardRef(() => FavoritesService))
     private readonly favoritesService: FavoritesService,
+    private readonly ratingService: RatingService,
     private readonly imageService: ImageService,
     private readonly cacheInvalidation: CacheInvalidationService,
   ) {}
@@ -154,7 +155,11 @@ export class CocktailsService {
   ) {
     let totalVolumeMlDecimal: Decimal | undefined;
     if (totalVolumeMl !== undefined && totalVolumeMl.trim() !== '') {
-      totalVolumeMlDecimal = new Decimal(totalVolumeMl);
+      try {
+        totalVolumeMlDecimal = new Decimal(totalVolumeMl);
+      } catch {
+        throw new BadRequestException('Total volume must be a valid number');
+      }
       if (totalVolumeMlDecimal.isNaN() || totalVolumeMlDecimal.lte(0)) {
         throw new BadRequestException('Total volume must be a positive number');
       }
@@ -277,6 +282,10 @@ export class CocktailsService {
 
         await this.favoritesService
           .migrateFavoritePointer(bartenderId, cleanExternalId, cocktail.id)
+          .catch(() => {});
+
+        await this.ratingService
+          .migrateExternalRating(bartenderId, cleanExternalId, cocktail.id)
           .catch(() => {});
       }
     }
@@ -663,5 +672,13 @@ export class CocktailsService {
     const saved = await this.cocktailRepository.save(cocktail);
     await this.cacheInvalidation.clearByPatterns(['search:*', 'makeability:*']);
     return saved;
+  }
+
+  @OnEvent(COCKTAIL_EVENTS.FIND_ALL)
+  async handleFindAll(payload: { limit?: number; page?: number }) {
+    return this.findAll({
+      limit: payload.limit ?? 100,
+      page: payload.page ?? 1,
+    });
   }
 }

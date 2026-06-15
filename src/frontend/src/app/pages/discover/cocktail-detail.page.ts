@@ -96,10 +96,10 @@ import { environment } from '../../../environments/environment';
         <section class="detail-section">
           <h3 class="section-title">Ingredients</h3>
           <ul class="ingredients-list">
-            @for (ing of cocktail()!.ingredients; track ing.ingredient?.id || $index) {
-              <li class="ingredient-item" [class.missing]="isMissing(ing.ingredient?.name)">
+            @for (ing of cocktail()!.ingredients; track ing.ingredient.id || $index) {
+              <li class="ingredient-item" [class.missing]="isMissing(ing.ingredient.name)">
                 <span class="ingredient-check">
-                  @if (isMissing(ing.ingredient?.name)) {
+                  @if (isMissing(ing.ingredient.name)) {
                     <app-icon name="x-circle" [size]="18" [color]="'var(--color-error)'" />
                   } @else {
                     <app-icon name="check-circle" [size]="18" [color]="'var(--color-success)'" />
@@ -120,7 +120,7 @@ import { environment } from '../../../environments/environment';
                   }
                 </span>
                 <span class="ingredient-type text-truncate">{{
-                  ing.ingredient?.name || 'Unknown'
+                  ing.ingredient.name || 'Unknown'
                 }}</span>
               </li>
             }

@@ -136,15 +136,11 @@ export class AuthController {
     const refreshToken = cookies.refreshToken;
     res.clearCookie('refreshToken', {
       path: '/auth',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict' as const,
+      ...this.cookieBaseOptions,
     });
     res.clearCookie('csrf_token', {
       path: '/',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'strict' as const,
+      ...this.cookieBaseOptions,
     });
     return this.authService.logout(accessToken!, refreshToken);
   }
@@ -244,11 +240,24 @@ export class AuthController {
     return this.authService.confirmEmailChange(token);
   }
 
-  private setRefreshCookie(res: Response, token: string): void {
-    res.cookie('refreshToken', token, {
+  private readonly cookieSameSite =
+    process.env.NODE_ENV === 'production' ? 'strict' : ('lax' as const);
+
+  private get cookieBaseOptions(): {
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: 'strict' | 'lax';
+  } {
+    return {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: this.cookieSameSite,
+    };
+  }
+
+  private setRefreshCookie(res: Response, token: string): void {
+    res.cookie('refreshToken', token, {
+      ...this.cookieBaseOptions,
       path: '/auth',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
@@ -256,9 +265,7 @@ export class AuthController {
 
   private setCsrfCookie(res: Response, token: string): void {
     res.cookie('csrf_token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      ...this.cookieBaseOptions,
       path: '/',
       maxAge: 15 * 60 * 1000, // 15 minutes (must match JWT access token TTL)
     });

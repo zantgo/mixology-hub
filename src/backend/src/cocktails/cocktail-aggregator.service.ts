@@ -3,8 +3,8 @@ import {
   Logger,
   BadRequestException,
   Inject,
-  forwardRef,
 } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Cache } from 'cache-manager';
@@ -14,6 +14,7 @@ import { ZeroResultSearch } from './entities/zero-result-search.entity';
 import { HiddenExternalCocktail } from './entities/hidden-external-cocktail.entity';
 import { CocktailsService } from './cocktails.service';
 import { CocktailDbService } from '../external/the-cocktail-db/cocktail-db.service';
+import { COCKTAIL_EVENTS } from '../common/events/cocktail-events';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { BarInventoryService } from '../inventory/bar-inventory.service';
 import { BarInventory } from '../inventory/entities/bar-inventory.entity';
@@ -115,7 +116,6 @@ export class CocktailAggregatorService {
   private readonly logger = new Logger(CocktailAggregatorService.name);
 
   constructor(
-    @Inject(forwardRef(() => CocktailsService))
     private readonly localService: CocktailsService,
     private readonly cocktailDbService: CocktailDbService,
     private readonly inventoryService: BarInventoryService,
@@ -135,12 +135,17 @@ export class CocktailAggregatorService {
    */
   async getExternalCocktailById(
     externalId: string,
+    hiddenIds?: Set<string>,
   ): Promise<FormattedCocktail | null> {
     try {
-      const isHidden = await this.hiddenRepository.findOne({
-        where: { externalId },
-      });
-      if (isHidden) return null;
+      if (hiddenIds && hiddenIds.has(externalId)) return null;
+
+      if (!hiddenIds) {
+        const isHidden = await this.hiddenRepository.findOne({
+          where: { externalId },
+        });
+        if (isHidden) return null;
+      }
 
       const drink = (await this.cocktailDbService.getCocktailById(
         externalId,
@@ -151,6 +156,14 @@ export class CocktailAggregatorService {
       this.logger.warn(`Failed to fetch external cocktail ${externalId}:`, err);
       return null;
     }
+  }
+
+  @OnEvent(COCKTAIL_EVENTS.GET_EXTERNAL_BY_ID)
+  async handleGetExternalById(
+    externalId: string,
+    hiddenIds?: Set<string>,
+  ): Promise<FormattedCocktail | null> {
+    return this.getExternalCocktailById(externalId, hiddenIds);
   }
 
   /**

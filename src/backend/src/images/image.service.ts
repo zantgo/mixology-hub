@@ -33,6 +33,8 @@ export class ImageService {
   ): Promise<{ full: string | null; thumb: string | null }> {
     if (!file) return { full: null, thumb: null };
 
+    this.validateMagicBytes(file.buffer);
+
     await fs.mkdir(this.UPLOAD_DIR, { recursive: true });
 
     // Validate MIME Type (Redundant safety check)
@@ -70,6 +72,8 @@ export class ImageService {
     buffer: Buffer,
     mimetype?: string,
   ): Promise<{ full: string; thumb: string }> {
+    this.validateMagicBytes(buffer);
+
     if (mimetype) {
       const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
       if (!allowedMimeTypes.includes(mimetype)) {
@@ -102,5 +106,24 @@ export class ImageService {
       full: `/uploads/cocktails/${filename}-full.webp`,
       thumb: `/uploads/cocktails/${filename}-thumb.webp`,
     };
+  }
+
+  private validateMagicBytes(buffer: Buffer): void {
+    const magicBytes = buffer.slice(0, 4);
+    const signatures: Record<string, Buffer> = {
+      'image/jpeg': Buffer.from([0xff, 0xd8, 0xff]),
+      'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      'image/webp': Buffer.from('RIFF'),
+    };
+
+    const detected = Object.entries(signatures).find(([, sig]) =>
+      magicBytes.slice(0, sig.length).equals(sig),
+    );
+
+    if (!detected) {
+      throw new BadRequestException(
+        'Invalid image signature. Only JPG, PNG, and WebP are allowed.',
+      );
+    }
   }
 }

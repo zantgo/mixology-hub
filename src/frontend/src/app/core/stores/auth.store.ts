@@ -37,6 +37,7 @@ export class AuthStore {
   private idleEventsSubscription: any = null;
 
   startIdleTimer(): void {
+    if (!this.isAuthenticated()) return;
     this.stopIdleTimer();
     this.resetIdleTimer();
 
@@ -104,24 +105,22 @@ export class AuthStore {
 
   initialize(): Observable<boolean> {
     return new Observable<boolean>((subscriber) => {
-      this.silentRefresh().subscribe({
-        next: (success) => {
-          subscriber.next(success);
-          subscriber.complete();
+      this.bootstrapCsrfToken().subscribe({
+        next: () => {
+          this.silentRefresh().subscribe({
+            next: (success) => {
+              subscriber.next(success);
+              subscriber.complete();
+            },
+            error: () => {
+              subscriber.next(false);
+              subscriber.complete();
+            },
+          });
         },
         error: () => {
-          this.http
-            .get<{ success: boolean }>(`${this.apiUrl}/csrf`, { withCredentials: true })
-            .subscribe({
-              next: () => {
-                subscriber.next(false);
-                subscriber.complete();
-              },
-              error: () => {
-                subscriber.next(false);
-                subscriber.complete();
-              },
-            });
+          subscriber.next(false);
+          subscriber.complete();
         },
       });
     });

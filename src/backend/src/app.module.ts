@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { DatabaseModule } from './database/database.module';
 import { RedisCacheModule } from './redis-cache/redis-cache.module';
 import { QueueModule } from './queue/queue.module';
@@ -20,9 +21,12 @@ import { McpModule } from './mcp/mcp.module';
 import { EmailModule } from './email/email.module';
 import { CustomThrottlerGuard } from './common/guards/custom-throttler.guard';
 import { CsrfGuard } from './auth/guards/csrf.guard';
+import { AppController } from './app.controller';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '../.env'],
@@ -55,7 +59,9 @@ import { CsrfGuard } from './auth/guards/csrf.guard';
     AdminModule,
     McpModule,
     EmailModule,
+    HealthModule,
   ],
+  controllers: [AppController],
   providers: [
     {
       provide: APP_GUARD,
