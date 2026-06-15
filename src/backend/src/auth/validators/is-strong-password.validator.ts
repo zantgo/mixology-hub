@@ -204,11 +204,22 @@ export function validatePasswordStrength(value: string): string | null {
 @ValidatorConstraint({ name: 'isStrongPassword', async: false })
 export class IsStrongPasswordConstraint implements ValidatorConstraintInterface {
   validate(value: string) {
-    return validatePasswordStrength(value) === null;
+    const error = validatePasswordStrength(value);
+    if (error) {
+      (this as Record<string, unknown>)._lastError = error;
+      return false;
+    }
+    return true;
   }
 
   defaultMessage() {
-    return 'Password is too weak. Use 8+ characters with mixed case, digits, and special characters.';
+    const lastError = (this as Record<string, unknown>)._lastError as
+      | string
+      | undefined;
+    return (
+      lastError ??
+      'Password is too weak. Use 8+ characters with mixed case, digits, and special characters.'
+    );
   }
 }
 
