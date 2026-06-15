@@ -1,16 +1,26 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
+import {
+  INestApplication,
+  ValidationPipe,
+  BadRequestException,
+} from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './../src/app.module';
 
-const getCsrfHeaders = async (appServer: any) => {
+const getCsrfHeaders = async (
+  appServer: ReturnType<INestApplication<App>['getHttpServer']>,
+) => {
   const res = await request(appServer).get('/auth/csrf');
   const csrfToken = res.body.csrfToken;
-  const cookies = res.headers['set-cookie'];
+  const rawCookies = res.headers['set-cookie'] as string[];
+  const cookieValue = rawCookies
+    ?.map((c: string) => c.split(';')[0])
+    .join('; ');
   return {
     headers: { 'X-CSRF-Token': csrfToken },
-    cookies,
+    cookies: cookieValue,
   };
 };
 
@@ -23,6 +33,35 @@ describe('App (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    app.use(cookieParser());
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: false,
+        transform: true,
+        transformOptions: {
+          enableImplicitConversion: true,
+        },
+        exceptionFactory: (errors) => {
+          const mapped = errors.map((error) => ({
+            field: error.property,
+            constraints: error.constraints ?? null,
+            children:
+              error.children && error.children.length > 0
+                ? error.children.map((child) => ({
+                    field: child.property,
+                    constraints: child.constraints ?? null,
+                  }))
+                : undefined,
+          }));
+          return new BadRequestException({
+            message: 'Validation failed',
+            statusCode: 400,
+            errors: mapped,
+          });
+        },
+      }),
+    );
     await app.init();
   });
 

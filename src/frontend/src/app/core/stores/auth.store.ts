@@ -29,6 +29,18 @@ export class AuthStore {
   readonly loading = signal<boolean>(false);
   readonly error = signal<string | null>(null);
 
+  private extractErrorMessage(err: any, fallback: string): string {
+    if (err.error?.errors && Array.isArray(err.error.errors) && err.error.errors.length > 0) {
+      const messages = err.error.errors
+        .map((e: { field: string; constraints: Record<string, string> | null }) =>
+          e.constraints ? Object.values(e.constraints).join('; ') : null,
+        )
+        .filter(Boolean);
+      if (messages.length > 0) return messages.join('; ');
+    }
+    return err.error?.message || fallback;
+  }
+
   private accessToken: string | null = null;
   private csrfToken: string | null = null;
   private refreshInProgress: Promise<boolean> | null = null;
@@ -154,7 +166,7 @@ export class AuthStore {
           this.startIdleTimer();
         }),
         catchError((err) => {
-          this.error.set(err.error?.message || 'Login failed');
+          this.error.set(this.extractErrorMessage(err, 'Login failed'));
           this.loading.set(false);
           return throwError(() => err);
         }),
@@ -181,7 +193,7 @@ export class AuthStore {
           this.startIdleTimer();
         }),
         catchError((err) => {
-          this.error.set(err.error?.message || 'Registration failed');
+          this.error.set(this.extractErrorMessage(err, 'Registration failed'));
           this.loading.set(false);
           return throwError(() => err);
         }),

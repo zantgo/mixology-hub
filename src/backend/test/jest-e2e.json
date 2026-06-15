@@ -3,7 +3,22 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "setupFiles": [
+    "<rootDir>/jest-setup.cjs"
+  ],
   "transform": {
-    "^.+\\.(t|j)s$": "ts-jest"
+    "^.+\\.(t|j)s$": [
+      "ts-jest",
+      {
+        "diagnostics": false
+      }
+    ]
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(uuid)/)"
+  ],
+  "moduleNameMapper": {
+    "^bcrypt$": "<rootDir>/__mocks__/bcrypt.js",
+    "^isomorphic-dompurify$": "<rootDir>/__mocks__/isomorphic-dompurify.js"
   }
 }

@@ -43,7 +43,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : exception,
     };
 
-    this.logger.error('Unhandled exception', logPayload);
+    if (status >= 500) {
+      this.logger.error('Unhandled exception', logPayload);
+    } else {
+      this.logger.warn('Client exception', logPayload);
+    }
 
     // Error alerting hook: log 5xx errors with structured metadata for
     // external monitoring systems (Datadog, Sentry, etc.) to pick up.
@@ -58,12 +62,26 @@ export class AllExceptionsFilter implements ExceptionFilter {
       });
     }
 
-    response.status(status).json({
+    const responseBody: Record<string, unknown> = {
       statusCode: status,
       message,
       timestamp: new Date().toISOString(),
       path: request.url,
-    });
+    };
+
+    const exceptionResponse =
+      exception instanceof HttpException ? exception.getResponse() : null;
+    if (
+      exceptionResponse &&
+      typeof exceptionResponse === 'object' &&
+      'errors' in exceptionResponse
+    ) {
+      responseBody.errors = (
+        exceptionResponse as Record<string, unknown>
+      ).errors;
+    }
+
+    response.status(status).json(responseBody);
   }
 
   private truncate(value: unknown): string {

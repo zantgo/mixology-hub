@@ -109,7 +109,7 @@ export class AuthService {
       .sendEmailVerificationEmail(result.email, result.emailVerificationToken!)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('Failed to send verification email:', message);
+        this.logger.error(`Failed to send verification email: ${message}`);
       });
 
     // Generate tokens
@@ -430,7 +430,9 @@ export class AuthService {
           .sendSessionEvictionEmail(user.email, toRevoke.length)
           .catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
-            console.error('Failed to send session eviction email:', message);
+            this.logger.error(
+              `Failed to send session eviction email: ${message}`,
+            );
           });
       }
     }
@@ -485,7 +487,7 @@ export class AuthService {
       .sendPasswordResetEmail(user.email, resetToken)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('Failed to send password reset email:', message);
+        this.logger.error(`Failed to send password reset email: ${message}`);
       });
 
     return {
@@ -573,7 +575,7 @@ export class AuthService {
       .sendAccountUnlockEmail(user.email, unlockToken)
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        console.error('Failed to send unlock email:', message);
+        this.logger.error(`Failed to send unlock email: ${message}`);
       });
 
     return {

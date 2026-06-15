@@ -53,7 +53,7 @@ test-backend: check-deps
 		-v $$(pwd)/src/backend/package.json:/app/package.json \
 		-v $$(pwd)/src/backend/tsconfig.json:/app/tsconfig.json \
 		-v $$(pwd)/src/backend/test:/app/test \
-		backend npx jest --passWithNoTests --verbose
+		backend node node_modules/.bin/jest --passWithNoTests --verbose
 
 test-frontend:
 	@echo "$(GREEN)Running Frontend Tests...$(NC)"
@@ -61,7 +61,13 @@ test-frontend:
 
 test-e2e:
 	@echo "$(GREEN)Running Backend E2E Tests...$(NC)"
-	cd src/backend && timeout 120 npm run test:e2e || (echo "$(RED)E2E tests timed out after 120s$(NC)" && exit 1)
+	@docker compose run --rm \
+		-v $$(pwd)/src/backend/src:/app/src \
+		-v $$(pwd)/src/backend/package.json:/app/package.json \
+		-v $$(pwd)/src/backend/tsconfig.json:/app/tsconfig.json \
+		-v $$(pwd)/src/backend/test:/app/test \
+		backend node node_modules/.bin/jest --config ./test/jest-e2e.json --verbose --forceExit 2>&1 | grep -v "Force exiting Jest" || \
+		(echo "$(RED)E2E tests failed$(NC)" && exit 1)
 
 test: test-backend test-frontend test-e2e
 	@echo "$(GREEN)All tests completed successfully.$(NC)"

@@ -319,18 +319,32 @@ ol {
 
 .skip-link {
   position: absolute;
-  top: -40px;
+  top: 0;
   left: var(--space-4);
   z-index: var(--z-index-5);
-  padding: var(--space-2) var(--space-4);
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
   background: var(--color-primary);
   color: #fff;
   border-radius: var(--border-radius-md);
   font-weight: var(--font-weight-medium);
-  transition: top var(--duration-fast) var(--ease-out);
 
   &:focus {
     top: var(--space-2);
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: var(--space-2) var(--space-4);
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    transition: top var(--duration-fast) var(--ease-out);
   }
 }
 

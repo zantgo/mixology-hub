@@ -193,7 +193,7 @@ export class MakeabilityService {
           matchedCount = matchedCount.plus(1);
           found = true;
         } else if (directMatch.quantity) {
-          insufficientIngredients.push(ci.ingredient.name);
+          insufficientIngredients.push(ci.ingredient.name as string);
           found = true;
         }
       }
@@ -240,7 +240,7 @@ export class MakeabilityService {
                 matchedCount = matchedCount.plus(match.confidence);
                 found = true;
               } else if (substituteInInventory.quantity) {
-                insufficientIngredients.push(ci.ingredient.name);
+                insufficientIngredients.push(ci.ingredient.name as string);
                 found = true;
               }
             }
