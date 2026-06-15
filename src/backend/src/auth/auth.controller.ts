@@ -242,8 +242,14 @@ export class AuthController {
     return this.authService.confirmEmailChange(token);
   }
 
-  private readonly cookieSameSite =
-    process.env.NODE_ENV === 'production' ? 'strict' : ('lax' as const);
+  private readonly cookieSecure =
+    process.env.COOKIE_SECURE !== undefined
+      ? process.env.COOKIE_SECURE === 'true'
+      : process.env.NODE_ENV === 'production';
+
+  private readonly cookieSameSite = this.cookieSecure
+    ? 'strict'
+    : ('lax' as const);
 
   private get cookieBaseOptions(): {
     httpOnly: boolean;
@@ -252,7 +258,7 @@ export class AuthController {
   } {
     return {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: this.cookieSecure,
       sameSite: this.cookieSameSite,
     };
   }
