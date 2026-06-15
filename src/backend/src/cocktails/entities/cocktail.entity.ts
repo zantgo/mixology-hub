@@ -42,11 +42,11 @@ export class Cocktail {
   @Expose()
   source: string; // 'local', 'api', 'ai'
 
-  @Column({ name: 'external_id', nullable: true })
+  @Column({ name: 'external_id', type: 'varchar', nullable: true })
   @Expose()
   externalId: string; // ID from TheCocktailDB to prevent duplicates
 
-  @Column({ name: 'parent_external_id', nullable: true })
+  @Column({ name: 'parent_external_id', type: 'varchar', nullable: true })
   @Expose()
   parentExternalId: string; // Original external ID when forked from API (UC 2.22 lineage tracking)
 

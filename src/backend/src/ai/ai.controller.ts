@@ -32,7 +32,8 @@ export class AiController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @ApiOperation({ summary: 'Generate a new cocktail recipe using AI' })
   create(@Request() req, @Body() createAiDto: CreateAiDto) {
-    return this.aiService.generateRecipe(req.user.id, {
+    const userId: string = req.user.id;
+    return this.aiService.generateRecipe(userId, {
       ingredients: createAiDto.ingredients,
       theme: createAiDto.theme,
       modifiers: createAiDto.modifiers,
@@ -45,7 +46,8 @@ export class AiController {
   @Patch(':id/regenerate')
   @ApiOperation({ summary: 'Regenerate a new AI recipe from the same prompt' })
   regenerate(@Request() req, @Param('id') id: string) {
-    return this.aiService.regenerateRecipe(req.user.id, id);
+    const userId: string = req.user.id;
+    return this.aiService.regenerateRecipe(userId, id);
   }
 
   @Post(':id/save-as-cocktail')
@@ -53,7 +55,8 @@ export class AiController {
     summary: 'Save an AI generated recipe into your local cocktail collection',
   })
   saveAsCocktail(@Request() req, @Param('id') id: string) {
-    return this.aiService.validateAndSaveRecipe(req.user.id, id);
+    const userId: string = req.user.id;
+    return this.aiService.validateAndSaveRecipe(userId, id);
   }
 
   @Get()
@@ -61,19 +64,22 @@ export class AiController {
     summary: 'Get history of AI generated recipes for the user with pagination',
   })
   findAll(@Request() req, @Query() paginationQuery: PaginationQueryDto) {
-    return this.aiService.getAiRecipeHistory(req.user.id, paginationQuery);
+    const userId: string = req.user.id;
+    return this.aiService.getAiRecipeHistory(userId, paginationQuery);
   }
 
   @Get('quota')
   @ApiOperation({ summary: 'Get remaining daily AI quota for the user' })
   getQuota(@Request() req) {
-    return this.aiService.getQuotaStatus(req.user.id);
+    const userId: string = req.user.id;
+    return this.aiService.getQuotaStatus(userId);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific AI generated recipe by ID' })
   findOne(@Request() req, @Param('id') id: string) {
-    return this.aiService.findOne(id, req.user.id);
+    const userId: string = req.user.id;
+    return this.aiService.findOne(id, userId);
   }
 
   @Patch(':id')
@@ -83,12 +89,14 @@ export class AiController {
     @Param('id') id: string,
     @Body() updateAiDto: UpdateAiDto,
   ) {
-    return this.aiService.update(id, updateAiDto, req.user.id);
+    const userId: string = req.user.id;
+    return this.aiService.update(id, updateAiDto, userId);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an AI generated recipe from history' })
   remove(@Request() req, @Param('id') id: string) {
-    return this.aiService.remove(id, req.user.id);
+    const userId: string = req.user.id;
+    return this.aiService.remove(id, userId);
   }
 }

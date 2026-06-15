@@ -14,12 +14,4 @@ export class SetSettingDto {
   @IsString()
   @IsNotEmpty()
   value: string;
-
-  @ApiProperty({
-    example: 'admin-uuid',
-    description: 'Admin user ID performing the update',
-  })
-  @IsString()
-  @IsNotEmpty()
-  updatedBy: string;
 }

@@ -429,6 +429,10 @@ export class CocktailDetailPage implements OnInit, OnDestroy {
 
   onRated(event: { score: number; average: number; count: number }): void {
     this.myRating.set(event.score);
+    this.cocktailStore.currentCocktail.update((c) => {
+      if (!c) return c;
+      return { ...c, rating: event.average, ratingCount: event.count };
+    });
     this.uiStore.addToast({
       id: crypto.randomUUID(),
       message: `Rated ${event.score} star${event.score > 1 ? 's' : ''}!`,

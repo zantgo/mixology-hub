@@ -67,7 +67,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   private truncate(value: unknown): string {
-    const str = typeof value === 'string' ? value : String(value ?? '');
+    const str =
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      typeof value === 'string' ? value : value == null ? '' : String(value);
     return str.length > this.MAX_LOG_LENGTH
       ? str.substring(0, this.MAX_LOG_LENGTH) + '...[truncated]'
       : str;

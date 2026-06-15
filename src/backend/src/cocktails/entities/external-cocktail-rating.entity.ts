@@ -13,7 +13,7 @@ import { User } from '../../users/entities/user.entity';
 import { ColumnFloatTransformer } from '../../utils/column-float.transformer';
 
 @Entity('external_cocktail_ratings')
-@Unique(['user', 'external_cocktail_id'])
+@Unique(['user', 'externalCocktailId'])
 export class ExternalCocktailRating {
   @PrimaryGeneratedColumn('uuid')
   @Expose()
@@ -24,10 +24,10 @@ export class ExternalCocktailRating {
   @Expose()
   user: User;
 
-  @Column({ name: 'user_id', insert: false, update: false })
+  @Column({ name: 'user_id', type: 'varchar', insert: false, update: false })
   userId: string;
 
-  @Column({ name: 'external_cocktail_id' })
+  @Column({ name: 'external_cocktail_id', type: 'varchar' })
   @Expose()
   externalCocktailId: string;
 

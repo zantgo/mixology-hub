@@ -7,6 +7,7 @@ import { AiGeneratedRecipe } from './entities/ai.entity';
 import { UserAiQuota } from './entities/user-ai-quota.entity';
 import { AiToolAudit } from './entities/ai-tool-audit.entity';
 import { User } from '../users/entities/user.entity';
+import { UserProfile } from '../users/entities/user-profile.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
@@ -24,6 +25,7 @@ import { AiAuditInterceptor } from './interceptors/ai-audit.interceptor';
       UserAiQuota,
       AiToolAudit,
       User,
+      UserProfile,
       Ingredient,
       Cocktail,
       CocktailIngredient,

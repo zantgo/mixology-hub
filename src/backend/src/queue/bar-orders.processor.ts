@@ -106,11 +106,62 @@ export class BarOrdersProcessor extends WorkerHost {
           throw new Error(`Cocktail ${cocktailId} not found`);
         }
 
-        const allStock = await transactionalEntityManager
-          .createQueryBuilder(BarInventory, 'bi')
-          .innerJoinAndSelect('bi.ingredient', 'ingredient')
-          .setLock('pessimistic_write')
-          .getMany();
+        const descendantCache = new Map<
+          string,
+          { ids: Set<string>; names: Set<string>; synonyms: Set<string> }
+        >();
+
+        for (const req of cocktail.ingredients) {
+          if (!req.ingredient?.id) continue;
+          const rows = await transactionalEntityManager.query(
+            `
+            WITH RECURSIVE descendants AS (
+              SELECT id, name, synonyms FROM ingredients WHERE id = $1
+              UNION
+              SELECT i.id, i.name, i.synonyms FROM ingredients i
+              INNER JOIN descendants d ON i.parent_id = d.id
+            )
+            SELECT id, name, synonyms FROM descendants;
+          `,
+            [req.ingredient.id],
+          );
+          const ids = new Set<string>(
+            rows.map((r: any): string => r.id) as string[],
+          );
+          const names = new Set<string>(
+            rows.map((r: any): string =>
+              r.name.toLowerCase().trim(),
+            ) as string[],
+          );
+          const synonyms = new Set<string>();
+          for (const r of rows) {
+            if (r.synonyms) {
+              r.synonyms
+                .split(',')
+                .forEach((s: string) => synonyms.add(s.toLowerCase().trim()));
+            }
+          }
+          descendantCache.set(req.ingredient.id, { ids, names, synonyms });
+        }
+
+        const allDescendantIds = new Set<string>();
+        for (const info of descendantCache.values()) {
+          for (const id of info.ids) allDescendantIds.add(id);
+        }
+
+        let allStock: BarInventory[];
+        if (allDescendantIds.size > 0) {
+          allStock = await transactionalEntityManager
+            .createQueryBuilder(BarInventory, 'bi')
+            .innerJoinAndSelect('bi.ingredient', 'ingredient')
+            .where('bi.ingredient_id IN (:...ids)', {
+              ids: [...allDescendantIds],
+            })
+            .setLock('pessimistic_write')
+            .getMany();
+        } else {
+          allStock = [];
+        }
 
         const deductions: Record<string, unknown>[] = [];
         const remainingStock = new Map(
@@ -173,36 +224,10 @@ export class BarOrdersProcessor extends WorkerHost {
             totalAmount = amountPerServing.times(new Decimal(servings));
           }
 
-          const descendantRows = await transactionalEntityManager.query(
-            `
-            WITH RECURSIVE descendants AS (
-              SELECT id, name, synonyms FROM ingredients WHERE id = $1
-              UNION
-              SELECT i.id, i.name, i.synonyms FROM ingredients i
-              INNER JOIN descendants d ON i.parent_id = d.id
-            )
-            SELECT id, name, synonyms FROM descendants;
-          `,
-            [req.ingredient.id],
-          );
-
-          const eligibleIngredientIds = new Set<string>(
-            descendantRows.map((r: any) => r.id),
-          );
-          const eligibleNames = new Set<string>(
-            descendantRows.map((r: any) => r.name.toLowerCase().trim()),
-          );
-          const eligibleSynonyms = new Set<string>();
-          for (const r of descendantRows) {
-            if (r.synonyms) {
-              r.synonyms
-                .split(',')
-                .forEach((s: string) =>
-                  eligibleSynonyms.add(s.toLowerCase().trim()),
-                );
-            }
-          }
-
+          const cached = descendantCache.get(req.ingredient.id);
+          const eligibleIngredientIds = cached?.ids ?? new Set<string>();
+          const eligibleNames = cached?.names ?? new Set<string>();
+          const eligibleSynonyms = cached?.synonyms ?? new Set<string>();
           const eligible: Array<{ rowId: string; quantity: Decimal }> = [];
           for (const [rowId, entry] of remainingStock) {
             const row = entry.row;
@@ -498,10 +523,12 @@ export class BarOrdersProcessor extends WorkerHost {
             );
 
             const eligibleIngredientIds = new Set<string>(
-              descendantRows.map((r: any) => r.id),
+              descendantRows.map((r: any): string => r.id) as string[],
             );
             const eligibleNames = new Set<string>(
-              descendantRows.map((r: any) => r.name.toLowerCase().trim()),
+              descendantRows.map((r: any): string =>
+                r.name.toLowerCase().trim(),
+              ) as string[],
             );
             const eligibleSynonyms = new Set<string>();
             for (const r of descendantRows) {
@@ -715,9 +742,10 @@ export class BarOrdersProcessor extends WorkerHost {
         });
 
         if (!ingredient) {
-          throw new Error(
-            `Internal Server Error: Cannot restore inventory. Ingredient taxonomy has been mutated. Missing ID: ${ingredientId}`,
+          this.logger.warn(
+            `Skipping batch undo restoration for ${String(deduction.ingredientName)}: ingredient taxonomy mutated (ID: ${ingredientId} no longer exists).`,
           );
+          continue;
         }
 
         const barStock = await tx
@@ -812,9 +840,32 @@ export class BarOrdersProcessor extends WorkerHost {
           );
 
           if (!ingredient) {
-            throw new Error(
-              `Internal Server Error: Cannot restore inventory. Ingredient taxonomy has been mutated. Missing ID: ${ingredientId}`,
+            this.logger.warn(
+              `Cannot fully restore inventory for ingredient ${String(deduction.ingredientName)}: taxonomy mutated (ID: ${ingredientId} no longer exists). Attempting quantity restoration by inventory row.`,
             );
+
+            const barStockExists = await transactionalEntityManager.findOne(
+              BarInventory,
+              { where: { id: rowId } },
+            );
+
+            if (barStockExists) {
+              await transactionalEntityManager
+                .createQueryBuilder()
+                .update(BarInventory)
+                .set({ quantity: () => 'quantity + :amount' })
+                .where('id = :rowId', { rowId })
+                .setParameter('amount', amount)
+                .execute();
+              this.logger.log(
+                `Restored ${amount} to inventory row ${rowId} despite missing ingredient ${ingredientId}`,
+              );
+            } else {
+              this.logger.warn(
+                `Skipped restoration of ${amount} for ingredient ${ingredientId}: both ingredient and inventory row are missing.`,
+              );
+            }
+            continue;
           }
 
           let barStock = await transactionalEntityManager.findOne(

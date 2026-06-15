@@ -11,6 +11,7 @@ import { Cocktail } from '../cocktails/entities/cocktail.entity';
 import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { CocktailRating } from '../cocktails/entities/cocktail-rating.entity';
+import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { TokenBlacklist } from '../auth/entities/token-blacklist.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 
@@ -27,6 +28,7 @@ import { RefreshToken } from '../auth/entities/refresh-token.entity';
       CocktailIngredient,
       Ingredient,
       CocktailRating,
+      PreparationLog,
       TokenBlacklist,
       RefreshToken,
     ]),

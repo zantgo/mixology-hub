@@ -15,6 +15,8 @@ import { AuthService } from '../auth/auth.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { AdminGuard } from '../auth/guards/admin.guard';
+import { GetUser } from '../auth/decorators/get-user.decorator';
+import { User } from '../users/entities/user.entity';
 import { ReviewReportDto } from './dto/review-report.dto';
 import { MergeIngredientsDto } from './dto/merge-ingredients.dto';
 import { HideExternalCocktailDto } from './dto/hide-external-cocktail.dto';
@@ -39,8 +41,12 @@ export class AdminController {
   }
 
   @Post('reports/:id/review')
-  async reviewReport(@Param('id') id: string, @Body() dto: ReviewReportDto) {
-    return this.adminService.reviewReport(id, dto.status, dto.reviewedBy);
+  async reviewReport(
+    @Param('id') id: string,
+    @Body() dto: ReviewReportDto,
+    @GetUser() user: User,
+  ) {
+    return this.adminService.reviewReport(id, dto.status, user.id);
   }
 
   // Ingredient merge (UC 1.23)
@@ -60,11 +66,14 @@ export class AdminController {
   // Hidden external cocktails
 
   @Post('external-cocktails/hide')
-  async hideExternalCocktail(@Body() dto: HideExternalCocktailDto) {
+  async hideExternalCocktail(
+    @Body() dto: HideExternalCocktailDto,
+    @GetUser() user: User,
+  ) {
     return this.adminService.hideExternalCocktail(
       dto.externalId,
       dto.reason,
-      dto.adminId,
+      user.id,
     );
   }
 
@@ -88,8 +97,8 @@ export class AdminController {
   }
 
   @Post('settings')
-  async setSetting(@Body() dto: SetSettingDto) {
-    return this.adminService.setSetting(dto.key, dto.value, dto.updatedBy);
+  async setSetting(@Body() dto: SetSettingDto, @GetUser() user: User) {
+    return this.adminService.setSetting(dto.key, dto.value, user.id);
   }
 
   @Post('security/global-revoke')
@@ -103,8 +112,9 @@ export class AdminController {
         'Security audit mandate: A revocation reason is required.',
       );
     }
-    const adminId = req.user.id;
-    const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+    const adminId: string = req.user.id;
+    const clientIp: string =
+      req.ip || req.connection?.remoteAddress || 'unknown';
 
     return this.authService.revokeAllSessions(adminId, clientIp, reason);
   }

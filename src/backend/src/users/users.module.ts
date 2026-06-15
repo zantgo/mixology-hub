@@ -4,6 +4,7 @@ import { UsersService } from './users.service';
 import { UsersController } from './users.controller';
 import { User } from './entities/user.entity';
 import { UserProfile } from './entities/user-profile.entity';
+import { SystemSetting } from './entities/system-setting.entity';
 import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 import { GdprController } from './gdpr.controller';
 import { SeederService } from '../database/seeder.service';
@@ -18,6 +19,7 @@ import { AdminGuard } from '../auth/guards/admin.guard';
     TypeOrmModule.forFeature([
       User,
       UserProfile,
+      SystemSetting,
       PreparationLog,
       Cocktail,
       Ingredient,

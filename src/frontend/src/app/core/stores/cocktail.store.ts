@@ -8,7 +8,7 @@ export interface CocktailIngredient {
   id?: string;
   ingredient: { id: string; name: string; baseUnit?: string };
   measure?: string;
-  amount: number;
+  amount: string;
   unit: string;
 }
 

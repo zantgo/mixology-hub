@@ -25,7 +25,8 @@ export class FavoritesController {
   @Post()
   @ApiOperation({ summary: 'Save a cocktail to favorites' })
   create(@Request() req, @Body() createFavoriteDto: CreateFavoriteDto) {
-    return this.favoritesService.create(req.user.id, createFavoriteDto);
+    const userId: string = req.user.id;
+    return this.favoritesService.create(userId, createFavoriteDto);
   }
 
   @Get()
@@ -35,18 +36,21 @@ export class FavoritesController {
     @Query() paginationQuery: PaginationQueryDto,
     @Query('search') search?: string,
   ) {
-    return this.favoritesService.findAll(req.user.id, paginationQuery, search);
+    const userId: string = req.user.id;
+    return this.favoritesService.findAll(userId, paginationQuery, search);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Get a specific favorite by ID' })
   findOne(@Request() req, @Param('id') id: string) {
-    return this.favoritesService.findOne(req.user.id, id);
+    const userId: string = req.user.id;
+    return this.favoritesService.findOne(userId, id);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Remove a favorite' })
   remove(@Request() req, @Param('id') id: string) {
-    return this.favoritesService.remove(req.user.id, id);
+    const userId: string = req.user.id;
+    return this.favoritesService.remove(userId, id);
   }
 }

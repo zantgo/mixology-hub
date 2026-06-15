@@ -20,7 +20,7 @@ import { Cocktail } from '../../cocktails/entities/cocktail.entity';
   unique: true,
   where: 'cocktail_id IS NOT NULL',
 })
-@Index('idx_fav_external', ['user', 'external_cocktail_id'], {
+@Index('idx_fav_external', ['user', 'externalCocktailId'], {
   unique: true,
   where: 'external_cocktail_id IS NOT NULL',
 })

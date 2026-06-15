@@ -82,6 +82,7 @@ export class CocktailsController {
   @ApiConsumes('application/json', 'multipart/form-data')
   @UseInterceptors(
     FileInterceptor('image', {
+      // eslint-disable-next-line no-restricted-syntax
       limits: { fileSize: 2 * 1024 * 1024 },
       fileFilter: CocktailsController.IMAGE_FILE_FILTER,
     }),
@@ -403,6 +404,7 @@ export class CocktailsController {
   @ApiConsumes('application/json', 'multipart/form-data')
   @UseInterceptors(
     FileInterceptor('image', {
+      // eslint-disable-next-line no-restricted-syntax
       limits: { fileSize: 2 * 1024 * 1024 },
       fileFilter: CocktailsController.IMAGE_FILE_FILTER,
     }),

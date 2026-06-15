@@ -249,7 +249,8 @@ export class CocktailsService {
           {
             name: externalDrink.strDrink,
             description: externalDrink.strInstructions
-              ? `Imported from TheCocktailDB: ${externalDrink.strInstructions.length > 100 ? externalDrink.strInstructions.substring(0, 100) + '...' : externalDrink.strInstructions}`
+              ? // eslint-disable-next-line no-restricted-syntax
+                `Imported from TheCocktailDB: ${externalDrink.strInstructions.length > 100 ? externalDrink.strInstructions.substring(0, 100) + '...' : externalDrink.strInstructions}`
               : 'Imported from TheCocktailDB',
             instructions:
               externalDrink.strInstructions || 'No instructions provided',
@@ -344,6 +345,7 @@ export class CocktailsService {
     cocktailId: string,
     url: string,
   ): Promise<void> {
+    // eslint-disable-next-line no-restricted-syntax
     const MAX_CONTENT_LENGTH = 5 * 1024 * 1024;
     const TIMEOUT_MS = 3000;
 
@@ -398,7 +400,9 @@ export class CocktailsService {
       throw new BadRequestException('Preparation has already been undone');
     }
 
+    // eslint-disable-next-line no-restricted-syntax
     const MAX_UNDO_WINDOW_MS = 16 * 60 * 1000;
+    // eslint-disable-next-line no-restricted-syntax
     const elapsed = Date.now() - new Date(log.createdAt).getTime();
     if (elapsed > MAX_UNDO_WINDOW_MS) {
       throw new BadRequestException(
@@ -505,6 +509,7 @@ export class CocktailsService {
 
   async findAll(paginationQuery: PaginationQueryDto) {
     const { limit = 10, page = 1 } = paginationQuery;
+    // eslint-disable-next-line no-restricted-syntax
     const offset = (page - 1) * limit;
     const [data, total] = await this.cocktailRepository.findAndCount({
       where: { isDeleted: false },
@@ -513,6 +518,7 @@ export class CocktailsService {
       take: limit,
     });
 
+    // eslint-disable-next-line no-restricted-syntax
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;
 
@@ -520,6 +526,7 @@ export class CocktailsService {
       data,
       meta: {
         currentPage: page,
+        // eslint-disable-next-line no-restricted-syntax
         nextPage: hasNextPage ? page + 1 : null,
         itemsPerPage: limit,
         totalItems: total,
@@ -534,6 +541,7 @@ export class CocktailsService {
     options?: { fuzzy?: boolean },
   ) {
     const { limit = 10, page = 1 } = paginationQuery;
+    // eslint-disable-next-line no-restricted-syntax
     const offset = (page - 1) * limit;
     const normalized = name.trim().toLowerCase();
 
@@ -559,6 +567,7 @@ export class CocktailsService {
 
     const [data, total] = await qb.getManyAndCount();
 
+    // eslint-disable-next-line no-restricted-syntax
     const totalPages = Math.ceil(total / limit);
     const hasNextPage = page < totalPages;
 
@@ -566,6 +575,7 @@ export class CocktailsService {
       data,
       meta: {
         currentPage: page,
+        // eslint-disable-next-line no-restricted-syntax
         nextPage: hasNextPage ? page + 1 : null,
         itemsPerPage: limit,
         totalItems: total,

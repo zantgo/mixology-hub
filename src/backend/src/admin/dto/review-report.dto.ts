@@ -10,12 +10,4 @@ export class ReviewReportDto {
   @IsNotEmpty()
   @IsIn(['resolved', 'dismissed', 'pending'])
   status: string;
-
-  @ApiProperty({
-    example: 'admin-uuid',
-    description: 'Admin user ID performing the review',
-  })
-  @IsString()
-  @IsNotEmpty()
-  reviewedBy: string;
 }

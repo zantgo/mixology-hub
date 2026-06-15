@@ -15,24 +15,24 @@ export class User {
   id: string;
 
   @Expose()
-  @Column({ unique: true })
+  @Column({ unique: true, type: 'varchar' })
   email: string;
 
   @Expose()
-  @Column({ name: 'display_name' })
+  @Column({ name: 'display_name', type: 'varchar' })
   displayName: string;
 
-  @Column({ name: 'password_hash' })
+  @Column({ name: 'password_hash', type: 'varchar' })
   passwordHash: string;
 
   @Expose()
   @Column({ name: 'email_verified', default: false })
   emailVerified: boolean;
 
-  @Column({ name: 'email_verification_token', nullable: true })
+  @Column({ name: 'email_verification_token', nullable: true, type: 'varchar' })
   emailVerificationToken: string | null;
 
-  @Column({ name: 'reset_password_token', nullable: true })
+  @Column({ name: 'reset_password_token', nullable: true, type: 'varchar' })
   resetPasswordToken: string | null;
 
   @Column({ name: 'reset_password_expires', nullable: true, type: 'timestamp' })
@@ -47,7 +47,7 @@ export class User {
   @Column({ name: 'account_locked_until', nullable: true, type: 'timestamp' })
   accountLockedUntil: Date | null;
 
-  @Column({ name: 'account_unlock_token', nullable: true })
+  @Column({ name: 'account_unlock_token', nullable: true, type: 'varchar' })
   accountUnlockToken: string | null;
 
   @Column({
@@ -82,20 +82,20 @@ export class User {
   anonymizedAt: Date | null;
 
   @Expose()
-  @Column({ name: 'username', nullable: true })
+  @Column({ name: 'username', nullable: true, type: 'varchar' })
   username: string | null;
 
   @Expose()
-  @Column({ name: 'first_name', nullable: true })
+  @Column({ name: 'first_name', nullable: true, type: 'varchar' })
   firstName: string | null;
 
   @Expose()
-  @Column({ name: 'last_name', nullable: true })
+  @Column({ name: 'last_name', nullable: true, type: 'varchar' })
   lastName: string | null;
 
   @Expose()
   @Index()
-  @Column({ name: 'role', default: 'bartender' })
+  @Column({ name: 'role', default: 'bartender', type: 'varchar' })
   role: string;
 
   @Expose()
@@ -127,10 +127,10 @@ export class User {
   tokenVersion: number;
 
   @Expose()
-  @Column({ name: 'temp_new_email', nullable: true })
+  @Column({ name: 'temp_new_email', nullable: true, type: 'varchar' })
   tempNewEmail: string | null;
 
-  @Column({ name: 'email_change_token', nullable: true })
+  @Column({ name: 'email_change_token', nullable: true, type: 'varchar' })
   emailChangeToken: string | null;
 
   @Expose()

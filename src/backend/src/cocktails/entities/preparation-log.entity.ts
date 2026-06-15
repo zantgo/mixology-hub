@@ -26,6 +26,7 @@ export class PreparationLog {
   @Expose()
   id: string;
 
+  @Index()
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'bartender_id' })
   @Expose()
@@ -36,22 +37,30 @@ export class PreparationLog {
     nullable: true,
     insert: false,
     update: false,
+    type: 'varchar',
   })
   bartenderId: string | null;
 
+  @Index()
   @ManyToOne(() => Cocktail, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'cocktail_id' })
   @Expose()
   cocktail: Cocktail | null;
 
-  @Column({ name: 'cocktail_id', nullable: true, insert: false, update: false })
+  @Column({
+    name: 'cocktail_id',
+    nullable: true,
+    insert: false,
+    update: false,
+    type: 'varchar',
+  })
   cocktailId: string | null;
 
-  @Column({ name: 'external_cocktail_id', nullable: true })
+  @Column({ name: 'external_cocktail_id', nullable: true, type: 'varchar' })
   @Expose({ name: 'externalCocktailId' })
   externalCocktailId: string | null;
 
-  @Column({ name: 'cocktail_name_snapshot', nullable: true })
+  @Column({ name: 'cocktail_name_snapshot', nullable: true, type: 'varchar' })
   @Expose({ name: 'cocktailNameSnapshot' })
   cocktailNameSnapshot: string | null;
 

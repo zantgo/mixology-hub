@@ -14,6 +14,8 @@ import { TokenBlacklist } from '../auth/entities/token-blacklist.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 export interface DataRetentionPolicy {
   // User data retention (in days)
@@ -327,6 +329,9 @@ export class GdprDataRetentionService {
         cocktail.user = null;
         await this.cocktailRepository.save(cocktail);
       } else {
+        if (cocktail.imageFull || cocktail.imageThumb) {
+          await this.unlinkCocktailImages(cocktail);
+        }
         await this.cocktailRepository.remove(cocktail);
       }
     }
@@ -340,12 +345,39 @@ export class GdprDataRetentionService {
         { createdBy: null },
       ),
       this.favoriteRepository.delete({ user: { id: userId } }),
-      this.aiRepository.delete({ user: { id: userId } }),
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      this.aiRepository.update({ user: { id: userId } }, { user: null } as any),
       this.quotaRepository.delete({ user: { id: userId } }),
       this.refreshTokenRepository.delete({ userId }),
     ]);
 
     this.logger.log(`Deleted and anonymized data for user ${userId}`);
+  }
+
+  private async unlinkCocktailImages(cocktail: Cocktail): Promise<void> {
+    const safeDelete = async (filePath: string | undefined, label: string) => {
+      if (!filePath) return;
+      const absolutePath = path.join(process.cwd(), filePath);
+      if (!absolutePath.startsWith(path.join(process.cwd(), 'uploads'))) {
+        this.logger.warn(
+          `Refusing to unlink path outside uploads: ${absolutePath}`,
+        );
+        return;
+      }
+      try {
+        await fs.unlink(absolutePath);
+        this.logger.log(`Deleted ${label}: ${absolutePath}`);
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          this.logger.error(
+            `Failed to unlink ${label} ${absolutePath}: ${err.message}`,
+          );
+        }
+      }
+    };
+
+    await safeDelete(cocktail.imageFull, 'full image');
+    await safeDelete(cocktail.imageThumb, 'thumbnail');
   }
 
   /**

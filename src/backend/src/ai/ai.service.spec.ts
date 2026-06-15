@@ -13,7 +13,6 @@ import { UserAiQuota } from './entities/user-ai-quota.entity';
 import { User } from '../users/entities/user.entity';
 import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { Cocktail } from '../cocktails/entities/cocktail.entity';
-import { CocktailIngredient } from '../cocktails/entities/cocktail-ingredient.entity';
 import { UserProfile } from '../users/entities/user-profile.entity';
 import { HierarchicalIngredientService } from '../ingredients/hierarchical-ingredient.service';
 import { CocktailDbService } from '../external/the-cocktail-db/cocktail-db.service';
@@ -237,8 +236,6 @@ describe('AiRecipeService', () => {
   });
 
   describe('recipe generation (generateRecipe)', () => {
-    const mockRecipe = makeRecipeResponse();
-
     beforeEach(() => {
       quotaRepository.findOne.mockResolvedValue({ usageCount: 0 });
       quotaRepository.manager.query.mockResolvedValue([{ usage_count: 1 }]);

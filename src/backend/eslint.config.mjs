@@ -34,6 +34,22 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
       "prettier/prettier": ["error", { endOfLine: "auto" }],
+    },
+  },
+  {
+    files: ['**/*.spec.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-argument': 'off',
+    },
+  },
+  {
+    files: [
+      'src/inventory/**/*.ts',
+      'src/cocktails/**/*.ts',
+      'src/utils/**/*.ts',
+      'src/queue/**/*.ts',
+    ],
+    rules: {
       // Custom rule to encourage decimal.js usage for inventory math
       'no-restricted-syntax': [
         'warn',

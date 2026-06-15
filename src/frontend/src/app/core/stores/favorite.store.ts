@@ -50,7 +50,7 @@ export class FavoriteStore {
 
     const existing = this.items().find(
       (f) =>
-        (!isExternal && f.cocktailId === cocktailId) ||
+        (!isExternal && (f.cocktail?.id === cocktailId || f.cocktailId === cocktailId)) ||
         (isExternal && f.externalCocktailId === cleanId),
     );
 
@@ -67,7 +67,7 @@ export class FavoriteStore {
 
     return this.items().some(
       (f) =>
-        (!isExternal && f.cocktailId === cocktailId) ||
+        (!isExternal && (f.cocktail?.id === cocktailId || f.cocktailId === cocktailId)) ||
         (isExternal && f.externalCocktailId === cleanId),
     );
   }

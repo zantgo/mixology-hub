@@ -28,8 +28,10 @@ export class AiAuditInterceptor implements NestInterceptor {
     const controller = context.getClass();
 
     const toolName = `${controller.name}.${handler.name}`;
-    const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-    const userId = request.user?.id || null;
+    const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(
+      request.method as string,
+    );
+    const userId: string | null = request.user?.id || null;
     const args = {
       body: this.sanitizeArgs(request.body),
       query: request.query,

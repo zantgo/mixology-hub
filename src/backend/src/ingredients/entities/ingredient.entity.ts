@@ -52,7 +52,7 @@ export class Ingredient {
   @JoinColumn({ name: 'parent_id' })
   parent: Ingredient | null;
 
-  @Column({ name: 'parent_id', nullable: true })
+  @Column({ name: 'parent_id', type: 'varchar', nullable: true })
   parentId: string | null;
 
   /**
@@ -104,7 +104,7 @@ export class Ingredient {
     description:
       'User who created this ingredient (NULL for system ingredients)',
   })
-  @Column({ name: 'created_by', nullable: true })
+  @Column({ name: 'created_by', type: 'varchar', nullable: true })
   createdBy: string | null;
 
   /**

@@ -10,7 +10,7 @@ export class CsrfGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest();
 
-    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method as string)) {
       return true;
     }
 

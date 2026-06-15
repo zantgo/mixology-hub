@@ -57,76 +57,6 @@ export class HierarchicalIngredientService implements OnApplicationBootstrap {
     }
   }
 
-  /**
-   * Synchronous best-match lookup using the pre-built closure map.
-   * Falls back to async findBestMatch if the map hasn't been built yet.
-   */
-  findBestMatchSync(
-    ingredientName: string,
-    options?: {
-      includeHierarchical?: boolean;
-      includeSynonyms?: boolean;
-      minConfidence?: number;
-    },
-  ): IngredientMatch | null {
-    if (this.closureMap.size === 0) {
-      return null;
-    }
-    const normalized = this.normalizeName(ingredientName);
-    const minConfidence = options?.minConfidence ?? 0.7;
-    const match = this.closureMap.get(normalized);
-    if (match && match.confidence >= minConfidence) {
-      return match;
-    }
-    return null;
-  }
-
-  /**
-   * Synchronous query expansion using the pre-built closure map.
-   * Returns a single-element array with the normalized name if the map hasn't been built yet.
-   */
-  expandIngredientQuerySync(ingredientName: string): string[] {
-    if (this.closureMap.size === 0) {
-      return [this.normalizeName(ingredientName)];
-    }
-    const normalized = this.normalizeName(ingredientName);
-    const matches: Set<string> = new Set([normalized]);
-
-    const match = this.closureMap.get(normalized);
-    if (match) {
-      matches.add(this.normalizeName(match.ingredient.name));
-      if (match.ingredient.synonyms) {
-        match.ingredient.synonyms
-          .split(',')
-          .map((s) => this.normalizeName(s.trim()))
-          .forEach((syn) => matches.add(syn));
-      }
-    }
-
-    // Check parent/children of matched ingredient for broader matches
-    if (match) {
-      const childNames = this.ingredientsCatalog
-        .filter((i) => i.parentId === match.ingredient.id)
-        .map((i) => this.normalizeName(i.name));
-      childNames.forEach((n) => matches.add(n));
-      const parentId = match.ingredient.parentId;
-      if (parentId) {
-        const parent = this.ingredientsCatalog.find((i) => i.id === parentId);
-        if (parent) {
-          matches.add(this.normalizeName(parent.name));
-          if (parent.synonyms) {
-            parent.synonyms
-              .split(',')
-              .map((s) => this.normalizeName(s.trim()))
-              .forEach((syn) => matches.add(syn));
-          }
-        }
-      }
-    }
-
-    return Array.from(matches);
-  }
-
   private async buildClosureMap(): Promise<void> {
     try {
       const allIngredients = await this.ingredientRepository.find({
@@ -657,15 +587,15 @@ export class HierarchicalIngredientService implements OnApplicationBootstrap {
         .limit(1)
         .getRawOne();
 
-      if (rawResult && parseFloat(rawResult.score) > 0.4) {
+      if (rawResult && parseFloat(rawResult.score as string) > 0.4) {
         const ingredient = await this.ingredientRepository.findOne({
-          where: { id: rawResult.id },
+          where: { id: rawResult.id as string },
         });
         if (ingredient) {
           return {
             ingredient,
             matchType: 'fuzzy',
-            confidence: parseFloat(rawResult.score),
+            confidence: parseFloat(rawResult.score as string),
           };
         }
       }
@@ -844,12 +774,15 @@ export class HierarchicalIngredientService implements OnApplicationBootstrap {
     });
 
     const descendants: Ingredient[] = [];
+    const visited = new Set<string>();
     const queue: Ingredient[] = allIngredients.filter(
       (ing) => ing.parentId === ingredientId,
     );
 
     while (queue.length > 0) {
       const current = queue.shift()!;
+      if (visited.has(current.id)) continue;
+      visited.add(current.id);
       descendants.push(current);
 
       // Add children of current ingredient

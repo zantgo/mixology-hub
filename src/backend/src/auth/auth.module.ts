@@ -47,6 +47,6 @@ import { CsrfGuard } from './guards/csrf.guard';
     CsrfGuard,
   ],
   controllers: [AuthController],
-  exports: [AuthService, JwtAuthGuard, CsrfGuard],
+  exports: [AuthService, JwtAuthGuard, CsrfGuard, TypeOrmModule],
 })
 export class AuthModule {}

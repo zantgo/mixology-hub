@@ -27,6 +27,7 @@ export class McpServerService implements OnApplicationShutdown {
   private readonly rateLimiter = new Map<string, number[]>();
   private readonly RATE_LIMIT = 30;
   private readonly RATE_WINDOW_MS = 60000;
+  private readonly MAX_SESSIONS = 10000;
   private readonly SESSION_TTL_MS = 30 * 60 * 1000;
   private readonly cleanupInterval: ReturnType<typeof setInterval>;
 
@@ -70,6 +71,27 @@ export class McpServerService implements OnApplicationShutdown {
 
     if (purged > 0) {
       this.logger.debug(`Purged ${purged} expired rate limiter entries`);
+    }
+  }
+
+  private evictOldestSession(): void {
+    let oldestKey: string | null = null;
+    let oldestTimestamp = Infinity;
+
+    for (const [key, timestamps] of this.rateLimiter.entries()) {
+      const latest =
+        timestamps.length > 0 ? timestamps[timestamps.length - 1] : 0;
+      if (latest < oldestTimestamp) {
+        oldestTimestamp = latest;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey) {
+      this.rateLimiter.delete(oldestKey);
+      this.logger.debug(
+        `Evicted oldest rate limiter session ${oldestKey} (threshold: ${this.MAX_SESSIONS})`,
+      );
     }
   }
 
@@ -226,6 +248,9 @@ export class McpServerService implements OnApplicationShutdown {
 
     let timestamps = this.rateLimiter.get(sessionId);
     if (!timestamps) {
+      if (this.rateLimiter.size >= this.MAX_SESSIONS) {
+        this.evictOldestSession();
+      }
       timestamps = [];
       this.rateLimiter.set(sessionId, timestamps);
     }

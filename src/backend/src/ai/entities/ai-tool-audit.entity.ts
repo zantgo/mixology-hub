@@ -33,7 +33,7 @@ export class AiToolAudit {
   @Expose({ name: 'isWrite' })
   isWrite: boolean;
 
-  @Column({ name: 'tokens_used', nullable: true })
+  @Column({ name: 'tokens_used', type: 'int', nullable: true })
   @Expose({ name: 'tokensUsed' })
   tokensUsed: number | null;
 

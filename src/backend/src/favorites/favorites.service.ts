@@ -3,6 +3,8 @@ import {
   NotFoundException,
   Logger,
   BadRequestException,
+  forwardRef,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -27,6 +29,7 @@ export class FavoritesService {
     private readonly cocktailRepository: Repository<Cocktail>,
     @InjectRepository(HiddenExternalCocktail)
     private readonly hiddenRepository: Repository<HiddenExternalCocktail>,
+    @Inject(forwardRef(() => CocktailAggregatorService))
     private readonly aggregatorService: CocktailAggregatorService,
   ) {}
 

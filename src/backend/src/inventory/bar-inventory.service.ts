@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   UnprocessableEntityException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
@@ -14,6 +15,7 @@ import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { AddBarInventoryDto } from './dto/add-bar-inventory.dto';
 import { UpdateBarInventoryDto } from './dto/update-bar-inventory.dto';
 import { CacheInvalidationService } from '../redis-cache/cache-invalidation.service';
+import { PreparationLog } from '../cocktails/entities/preparation-log.entity';
 
 @Injectable()
 export class BarInventoryService {
@@ -106,6 +108,7 @@ export class BarInventoryService {
     const [items, total] = await this.inventoryRepository.findAndCount({
       relations: ['ingredient'],
       order: { updatedAt: 'DESC' },
+      // eslint-disable-next-line no-restricted-syntax
       skip: (page - 1) * limit,
       take: limit,
     });
@@ -173,10 +176,32 @@ export class BarInventoryService {
 
   async removeFromInventory(id: string) {
     return this.dataSource.transaction(async (manager) => {
-      const item = await manager.findOne(BarInventory, { where: { id } });
+      const item = await manager.findOne(BarInventory, {
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
       if (!item) {
         throw new NotFoundException(`Inventory item ${id} not found`);
       }
+
+      // eslint-disable-next-line no-restricted-syntax
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const hasRecentUse = await manager
+        .createQueryBuilder(PreparationLog, 'log')
+        .where('log.status = :status', { status: 'completed' })
+        .andWhere('log.undone = false')
+        .andWhere('log.createdAt > :cutoff', { cutoff: fifteenMinutesAgo })
+        .andWhere('log.deductedIngredients @> :pattern', {
+          pattern: JSON.stringify([{ ingredientId: item.ingredient.id }]),
+        })
+        .getExists();
+
+      if (hasRecentUse) {
+        throw new ConflictException(
+          `Cannot delete inventory item "${item.ingredient.name}": it was used in a preparation within the last 15 minutes.`,
+        );
+      }
+
       await manager.remove(item);
       await this.clearMakeabilityCache();
       return { message: 'Inventory item removed successfully' };
@@ -253,6 +278,32 @@ export class BarInventoryService {
 
   async bulkDelete(ids: string[]) {
     return this.dataSource.transaction(async (manager) => {
+      // eslint-disable-next-line no-restricted-syntax
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+
+      const recentLog = await manager
+        .createQueryBuilder(PreparationLog, 'log')
+        .where('log.status = :status', { status: 'completed' })
+        .andWhere('log.undone = false')
+        .andWhere('log.createdAt > :cutoff', { cutoff: fifteenMinutesAgo })
+        .andWhere(
+          `EXISTS (
+             SELECT 1 FROM jsonb_array_elements(log.deductedIngredients) AS e
+             WHERE e->>'ingredientId' IN (
+               SELECT bi.ingredient_id FROM bar_inventory bi WHERE bi.id = ANY(:ids)
+             )
+           )`,
+          { ids },
+        )
+        .limit(1)
+        .getOne();
+
+      if (recentLog) {
+        throw new ConflictException(
+          'Cannot delete inventory items: one or more were used in a preparation within the last 15 minutes.',
+        );
+      }
+
       await manager.delete(BarInventory, ids);
       await this.clearMakeabilityCache();
       return { message: `${ids.length} inventory items deleted` };

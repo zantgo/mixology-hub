@@ -15,27 +15,30 @@ export class ReportedContent {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index()
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'reported_by' })
   reportedBy: User | null;
 
+  @Index()
   @ManyToOne(() => Cocktail, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'cocktail_id' })
   cocktail: Cocktail | null;
 
   @Index()
-  @Column({ name: 'external_cocktail_id', nullable: true })
+  @Column({ name: 'external_cocktail_id', type: 'varchar', nullable: true })
   externalCocktailId: string;
 
   @Column({ name: 'report_reason' })
   reportReason: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   details: string;
 
   @Column({ default: 'pending' })
   status: string;
 
+  @Index()
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'reviewed_by' })
   reviewedBy: User | null;

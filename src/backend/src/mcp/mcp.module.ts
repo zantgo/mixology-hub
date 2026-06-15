@@ -8,6 +8,7 @@ import { AiToolAudit } from '../ai/entities/ai-tool-audit.entity';
 import { InventoryModule } from '../inventory/inventory.module';
 import { CocktailsModule } from '../cocktails/cocktails.module';
 import { UtilsModule } from '../utils/utils.module';
+import { IngredientsModule } from '../ingredients/ingredients.module';
 import { BullModule } from '@nestjs/bullmq';
 
 @Module({
@@ -17,6 +18,7 @@ import { BullModule } from '@nestjs/bullmq';
     InventoryModule,
     CocktailsModule,
     UtilsModule,
+    IngredientsModule,
     BullModule.registerQueue({ name: 'bar-orders' }),
   ],
   controllers: [McpController],

@@ -60,6 +60,7 @@ export class AuthController {
       user: result.user,
       accessToken: result.accessToken,
       accessTokenExpiresIn: result.accessTokenExpiresIn,
+      csrfToken: result.csrfToken,
     };
   }
 
@@ -81,6 +82,7 @@ export class AuthController {
       user: result.user,
       accessToken: result.accessToken,
       accessTokenExpiresIn: result.accessTokenExpiresIn,
+      csrfToken: result.csrfToken,
     };
   }
 

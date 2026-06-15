@@ -3,7 +3,7 @@ import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } fr
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
-import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject, switchMap, of } from 'rxjs';
 import { CocktailService } from '../../core/services/cocktail.service';
 import { UiStore } from '../../core/stores/ui.store';
 import { ButtonComponent } from '../../shared/components/button/button.component';
@@ -522,33 +522,37 @@ export class CreatePage implements CanComponentDeactivate, OnDestroy {
     this.perRowState.set([...state]);
 
     const subject = new Subject<string>();
-    subject.pipe(debounceTime(300), distinctUntilChanged()).subscribe((term) => {
-      const currentIdx = this.ingredientsArray.controls.indexOf(group);
-      if (currentIdx === -1) return;
-
-      if (term.length < 1) {
-        const s = this.perRowState();
-        if (s[currentIdx]) s[currentIdx].searchResults = [];
-        this.perRowState.set([...s]);
-        return;
-      }
-      this.http
-        .get<any[]>(`${environment.apiUrl}/ingredients?name=${encodeURIComponent(term)}&limit=10`)
-        .subscribe({
-          next: (res: any) => {
-            const s = this.perRowState();
-            if (s[currentIdx]) s[currentIdx].searchResults = res.data || res || [];
-            this.perRowState.set([...s]);
-          },
-          error: () => {
+    const currentIdx = this.ingredientsArray.length - 1;
+    subject
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        switchMap((term) => {
+          if (term.length < 1) {
             const s = this.perRowState();
             if (s[currentIdx]) s[currentIdx].searchResults = [];
             this.perRowState.set([...s]);
-          },
-        });
-    });
-    const initialIdx = this.ingredientsArray.length - 1;
-    this.searchSubjects.set(initialIdx, subject);
+            return of([]);
+          }
+          return this.http.get<any>(
+            `${environment.apiUrl}/ingredients?name=${encodeURIComponent(term)}&limit=10`,
+          );
+        }),
+      )
+      .subscribe({
+        next: (res: any) => {
+          if (!res) return;
+          const s = this.perRowState();
+          if (s[currentIdx]) s[currentIdx].searchResults = res.data || res || [];
+          this.perRowState.set([...s]);
+        },
+        error: () => {
+          const s = this.perRowState();
+          if (s[currentIdx]) s[currentIdx].searchResults = [];
+          this.perRowState.set([...s]);
+        },
+      });
+    this.searchSubjects.set(currentIdx, subject);
   }
 
   removeIngredient(i: number): void {

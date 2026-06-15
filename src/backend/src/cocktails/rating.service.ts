@@ -48,7 +48,11 @@ export class RatingService {
         ? cocktailId.slice(4)
         : cocktailId;
       cocktail = await this.cocktailRepository.findOne({
-        where: { parentExternalId: cleanId, isDeleted: false },
+        where: {
+          parentExternalId: cleanId,
+          user: { id: user.id },
+          isDeleted: false,
+        },
       });
     }
 

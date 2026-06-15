@@ -17,12 +17,4 @@ export class HideExternalCocktailDto {
   @IsString()
   @IsNotEmpty()
   reason: string;
-
-  @ApiProperty({
-    example: 'admin-uuid',
-    description: 'Admin user ID performing the action',
-  })
-  @IsString()
-  @IsNotEmpty()
-  adminId: string;
 }

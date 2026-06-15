@@ -8,7 +8,7 @@ import { Ingredient } from '../ingredients/entities/ingredient.entity';
 import { SystemSetting } from '../users/entities/system-setting.entity';
 import { Decimal } from 'decimal.js';
 import * as bcrypt from 'bcrypt';
-import * as fs from 'fs';
+import { promises as fs } from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -104,7 +104,7 @@ export class SeederService implements OnModuleInit {
     let ingredients: SeedIngredient[];
 
     try {
-      const raw = fs.readFileSync(seedPath, 'utf-8');
+      const raw = await fs.readFile(seedPath, 'utf-8');
       ingredients = JSON.parse(raw);
     } catch (err: any) {
       this.logger.error(`Failed to load ingredients seed file: ${err.message}`);

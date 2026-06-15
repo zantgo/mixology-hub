@@ -29,17 +29,32 @@ export class IngredientsService {
 
   async create(createIngredientDto: CreateIngredientDto, createdBy?: string) {
     try {
+      const parentId = createIngredientDto.parentId || null;
+      if (parentId) {
+        const parent = await this.ingredientRepository.findOne({
+          where: { id: parentId },
+        });
+        if (!parent) {
+          throw new NotFoundException(
+            `Parent ingredient with ID ${parentId} not found`,
+          );
+        }
+        await this.validateParentChain(parentId);
+      }
+
       const ingredient = this.ingredientRepository.create({
         name: createIngredientDto.name.toLowerCase().trim(),
         baseUnit: createIngredientDto.baseUnit || 'ml',
         createdBy: createdBy || null,
         isGlobal: !createdBy,
-        parentId: createIngredientDto.parentId || null,
+        parentId,
         ...(createIngredientDto.density !== undefined && {
           density: new Decimal(createIngredientDto.density),
         }),
       });
-      return await this.ingredientRepository.save(ingredient);
+      const saved = await this.ingredientRepository.save(ingredient);
+      await this.hierarchicalService.clearCache();
+      return saved;
     } catch (error: any) {
       // 23505 is the Postgres error code for Unique Violation
       if (error?.code === '23505')
@@ -124,13 +139,17 @@ export class IngredientsService {
     }
 
     Object.assign(ingredient, updateIngredientDto);
-    return await this.ingredientRepository.save(ingredient);
+    const saved = await this.ingredientRepository.save(ingredient);
+    await this.hierarchicalService.clearCache();
+    return saved;
   }
 
   async remove(id: string) {
     const ingredient = await this.findOne(id);
     try {
-      return await this.ingredientRepository.remove(ingredient);
+      const result = await this.ingredientRepository.remove(ingredient);
+      await this.hierarchicalService.clearCache();
+      return result;
     } catch (error: any) {
       if (
         error instanceof QueryFailedError &&
@@ -141,6 +160,26 @@ export class IngredientsService {
         );
       }
       throw error;
+    }
+  }
+
+  private async validateParentChain(parentId: string): Promise<void> {
+    const visited = new Set<string>();
+    let currentId: string | null = parentId;
+
+    while (currentId) {
+      if (visited.has(currentId)) {
+        throw new BadRequestException(
+          `Circular reference detected in ingredient parent chain at ${currentId}`,
+        );
+      }
+      visited.add(currentId);
+      const ingredient = await this.ingredientRepository.findOne({
+        where: { id: currentId },
+        select: ['id', 'parentId'],
+      });
+      if (!ingredient) break;
+      currentId = ingredient.parentId;
     }
   }
 }

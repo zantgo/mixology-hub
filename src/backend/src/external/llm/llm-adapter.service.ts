@@ -94,7 +94,8 @@ export class LlmAdapterService implements AiProvider {
         );
       }
       const jsonString = rawContent.substring(startIdx, endIdx + 1);
-      const recipe = JSON.parse(jsonString);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+      const recipe = JSON.parse(jsonString) as AiRecipe;
 
       // Validate the recipe structure
       const validation = await this.validateContent(JSON.stringify(recipe));
@@ -292,7 +293,9 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
               `Tool call arguments for "${toolName}" exceed maximum size of ${MAX_ARGUMENT_SIZE} bytes`,
             );
           }
-          const args = JSON.parse(rawArgs);
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+          const args = JSON.parse(rawArgs) as Record<string, unknown>;
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
           const toolResult = await toolExecutor(toolName, args);
 
           messages.push({
@@ -302,7 +305,7 @@ Return ONLY a raw JSON object: {"name":"string","description":"string","instruct
           });
         }
       } else {
-        const recipe = this.extractRecipeJson(message.content);
+        const recipe = this.extractRecipeJson(message.content as string);
         const validation = await this.validateContent(JSON.stringify(recipe));
         if (!validation.isValid) {
           throw new BadGatewayException(

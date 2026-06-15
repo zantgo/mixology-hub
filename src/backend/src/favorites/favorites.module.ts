@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { FavoritesService } from './favorites.service';
 import { FavoritesController } from './favorites.controller';
@@ -16,9 +16,10 @@ import { CocktailsModule } from '../cocktails/cocktails.module';
       Cocktail,
       HiddenExternalCocktail,
     ]),
-    CocktailsModule,
+    forwardRef(() => CocktailsModule),
   ],
   controllers: [FavoritesController],
   providers: [FavoritesService],
+  exports: [FavoritesService],
 })
 export class FavoritesModule {}

@@ -44,6 +44,13 @@ describe('BarInventoryService', () => {
   let cacheInvalidation: any;
 
   beforeEach(() => {
+    const qbMock = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+      getExists: jest.fn().mockResolvedValue(false),
+    };
     repo = {
       findOne: jest.fn(),
       findAndCount: jest.fn(),
@@ -94,7 +101,7 @@ describe('BarInventoryService', () => {
                 .mockImplementation((_entityClass: any, ids: any) => {
                   return repo.delete(ids);
                 }),
-              createQueryBuilder: jest.fn(),
+              createQueryBuilder: jest.fn().mockReturnValue(qbMock),
             };
             return runInTransaction(manager);
           },

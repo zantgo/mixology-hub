@@ -16,7 +16,7 @@ export class ZeroResultSearch {
   @Column({ type: 'jsonb', nullable: true })
   filters: Record<string, any>;
 
-  @Column({ name: 'user_id', nullable: true })
+  @Column({ name: 'user_id', type: 'varchar', nullable: true })
   userId: string | null;
 
   @CreateDateColumn({ name: 'created_at' })

@@ -19,13 +19,4 @@ export class MergeIngredientsDto {
   @IsNotEmpty()
   @IsUUID()
   targetId: string;
-
-  @ApiProperty({
-    example: 'admin-uuid',
-    description: 'Admin user ID performing the merge',
-  })
-  @IsString()
-  @IsNotEmpty()
-  @IsUUID()
-  adminId: string;
 }

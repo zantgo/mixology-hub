@@ -13,10 +13,11 @@ const FACTORS: Record<string, number> = {
 
 @Pipe({ standalone: true, name: 'unitConvert' })
 export class UnitConversionPipe implements PipeTransform {
-  transform(value: number, fromUnit: string, toUnit: string = 'ml'): string {
+  transform(value: string | number, fromUnit: string, toUnit: string = 'ml'): string {
+    const num = typeof value === 'string' ? parseFloat(value) : value;
     const from = FACTORS[fromUnit?.toLowerCase()] || 1;
     const to = FACTORS[toUnit?.toLowerCase()] || 1;
-    const result = (value * from) / to;
+    const result = (num * from) / to;
     return result % 1 === 0 ? result.toString() : result.toFixed(2);
   }
 }
