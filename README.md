@@ -190,4 +190,4 @@ To keep this README concise, detailed engineering documentation has been separat
   
 ---
 
-*This project is licensed under the MIT License.*
+*This project is licensed under the [MIT License](./LICENSE).*
